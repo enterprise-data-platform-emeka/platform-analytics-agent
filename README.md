@@ -42,20 +42,20 @@ Most NL-to-SQL tools only see column names. This agent sees the business meaning
 
 ```mermaid
 flowchart TD
+    subgraph Startup ["Startup - once per ECS task"]
+        LoadSchemas["load_all_schemas()\nGlue Catalog + dbt catalog.json\nAll 7 Gold schemas into system prompt"]
+    end
+
     subgraph Input ["Input"]
         User([User NL Question\ne.g. via CLI or HTTP])
     end
 
     subgraph AgentLoop ["Agent Reasoning Loop - ECS Fargate"]
         direction TB
-        Interpret[Interpret Question\nClaude API - tool use]
-        ListTables["list_tables()\nGlue Catalog API"]
-        GetSchema["get_schema(table)\nGlue + dbt catalog.json"]
-        GenerateSQL[Generate SQL\nClaude API - partition-aware]
-        ReviewSQL[Two-pass SQL Review\nClaude API - logic check]
-        ValidateSQL["validate_sql()\nsqlparse rules + guardrails"]
-        EstimateCost["estimate_cost()\nAthena metadata"]
+        GenerateSQL["Generate SQL + Assumptions\nClaude API - single call\nSchema already in system prompt"]
+        ValidateSQL["validate_sql()\nsqlparse guardrails"]
         Execute["execute_query()\nAthena SDK"]
+        TrackCost["cost.py\nDataScannedInBytes to USD"]
         ValidateResults["validate_results()\nsanity checks"]
         RenderChart["render_chart()\nmatplotlib + Plotly"]
         Summarise[Generate Insight\nClaude API]
@@ -78,20 +78,16 @@ flowchart TD
         CostLine[Scan Cost in USD]
     end
 
-    User --> Interpret
-    Interpret --> ListTables
-    ListTables --> GlueCatalog
-    ListTables --> GetSchema
-    GetSchema --> GlueCatalog
-    GetSchema --> DbtArtifacts
-    GetSchema --> GenerateSQL
-    GenerateSQL --> ReviewSQL
-    ReviewSQL --> ValidateSQL
-    ValidateSQL --> EstimateCost
-    EstimateCost --> Athena
-    EstimateCost --> Execute
+    LoadSchemas --> GlueCatalog
+    LoadSchemas --> DbtArtifacts
+    LoadSchemas --> User
+    User --> GenerateSQL
+    GenerateSQL --> ValidateSQL
+    ValidateSQL -->|pass| Execute
+    ValidateSQL -->|fail: reason sent back| GenerateSQL
     Execute --> Athena
     Athena --> S3Gold
+    Execute --> TrackCost
     Execute --> ValidateResults
     ValidateResults --> RenderChart
     RenderChart --> Summarise
@@ -99,48 +95,46 @@ flowchart TD
     Summarise --> AuditLog
 
     classDef box fill:#f0f4f8,stroke:#333,stroke-width:1px;
-    class Input,AgentLoop,AWS,OutputBlock box;
+    class Startup,Input,AgentLoop,AWS,OutputBlock box;
 ```
 
 ---
 
 ## How the reasoning loop works
 
-The agent uses the Claude API with tool use (function calling). It doesn't generate SQL in one shot. It works through a structured loop where each step has a specific job and can fail safely.
+The agent starts each ECS task by loading all Gold schemas once and embedding them in the Claude system prompt. Claude knows every table and column before it sees the first question. This eliminates the multi-turn `list_tables` / `get_schema` tool-call round trips that text-to-SQL systems typically need.
 
-### Step 1: Interpret the question
+### Startup: eager schema loading
 
-Claude reads the question and decides which tool to call first. For most questions, it starts with `list_tables()` to see what Gold tables exist, then calls `get_schema()` on the most likely candidate.
+`SchemaResolver.load_all_schemas()` runs once at startup. It reads all Gold tables from Glue Catalog (column names, data types, partition keys) and overlays dbt catalog.json from S3 (column descriptions, model documentation) for every table. The result — all 7 Gold schemas, roughly 2,500 tokens — is embedded directly in the system prompt.
 
-### Step 2: Resolve schema
+If catalog.json isn't present yet (the pipeline hasn't run), it falls back to Glue-only schema and logs a warning. No crash, no partial startup.
 
-`get_schema()` merges two live sources:
-- `glue_client.get_table()`: current physical schema (column names, types, partition keys)
-- `s3_client.get_object(Key="metadata/dbt/catalog.json")`: current business context (column descriptions, model documentation, accepted values)
+### Step 1: Generate SQL in a single Claude call
 
-The result gives Claude a complete picture: not just `order_id VARCHAR` but `order_id: unique identifier for each placed order, relates to fact_order_items`.
+Claude reads the question against the schema already in the system prompt and returns a SELECT query plus a list of assumptions (for example, "'transactions' interpreted as completed orders only"). No tool calls needed in the common case.
 
-### Step 3: Generate and review SQL
+### Step 2: Validate
 
-Claude generates a SELECT query. It knows the partition keys from the schema and includes a partition filter. A second Claude call then reviews the SQL specifically for logical errors: wrong aggregation, missing join condition, filter that eliminates too much data.
+`SQLValidator` parses the query with sqlparse and enforces hard rules: SELECT only, Gold database only, no DDL keywords anywhere, LIMIT present. If validation fails, the error reason is sent back to Claude with a correction request. Up to 3 attempts before raising `SQLValidationError` to the user. The Athena WorkGroup `bytes_scanned_cutoff_per_query` setting in Terraform is the hard cost backstop.
 
-### Step 4: Validate and cost-check
+### Step 3: Execute and track cost
 
-`validate_sql()` uses sqlparse to parse the query and enforce hard rules (SELECT only, Gold DB only, LIMIT present, no DDL). `estimate_cost()` uses Athena metadata to estimate bytes scanned and rejects the query if it exceeds the session threshold. The Athena WorkGroup `bytes_scanned_cutoff_per_query` setting in the Terraform processing module is the hard backstop.
+`AthenaExecutor` starts the query, polls until complete, and reads the result CSV from the athena-results S3 bucket. `cost.py` converts `DataScannedInBytes` from the Athena execution metadata to USD. No pre-execution cost estimation needed — Gold tables are small pre-aggregations, and the WorkGroup hard stop handles any outliers.
 
-### Step 5: Execute and validate results
+### Step 4: Validate results
 
-`execute_query()` runs the query on Athena, polls for completion, and reads the result CSV from the S3 (Simple Storage Service) athena-results bucket. `validate_results()` checks: row count (0 rows is suspicious for a plausible question), null rates on key columns, numeric values within plausible bounds, and date range coverage matching what was asked.
+`ResultValidator` checks the DataFrame for obvious anomalies: negative values in revenue columns, unexpected nulls on key columns. Zero rows is a valid result for Gold tables — an aggregation with no matching data is a legitimate answer, not a bug. Flags are surfaced in the output, never block execution.
 
-### Step 6: Chart and insight
+### Step 5: Chart and insight
 
-`render_chart()` selects a chart type based on the data shape, not just the question. Time-series data gets a line chart. Category vs metric with 8 or fewer categories gets a bar chart. More than 8 categories gets a horizontal bar chart sorted by value. The chart cardinality is checked before type selection to avoid unreadable outputs.
+`ChartGenerator` selects chart type from data shape: time-series data gets a line chart, 8 or fewer categories get a bar chart, more than 8 get a horizontal bar chart sorted by value. The chart is uploaded to S3 and returned as a presigned URL.
 
-`summarise()` produces a 2-3 sentence plain-English insight. It includes every assumption made (for example, "'transactions' interpreted as completed orders only (status = 'completed')").
+`InsightGenerator` makes a final Claude call with the original question, SQL, result sample, and assumptions, and returns a 2-3 sentence plain-English insight.
 
-### Step 7: Audit
+### Step 6: Audit
 
-A structured JSON record is written to `s3://{bronze_bucket}/metadata/agent-audit/` containing the original question, interpretation, SQL, assumptions, row count, bytes scanned, cost in USD, validation flags, and summary. This audit log is itself queryable via Athena.
+A structured JSON record is written to `s3://{bronze_bucket}/metadata/agent-audit/` containing the original question, SQL, assumptions, row count, bytes scanned, cost in USD, validation flags, and insight. The audit log is itself queryable via Athena.
 
 ---
 
@@ -193,7 +187,7 @@ The response includes the SQL, assumptions, result table, chart presigned URL, i
 
 ### IAM role permissions
 
-The ECS task role is scoped to exactly what the agent needs. Nothing more.
+The ECS task role is defined in `terraform-platform-infra-live/modules/analytics-agent/main.tf` and scoped to exactly what the agent needs. Nothing more.
 
 ```
 Athena:
@@ -226,7 +220,7 @@ SSM:
 
 Each phase has a clear deliverable. No phase starts until the previous one passes `make lint`, `make typecheck`, and `make test`.
 
-### Phase 1: Foundation
+### Phase 1: Foundation — complete
 
 Project skeleton with CI from the first commit. No business logic yet.
 
@@ -242,15 +236,19 @@ Project skeleton with CI from the first commit. No business logic yet.
 
 Deliverable: `make lint`, `make typecheck`, `make test` all pass. Docker image builds cleanly. CI is green.
 
-### Phase 2: IAM and infra design
+### Phase 2: IAM and infra design — complete
 
 Written before any AWS code so the executor is coded to the permission boundary, not retrofitted after.
 
-- `infra/main.tf` — ECS cluster, task definition, and task IAM role scoped exactly to what the agent needs: read-only on Gold S3 and Glue Catalog, read/write on Athena results bucket, read on `metadata/dbt/*` in Bronze bucket, write on `metadata/agent-audit/*` in Bronze bucket, read on SSM parameter for the Anthropic API key
+All AWS infrastructure lives in `terraform-platform-infra-live/modules/analytics-agent/` — the same repo and state file as the rest of the platform. This is intentional: the agent's IAM role references bucket names, KMS key ARN, and Glue database name that are outputs of sibling modules. Keeping everything in one state file means no manual `tfvars` to maintain, and the teardown workflow covers the agent automatically.
 
-Deliverable: `terraform plan` produces the correct IAM role with no wildcard resource permissions.
+Resources: ECR repository (scan on push, lifecycle policy keeps last 10 images), ECS cluster (FARGATE, Container Insights enabled), CloudWatch log group (30-day retention, KMS-encrypted), task execution role (ECR pull + CloudWatch write only), task IAM role (scoped exactly), security group (egress port 443 only), ECS task definition (512 CPU / 1024 MB, `lifecycle.ignore_changes` so CI updates the image without Terraform re-deploying).
 
-### Phase 3: Schema resolver
+Task IAM role grants: Gold S3 read-only, Athena results bucket read/write, Bronze `metadata/dbt/*` read, Bronze `metadata/agent-audit/*` write, Glue Gold catalog read-only, Athena query execution on the platform workgroup only, SSM API key read on `/edp/{env}/anthropic_api_key`, KMS decrypt on platform key only. No wildcard resources anywhere.
+
+Deliverable: `terraform plan` in `terraform-platform-infra-live/environments/dev` produces the correct IAM role. All application AWS code is written inside this permission boundary.
+
+### Phase 3: Schema resolver — in progress
 
 The Gold layer has 7 small, pre-aggregated tables with 5-10 columns each. All schemas are loaded eagerly at startup and embedded in the system prompt — Claude knows every table and column before it sees the first question. This eliminates the `list_tables` / `get_schema` tool call round trips from the common case and is the single biggest latency saving in the design.
 
@@ -498,10 +496,7 @@ platform-analytics-agent/
 │   ├── insight.py              ← insight generator: final Claude call, structured output
 │   ├── charts.py               ← matplotlib PNG and Plotly HTML chart generation
 │   └── audit.py                ← structured JSON audit log writer to S3
-├── infra/                      ← Terraform for ECS Fargate, ALB, ECR, IAM task role
-│   ├── main.tf
-│   ├── variables.tf
-│   └── outputs.tf
+│   (no infra/ directory — all AWS infrastructure lives in terraform-platform-infra-live)
 ├── tests/                      ← pytest unit and integration tests
 │   ├── conftest.py             ← shared fixtures: mocked boto3 clients, mocked Claude responses
 │   ├── test_config.py
@@ -528,6 +523,21 @@ platform-analytics-agent/
 
 ## Status
 
-**In development.** The architecture and guardrail design are finalised. Implementation starts with Phase 1: the core reasoning loop (schema resolution, SQL generation, Athena execution, assumption flagging). Visualisation and the HTTP endpoint follow in Phase 3.
+**In development.** Phases 1 and 2 are complete. Phase 3 (schema resolver) is in progress.
+
+| Phase | Status |
+|---|---|
+| 1: Foundation (skeleton, CI, Docker, exceptions, config, logging) | Complete |
+| 2: IAM and infra (ECR, ECS cluster, task role, task definition) | Complete |
+| 3: Schema resolver (Glue + dbt catalog.json → system prompt) | In progress |
+| 4: SQL validator | Not started |
+| 5: Prompts and Claude client | Not started |
+| 6: SQL generator with feedback loop | Not started |
+| 7: Athena executor and cost tracking | Not started |
+| 8: Result validator, insight generator, audit log | Not started |
+| 9: CLI entry point and end-to-end integration | Not started |
+| 10: Charts | Not started |
+| 11: FastAPI HTTP endpoint and session state | Not started |
+| 12: Deploy pipeline and full ECS infra | Not started |
 
 This is the last component of the platform. Everything else is complete and validated end-to-end in AWS.

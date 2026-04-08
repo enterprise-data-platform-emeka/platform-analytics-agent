@@ -40,7 +40,7 @@ htmlcov/
 *.tfstate.backup
 *.tfplan
 .terraform.lock.hcl
-infra/terraform.tfvars
+
 
 # Docker
 *.log
