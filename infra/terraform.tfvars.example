@@ -1,0 +1,26 @@
+# Copy to terraform.tfvars and fill in values from terraform-platform-infra-live outputs.
+# Run: cd terraform-platform-infra-live/environments/dev && terraform output
+# Then paste the values below.
+
+environment   = "dev"
+name_prefix   = "edp"
+region        = "eu-central-1"
+profile       = "dev-admin"
+
+# From terraform-platform-infra-live networking outputs
+vpc_id             = ""   # module.networking.vpc_id
+private_subnet_ids = []   # module.networking.private_subnet_ids
+
+# From terraform-platform-infra-live data-lake outputs
+bronze_bucket_name    = ""   # module.data_lake.bronze_bucket_name
+gold_bucket_name      = ""   # module.data_lake.gold_bucket_name
+athena_results_bucket = ""   # module.data_lake.athena_results_bucket
+
+# From terraform-platform-infra-live iam-metadata outputs
+kms_key_arn = ""   # module.iam_metadata.kms_key_arn
+
+# Glue Gold database name follows the pattern: {name_prefix}_{environment}_gold
+glue_gold_database = "edp_dev_gold"
+
+# SSM parameter path where the Anthropic API key is stored
+ssm_api_key_param = "/edp/dev/anthropic_api_key"
