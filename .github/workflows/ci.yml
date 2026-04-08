@@ -1,0 +1,75 @@
+name: CI
+
+# Runs on every push and pull request.
+# Skips when only README or docs files changed.
+# Integration tests are excluded — they require live AWS credentials
+# and are run manually before deploy.
+
+on:
+  push:
+    branches: ["main"]
+    paths-ignore:
+      - "README.md"
+      - "DEVELOPMENT.md"
+      - "docs/**"
+  pull_request:
+    paths-ignore:
+      - "README.md"
+      - "DEVELOPMENT.md"
+      - "docs/**"
+
+jobs:
+  quality:
+    name: Lint and type check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.8"
+          cache: pip
+
+      - name: Install dev dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check agent/ tests/
+
+      - name: Format check (ruff)
+        run: ruff format --check agent/ tests/
+
+      - name: Type check (mypy)
+        run: mypy agent/ tests/
+
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    needs: quality
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.8"
+          cache: pip
+
+      - name: Install dev dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run unit tests
+        run: pytest tests/ -v
+        # Integration tests are excluded by default via pyproject.toml addopts
+
+  docker-build:
+    name: Docker build check
+    runs-on: ubuntu-latest
+    needs: quality
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build --target runtime -t edp-analytics-agent:ci .

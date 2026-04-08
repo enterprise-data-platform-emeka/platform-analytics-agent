@@ -13,8 +13,7 @@ dist/
 venv/
 env/
 
-# pyenv
-.python-version
+# pyenv — .python-version is committed so pyenv uses the correct version automatically
 
 # Testing
 .pytest_cache/
