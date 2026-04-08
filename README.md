@@ -224,41 +224,148 @@ SSM:
 
 ## Build phases
 
-### Phase 1: Core reasoning loop (no visualisation)
+Each phase has a clear deliverable. No phase starts until the previous one passes `make lint`, `make typecheck`, and `make test`.
 
-The goal is a working end-to-end loop: question in, SQL + result table + insight out.
+### Phase 1: Foundation
 
-- Schema resolver: Glue + dbt catalog.json
-- SQL generator with two-pass review
-- SQL validator: sqlparse + guardrail rules
-- Athena execution and result reading
-- Assumption flagging in output
-- Audit log written to S3
-- CLI entry point
+Project skeleton with CI from the first commit. No business logic yet.
 
-Deliverable: `python -m agent.main "Show total orders by country"` returns SQL, a formatted result table, flagged assumptions, and a 2-sentence insight.
+- `pyproject.toml`, `.python-version`, `requirements.txt`, `requirements-dev.txt`
+- `Makefile` — setup, lint, typecheck, test, run targets
+- `Dockerfile` (two-stage build, non-root user) + `docker-compose.yml`
+- `.env.example`, `.gitignore`
+- `agent/exceptions.py` — named exception hierarchy (`AgentError`, `SchemaResolutionError`, `SQLValidationError`, `CostLimitError`, `ExecutionError`, `ResultValidationError`)
+- `agent/config.py` — frozen dataclasses driven by environment variables, fail fast at startup if any required variable is missing
+- `agent/logging.py` — structured JSON logger used by every module from day one
+- `.github/workflows/ci.yml` — ruff + mypy + pytest on every push
+- `tests/conftest.py` — shared fixtures for mocked AWS clients and mocked Claude API responses
 
-### Phase 2: Cost awareness and result validation
+Deliverable: `make lint`, `make typecheck`, `make test` all pass. Docker image builds cleanly. CI is green.
 
-- Cost estimator using Athena metadata
-- Result sanity validator (row count, null rates, numeric bounds)
-- Intelligent retry: diagnose failure reason, generate corrected query
-- WorkGroup byte limit as hard backstop
+### Phase 2: IAM and infra design
 
-### Phase 3: Visualisation and HTTP endpoint
+Written before any AWS code so the executor is coded to the permission boundary, not retrofitted after.
 
-- Chart generator: matplotlib for static PNG, Plotly for interactive HTML
-- Chart type selection based on data shape and cardinality
-- Presigned S3 URL returned with the response
-- FastAPI HTTP endpoint
-- Session state for multi-turn follow-up questions ("now break it down by region")
+- `infra/main.tf` — ECS cluster, task definition, and task IAM role scoped exactly to what the agent needs: read-only on Gold S3 and Glue Catalog, read/write on Athena results bucket, read on `metadata/dbt/*` in Bronze bucket, write on `metadata/agent-audit/*` in Bronze bucket, read on SSM parameter for the Anthropic API key
 
-### Phase 4: MWAA integration and demo polish
+Deliverable: `terraform plan` produces the correct IAM role with no wildcard resource permissions.
 
-- `upload_dbt_artifacts` task confirmed in MWAA DAG
-- Demo script covering 6 showcase questions across different chart types
-- GitHub Actions CI: ruff + mypy + pytest on every push
-- GitHub Actions deploy: Docker build and push to ECR (Elastic Container Registry), ECS task definition update
+### Phase 3: Schema resolver
+
+The agent can't generate SQL without knowing what tables and columns exist.
+
+- `agent/schema.py` — `SchemaResolver` class:
+  - `list_gold_tables()` — calls `glue_client.get_tables()` for the Gold database, returns table names and descriptions
+  - `get_schema(table_name)` — merges `glue_client.get_table()` (physical: column names, types, partition keys) with `catalog.json` read from `s3://{bronze_bucket}/metadata/dbt/` (business: column descriptions, accepted values, model docs). Returns a structured dict Claude can reason about.
+  - Within-session cache so repeated calls on the same table don't hit Glue or S3 twice
+  - Graceful fallback if `catalog.json` doesn't exist yet (pipeline hasn't run), falls back to Glue-only schema with a warning in the audit log
+- `tests/test_schema.py` — parametrized tests with full mock fixtures for both Glue and S3 responses
+
+Deliverable: `SchemaResolver` returns a correct merged schema dict for any Gold table. All edge cases tested.
+
+### Phase 4: SQL validator
+
+Guardrails are built before the SQL generator so no generated SQL can ever bypass them.
+
+- `agent/validator.py` — `SQLValidator`:
+  - Parses with sqlparse
+  - Rejects anything that isn't a single SELECT statement
+  - Rejects any DDL keyword anywhere in the statement or any subquery (`DROP`, `DELETE`, `INSERT`, `UPDATE`, `CREATE`, `ALTER`, `TRUNCATE`)
+  - Rejects any database reference outside `edp_{env}_gold`
+  - Injects `LIMIT 1000` if missing
+  - Checks that at least one partition key filter is present for large tables
+  - Returns validated SQL or raises `SQLValidationError` with a reason string Claude can act on
+- `tests/test_validator.py` — parametrized, one test case per guardrail, both passing and failing inputs
+
+Deliverable: `SQLValidator` enforces all guardrails. No SQL can reach Athena without passing through it.
+
+### Phase 5: Prompts and Claude tool use loop
+
+The agentic loop is a first-class module, not wired ad-hoc inside `main.py`.
+
+- `agent/prompts.py` — all prompts in one place: system prompt, tool definitions, SQL review prompt, insight generation prompt. Prompts are reviewed and tuned independently of the rest of the code.
+- `agent/claude_client.py` — `ClaudeClient` drives the tool use loop:
+  - Sends question and tool definitions to the Claude API
+  - Handles `tool_use` content blocks, dispatches to the correct tool function, sends `tool_result` back
+  - Repeats until Claude returns a plain text response (end of reasoning)
+  - Retries on transient errors (throttling, timeout) with exponential backoff
+  - Hard fails immediately on semantic errors (table not found, permission denied) with no retry
+- `tests/test_claude_client.py` — mocked Anthropic SDK responses covering single-turn, multi-turn tool use, and retry scenarios
+
+Deliverable: `ClaudeClient` drives a full multi-turn tool use loop correctly. Retry behaviour tested.
+
+### Phase 6: SQL generator with feedback loop
+
+- `agent/generator.py` — `SQLGenerator`:
+  - Calls `ClaudeClient` with the question and merged schema, gets a SELECT query and a list of assumptions
+  - Runs the result through `SQLValidator`
+  - If validation fails, sends the error back to Claude and asks for a corrected query. Up to 3 attempts before raising `SQLValidationError` to the user.
+  - Runs a second Claude call (two-pass review) that checks the SQL specifically for logical errors: wrong aggregation, missing join condition, filter that eliminates all data
+  - Returns reviewed SQL and flagged assumptions
+- `tests/test_generator.py` — mocked `ClaudeClient`, tests the retry feedback loop, tests assumption extraction
+
+Deliverable: `SQLGenerator` handles validation failures gracefully and recovers automatically.
+
+### Phase 7: Cost estimator (partition-aware)
+
+Athena has no dry-run mode. Cost is estimated by reading partition metadata from Glue.
+
+- `agent/cost.py` — `CostEstimator`:
+  - Parses partition key filters from the SQL using sqlparse
+  - Calls `glue_client.get_partitions()` to find the matching S3 prefixes
+  - Sums S3 object sizes for those prefixes to estimate bytes scanned
+  - Raises `CostLimitError` if the estimate exceeds the session threshold from config
+  - Also tracks actual bytes scanned post-execution for the audit log
+- `tests/test_cost.py` — mocked Glue partition and S3 object responses, threshold enforcement tested
+
+Deliverable: Cost estimation works against real partition metadata. Queries over threshold are blocked before execution.
+
+### Phase 8: Athena executor
+
+- `agent/executor.py` — `AthenaExecutor`:
+  - `execute(sql)` — starts the Athena query, polls until complete, reads the result CSV from the S3 athena-results bucket
+  - Returns a pandas DataFrame, actual bytes scanned, and actual cost in USD
+  - Retries on transient Athena errors (throttling, internal service error), fails immediately on query errors (syntax, permission)
+- `tests/test_executor.py` — mocked Athena start/poll/result cycle, failure handling tested
+
+Deliverable: Full Athena execution path works correctly with proper error handling.
+
+### Phase 9: Result validator, insight generator, and audit log
+
+- `agent/result_validator.py` — `ResultValidator`: checks row count (zero rows on a plausible question is suspicious), null rates on key columns, numeric values within plausible bounds (negative revenue is flagged). Returns a list of flags — never blocks execution, always surfaces flags in output.
+- `agent/insight.py` — `InsightGenerator`: final Claude call that takes the original question, SQL, result DataFrame, and assumptions, and returns a 2-3 sentence plain-English insight. Uses the insight prompt from `prompts.py`. Structured output so malformed responses raise `AgentError`, not crash.
+- `agent/audit.py` — `AuditLogger`: writes a structured JSON record to `s3://{bronze_bucket}/metadata/agent-audit/` after every query. Fields: question, interpretation, SQL, assumptions, row count, bytes scanned, cost in USD, validation flags, insight, timestamp. The audit log is itself queryable via Athena.
+- `tests/test_result_validator.py`, `tests/test_insight.py`
+
+### Phase 10: CLI entry point and end-to-end integration
+
+Wire all modules into the full loop.
+
+- `agent/main.py` — orchestrates the complete reasoning chain. Handles errors at each stage with clear user-facing messages. CLI entry point: `python -m agent.main "question"`.
+- `tests/test_integration.py` — marked `@pytest.mark.integration`, runs against the real AWS dev environment, not mocks. Run manually before deploy, not in CI.
+
+Deliverable: `python -m agent.main "Show total orders by country"` returns SQL, result table, flagged assumptions, and a 2-sentence insight against live Athena data. This is the core agent complete.
+
+### Phase 11: Charts
+
+- `agent/charts.py` — `ChartGenerator`:
+  - Detects data shape from the DataFrame: time-series, category vs metric, or distribution
+  - Time-series → line chart (matplotlib static PNG)
+  - 8 or fewer categories → vertical bar chart
+  - More than 8 categories → horizontal bar chart sorted by value
+  - Uploads PNG to `s3://{bronze_bucket}/metadata/agent-charts/`, returns presigned URL
+  - Plotly interactive HTML version for the HTTP endpoint
+
+### Phase 12: FastAPI HTTP endpoint and session state
+
+- FastAPI route added to `agent/main.py` — POST `/query` accepts `{"question": "...", "session_id": "..."}`, returns full JSON response: SQL, assumptions, result table, presigned chart URL, insight, scan cost
+- Session state keyed by `session_id` maintains conversation history for multi-turn follow-ups ("now break it down by region")
+
+### Phase 13: Deploy pipeline and ECS infra
+
+- `.github/workflows/deploy.yml` — CI passes → Docker build → push to ECR (Elastic Container Registry) → update ECS task definition → smoke test against dev Athena
+- `infra/` expanded with ALB (Application Load Balancer), ECR repository, and ECS service
+- Demo script covering 6 showcase questions across all chart types
 
 ---
 
@@ -347,33 +454,43 @@ Chart: [presigned S3 URL — time series line chart]
 platform-analytics-agent/
 ├── agent/                      ← Python agent source code
 │   ├── main.py                 ← CLI entry point and FastAPI app
-│   ├── config.py               ← frozen dataclasses, env var validation
+│   ├── config.py               ← frozen dataclasses, env var validation, fail fast on missing vars
 │   ├── exceptions.py           ← named exception hierarchy
-│   ├── schema.py               ← schema resolver: Glue + dbt catalog.json
-│   ├── validator.py            ← SQL validator: sqlparse guardrail rules
-│   ├── cost.py                 ← cost estimator: Athena byte scan estimate
+│   ├── logging.py              ← structured JSON logger used by every module
+│   ├── prompts.py              ← all Claude prompts in one place: system, SQL review, insight
+│   ├── claude_client.py        ← Claude API tool use loop: send, dispatch tools, retry on throttle
+│   ├── schema.py               ← schema resolver: Glue (physical) + dbt catalog.json (business context)
+│   ├── validator.py            ← SQL validator: sqlparse guardrail rules, SELECT-only, Gold DB only
+│   ├── generator.py            ← SQL generator: two-pass review, validation feedback loop (3 attempts)
+│   ├── cost.py                 ← cost estimator: partition-aware S3 byte scan estimate from Glue
 │   ├── executor.py             ← Athena SDK: execute, poll, read results from S3
-│   ├── result_validator.py     ← result sanity checks: row count, nulls, bounds
-│   ├── charts.py               ← matplotlib and Plotly chart generation
-│   ├── audit.py                ← audit log writer to S3
-│   └── tools.py                ← Claude API tool definitions
-├── infra/                      ← Terraform for ECS Fargate and ALB
+│   ├── result_validator.py     ← result sanity checks: row count, nulls, numeric bounds
+│   ├── insight.py              ← insight generator: final Claude call, structured output
+│   ├── charts.py               ← matplotlib PNG and Plotly HTML chart generation
+│   └── audit.py                ← structured JSON audit log writer to S3
+├── infra/                      ← Terraform for ECS Fargate, ALB, ECR, IAM task role
 │   ├── main.tf
 │   ├── variables.tf
 │   └── outputs.tf
 ├── tests/                      ← pytest unit and integration tests
-│   ├── conftest.py
+│   ├── conftest.py             ← shared fixtures: mocked boto3 clients, mocked Claude responses
+│   ├── test_config.py
+│   ├── test_exceptions.py
 │   ├── test_schema.py
 │   ├── test_validator.py
+│   ├── test_claude_client.py
+│   ├── test_generator.py
 │   ├── test_cost.py
 │   ├── test_executor.py
-│   └── test_result_validator.py
+│   ├── test_result_validator.py
+│   ├── test_insight.py
+│   └── test_integration.py     ← marked @pytest.mark.integration, runs against real AWS dev
 ├── .python-version             ← 3.11.8 (pyenv)
 ├── pyproject.toml              ← ruff, mypy, pytest config
 ├── requirements.txt            ← runtime dependencies
 ├── requirements-dev.txt        ← dev tools: ruff, mypy, pytest
 ├── Dockerfile                  ← two-stage build, non-root user
-├── docker-compose.yml          ← local dev with mock Athena
+├── docker-compose.yml          ← local dev
 ├── Makefile                    ← setup, lint, typecheck, test, run
 └── README.md                   ← this file
 ```
