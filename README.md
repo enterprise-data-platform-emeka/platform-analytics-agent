@@ -252,16 +252,15 @@ Deliverable: `terraform plan` produces the correct IAM role with no wildcard res
 
 ### Phase 3: Schema resolver
 
-The agent can't generate SQL without knowing what tables and columns exist.
+The Gold layer has 7 small, pre-aggregated tables with 5-10 columns each. All schemas are loaded eagerly at startup and embedded in the system prompt — Claude knows every table and column before it sees the first question. This eliminates the `list_tables` / `get_schema` tool call round trips from the common case and is the single biggest latency saving in the design.
 
 - `agent/schema.py` — `SchemaResolver` class:
-  - `list_gold_tables()` — calls `glue_client.get_tables()` for the Gold database, returns table names and descriptions
-  - `get_schema(table_name)` — merges `glue_client.get_table()` (physical: column names, types, partition keys) with `catalog.json` read from `s3://{bronze_bucket}/metadata/dbt/` (business: column descriptions, accepted values, model docs). Returns a structured dict Claude can reason about.
-  - Within-session cache so repeated calls on the same table don't hit Glue or S3 twice
-  - Graceful fallback if `catalog.json` doesn't exist yet (pipeline hasn't run), falls back to Glue-only schema with a warning in the audit log
-- `tests/test_schema.py` — parametrized tests with full mock fixtures for both Glue and S3 responses
+  - `load_all_schemas()` — called once at startup. Reads `catalog.json` from `s3://{bronze_bucket}/metadata/dbt/` and fetches all Gold tables from `glue_client.get_tables()`. Merges physical schema (column names, types, partition keys) with business context (column descriptions, accepted values, model docs) for every table. Returns a single dict covering all 7 Gold tables (~2,500 tokens total). This dict is embedded directly in the system prompt so Claude starts every query with full schema awareness.
+  - `get_schema(table_name)` — available as a tool for edge cases where Claude needs to re-examine one table during reasoning, but won't be called in normal operation.
+  - Graceful fallback if `catalog.json` doesn't exist yet (pipeline hasn't run): falls back to Glue-only schema with a warning logged.
+- `tests/test_schema.py` — parametrized tests with full mock fixtures for both Glue and S3 responses, including the fallback path.
 
-Deliverable: `SchemaResolver` returns a correct merged schema dict for any Gold table. All edge cases tested.
+Deliverable: `SchemaResolver.load_all_schemas()` returns the complete merged schema for all Gold tables in one call. Tested with and without `catalog.json` present.
 
 ### Phase 4: SQL validator
 
@@ -279,74 +278,69 @@ Guardrails are built before the SQL generator so no generated SQL can ever bypas
 
 Deliverable: `SQLValidator` enforces all guardrails. No SQL can reach Athena without passing through it.
 
-### Phase 5: Prompts and Claude tool use loop
+### Phase 5: Prompts and Claude client
 
 The agentic loop is a first-class module, not wired ad-hoc inside `main.py`.
 
-- `agent/prompts.py` — all prompts in one place: system prompt, tool definitions, SQL review prompt, insight generation prompt. Prompts are reviewed and tuned independently of the rest of the code.
-- `agent/claude_client.py` — `ClaudeClient` drives the tool use loop:
-  - Sends question and tool definitions to the Claude API
-  - Handles `tool_use` content blocks, dispatches to the correct tool function, sends `tool_result` back
-  - Repeats until Claude returns a plain text response (end of reasoning)
-  - Retries on transient errors (throttling, timeout) with exponential backoff
-  - Hard fails immediately on semantic errors (table not found, permission denied) with no retry
-- `tests/test_claude_client.py` — mocked Anthropic SDK responses covering single-turn, multi-turn tool use, and retry scenarios
+- `agent/prompts.py` — all prompts in one place, reviewed and tuned independently of code:
+  - System prompt: includes the full pre-loaded Gold schema dict from Phase 3, guardrail rules, and output format expectations. Because all schemas are embedded here, Claude can answer most questions in a single non-tool-call response.
+  - SQL generation prompt: question + schema context → SELECT query + assumptions list
+  - Insight prompt: question + SQL + result sample → 2-3 sentence plain-English insight
+  - Tool definitions: `get_schema` (for edge cases where Claude needs to re-examine one table)
+- `agent/claude_client.py` — `ClaudeClient`:
+  - For the common case (question maps clearly to one Gold table): single Claude call, no tool use needed. Claude reads the schema from the system prompt and returns SQL + assumptions directly.
+  - For edge cases (ambiguous question, needs to re-examine a specific table): handles `tool_use` content blocks, dispatches `get_schema`, sends `tool_result` back, repeats until text response.
+  - Retries on transient errors (throttling, timeout) with exponential backoff.
+  - Hard fails immediately on semantic errors (table not found, permission denied) with no retry.
+- `tests/test_claude_client.py` — mocked Anthropic SDK responses covering single-turn (common case), tool-use fallback, and retry scenarios.
 
-Deliverable: `ClaudeClient` drives a full multi-turn tool use loop correctly. Retry behaviour tested.
+Deliverable: `ClaudeClient` handles both the single-call common path and the tool-use fallback path correctly. Retry behaviour tested.
 
 ### Phase 6: SQL generator with feedback loop
 
+Gold queries are simple: `SELECT` from one pre-aggregated table with optional `WHERE` filters. A second review pass designed for complex JOINs adds latency and tokens with no benefit here. Single-pass generation with validation feedback is the right design.
+
 - `agent/generator.py` — `SQLGenerator`:
-  - Calls `ClaudeClient` with the question and merged schema, gets a SELECT query and a list of assumptions
-  - Runs the result through `SQLValidator`
-  - If validation fails, sends the error back to Claude and asks for a corrected query. Up to 3 attempts before raising `SQLValidationError` to the user.
-  - Runs a second Claude call (two-pass review) that checks the SQL specifically for logical errors: wrong aggregation, missing join condition, filter that eliminates all data
-  - Returns reviewed SQL and flagged assumptions
-- `tests/test_generator.py` — mocked `ClaudeClient`, tests the retry feedback loop, tests assumption extraction
+  - Calls `ClaudeClient` with the question. Claude reads the schema from the system prompt and returns a SELECT query and a list of assumptions.
+  - Runs the result through `SQLValidator`.
+  - If validation fails, sends the error reason back to Claude and asks for a corrected query. Up to 3 attempts before raising `SQLValidationError` to the user.
+  - No second review pass — Gold SQL is simple enough that sqlparse guardrail validation is sufficient.
+  - Returns validated SQL and flagged assumptions.
+- `tests/test_generator.py` — mocked `ClaudeClient`, tests the validation feedback loop, tests assumption extraction.
 
-Deliverable: `SQLGenerator` handles validation failures gracefully and recovers automatically.
+Deliverable: `SQLGenerator` handles validation failures gracefully and recovers automatically. Single Claude call in the common case.
 
-### Phase 7: Cost estimator (partition-aware)
+### Phase 7: Athena executor and cost tracking
 
-Athena has no dry-run mode. Cost is estimated by reading partition metadata from Glue.
-
-- `agent/cost.py` — `CostEstimator`:
-  - Parses partition key filters from the SQL using sqlparse
-  - Calls `glue_client.get_partitions()` to find the matching S3 prefixes
-  - Sums S3 object sizes for those prefixes to estimate bytes scanned
-  - Raises `CostLimitError` if the estimate exceeds the session threshold from config
-  - Also tracks actual bytes scanned post-execution for the audit log
-- `tests/test_cost.py` — mocked Glue partition and S3 object responses, threshold enforcement tested
-
-Deliverable: Cost estimation works against real partition metadata. Queries over threshold are blocked before execution.
-
-### Phase 8: Athena executor
+Gold tables are small pre-aggregated tables. The worst-case scan cost for any Gold query in a dev environment is a fraction of a cent — complex pre-execution cost estimation via Glue partition enumeration is unnecessary overhead. The Athena WorkGroup `bytes_scanned_cutoff_per_query` setting (configured in the Terraform processing module) is the hard cost backstop. Actual cost is tracked post-execution from the Athena result metadata and recorded in the audit log.
 
 - `agent/executor.py` — `AthenaExecutor`:
-  - `execute(sql)` — starts the Athena query, polls until complete, reads the result CSV from the S3 athena-results bucket
-  - Returns a pandas DataFrame, actual bytes scanned, and actual cost in USD
-  - Retries on transient Athena errors (throttling, internal service error), fails immediately on query errors (syntax, permission)
-- `tests/test_executor.py` — mocked Athena start/poll/result cycle, failure handling tested
+  - `execute(sql)` — starts the Athena query, polls until complete, reads the result CSV from the S3 athena-results bucket.
+  - Reads `Statistics.DataScannedInBytes` from the completed query execution and converts to USD (~$5 per TB scanned).
+  - Returns a pandas DataFrame, actual bytes scanned, and actual cost in USD.
+  - Retries on transient Athena errors (throttling, internal service error). Fails immediately on query errors (syntax, permission) with no retry.
+- `agent/cost.py` — lightweight utility: one function that converts `DataScannedInBytes` to USD. No Glue calls, no S3 enumeration.
+- `tests/test_executor.py` — mocked Athena start/poll/result cycle, failure handling, cost calculation tested.
 
-Deliverable: Full Athena execution path works correctly with proper error handling.
+Deliverable: Full Athena execution path works correctly. Actual cost tracked per query from execution metadata.
 
-### Phase 9: Result validator, insight generator, and audit log
+### Phase 8: Result validator, insight generator, and audit log
 
-- `agent/result_validator.py` — `ResultValidator`: checks row count (zero rows on a plausible question is suspicious), null rates on key columns, numeric values within plausible bounds (negative revenue is flagged). Returns a list of flags — never blocks execution, always surfaces flags in output.
+- `agent/result_validator.py` — `ResultValidator`: checks numeric values within plausible bounds (negative revenue is flagged), checks for unexpected nulls on key columns. Zero rows is a valid result for Gold tables — an aggregation with no matching data is a legitimate answer, not a bug. Returns a list of flags, never blocks execution, always surfaces flags in output.
 - `agent/insight.py` — `InsightGenerator`: final Claude call that takes the original question, SQL, result DataFrame, and assumptions, and returns a 2-3 sentence plain-English insight. Uses the insight prompt from `prompts.py`. Structured output so malformed responses raise `AgentError`, not crash.
-- `agent/audit.py` — `AuditLogger`: writes a structured JSON record to `s3://{bronze_bucket}/metadata/agent-audit/` after every query. Fields: question, interpretation, SQL, assumptions, row count, bytes scanned, cost in USD, validation flags, insight, timestamp. The audit log is itself queryable via Athena.
+- `agent/audit.py` — `AuditLogger`: writes a structured JSON record to `s3://{bronze_bucket}/metadata/agent-audit/` after every query. Fields: question, SQL, assumptions, row count, bytes scanned, cost in USD, validation flags, insight, timestamp. The audit log is itself queryable via Athena.
 - `tests/test_result_validator.py`, `tests/test_insight.py`
 
-### Phase 10: CLI entry point and end-to-end integration
+### Phase 9: CLI entry point and end-to-end integration
 
 Wire all modules into the full loop.
 
-- `agent/main.py` — orchestrates the complete reasoning chain. Handles errors at each stage with clear user-facing messages. CLI entry point: `python -m agent.main "question"`.
+- `agent/main.py` — orchestrates the complete reasoning chain: load schemas → generate SQL → validate → execute → validate results → generate insight → audit log → return output. Handles errors at each stage with clear user-facing messages. CLI entry point: `python -m agent.main "question"`.
 - `tests/test_integration.py` — marked `@pytest.mark.integration`, runs against the real AWS dev environment, not mocks. Run manually before deploy, not in CI.
 
-Deliverable: `python -m agent.main "Show total orders by country"` returns SQL, result table, flagged assumptions, and a 2-sentence insight against live Athena data. This is the core agent complete.
+Deliverable: `python -m agent.main "Show total orders by country"` returns SQL, result table, flagged assumptions, and a 2-sentence insight against live Athena data in under 25 seconds. This is the core agent complete.
 
-### Phase 11: Charts
+### Phase 10: Charts
 
 - `agent/charts.py` — `ChartGenerator`:
   - Detects data shape from the DataFrame: time-series, category vs metric, or distribution
@@ -356,12 +350,12 @@ Deliverable: `python -m agent.main "Show total orders by country"` returns SQL, 
   - Uploads PNG to `s3://{bronze_bucket}/metadata/agent-charts/`, returns presigned URL
   - Plotly interactive HTML version for the HTTP endpoint
 
-### Phase 12: FastAPI HTTP endpoint and session state
+### Phase 11: FastAPI HTTP endpoint and session state
 
 - FastAPI route added to `agent/main.py` — POST `/query` accepts `{"question": "...", "session_id": "..."}`, returns full JSON response: SQL, assumptions, result table, presigned chart URL, insight, scan cost
 - Session state keyed by `session_id` maintains conversation history for multi-turn follow-ups ("now break it down by region")
 
-### Phase 13: Deploy pipeline and ECS infra
+### Phase 12: Deploy pipeline and ECS infra
 
 - `.github/workflows/deploy.yml` — CI passes → Docker build → push to ECR (Elastic Container Registry) → update ECS task definition → smoke test against dev Athena
 - `infra/` expanded with ALB (Application Load Balancer), ECR repository, and ECS service
@@ -369,20 +363,56 @@ Deliverable: `python -m agent.main "Show total orders by country"` returns SQL, 
 
 ---
 
-## Cost per session
+## Performance and cost per query
 
-Following the test-and-destroy pattern, all costs are per session (2-3 hours).
+The Gold layer is pre-aggregated. Each table directly answers a specific business question with 5-10 columns and tens to low hundreds of rows. All 7 Gold schemas (~2,500 tokens total) are loaded at startup and embedded in the system prompt, so Claude knows every table before it sees the first question. This eliminates the multi-turn schema resolution loop and is the single biggest design decision affecting latency and cost.
+
+### Response time per question
+
+| Step | Time |
+|---|---|
+| Claude call 1: schema already in prompt, generate SQL + assumptions | 6-10s |
+| SQL validation (local, sqlparse) | <0.1s |
+| Athena execution on small Gold table | <2s |
+| Result validation (local, pandas) | <0.1s |
+| Claude call 2: insight generation | 3-5s |
+| Chart generation + S3 upload | 1-2s |
+| Audit log write | 0.2s |
+| **Typical total** | **12-20 seconds** |
+
+### Token usage per question
+
+| Component | Input tokens | Output tokens |
+|---|---|---|
+| System prompt with all Gold schemas | ~2,500 | — |
+| User question | ~30 | — |
+| SQL + assumptions | — | ~200 |
+| Insight prompt + question + result sample | ~700 | ~150 |
+| **Total per question** | **~3,230** | **~350** |
+
+### Cost per question
+
+Claude-sonnet-4-6 pricing: $3.00 per million input tokens, $15.00 per million output tokens.
+
+| Component | Cost |
+|---|---|
+| Claude API (~3,230 input + ~350 output tokens) | ~$0.015 |
+| Athena scan (Gold table, <5 MB) | <$0.001 |
+| S3 operations (audit log, chart upload) | <$0.001 |
+| **Total per question** | **~$0.016** |
+
+### 50-question demo session
 
 | Component | Per session cost |
 |---|---|
 | ECS Fargate (0.5 vCPU, 1 GB, 3 hours) | ~$0.08 |
-| Athena queries (50 queries, 20 MB avg scan each) | ~$0.005 |
-| Claude API — claude-sonnet-4-6 (50 queries, ~3K tokens each round trip) | ~$1.20 |
-| S3 (audit logs, chart PNGs, dbt artifact reads) | ~$0.01 |
+| Claude API (50 questions × ~$0.016) | ~$0.80 |
+| Athena (50 queries, <5 MB each) | ~$0.001 |
+| S3 (audit logs, chart PNGs) | ~$0.01 |
 | ALB (3 hours, if HTTP endpoint used) | ~$0.05 |
-| **Total per session** | **~$1.35** |
+| **Total per session** | **~$0.94** |
 
-Claude API cost dominates. The two-pass SQL review doubles the Claude calls per query but keeps total cost under $2 for a full demo session. Athena cost is negligible for Gold tables in a dev environment.
+Claude API cost dominates. Athena cost on Gold tables is negligible. The pre-aggregated Gold layer cuts both response time and Claude token usage roughly in half compared to querying Silver directly.
 
 ---
 
@@ -457,14 +487,14 @@ platform-analytics-agent/
 │   ├── config.py               ← frozen dataclasses, env var validation, fail fast on missing vars
 │   ├── exceptions.py           ← named exception hierarchy
 │   ├── logging.py              ← structured JSON logger used by every module
-│   ├── prompts.py              ← all Claude prompts in one place: system, SQL review, insight
-│   ├── claude_client.py        ← Claude API tool use loop: send, dispatch tools, retry on throttle
-│   ├── schema.py               ← schema resolver: Glue (physical) + dbt catalog.json (business context)
+│   ├── prompts.py              ← all Claude prompts in one place: system prompt (with schemas), insight
+│   ├── claude_client.py        ← Claude API client: single-call common path, tool-use fallback, retry
+│   ├── schema.py               ← schema resolver: load_all_schemas() at startup, Glue + dbt catalog.json
 │   ├── validator.py            ← SQL validator: sqlparse guardrail rules, SELECT-only, Gold DB only
-│   ├── generator.py            ← SQL generator: two-pass review, validation feedback loop (3 attempts)
-│   ├── cost.py                 ← cost estimator: partition-aware S3 byte scan estimate from Glue
-│   ├── executor.py             ← Athena SDK: execute, poll, read results from S3
-│   ├── result_validator.py     ← result sanity checks: row count, nulls, numeric bounds
+│   ├── generator.py            ← SQL generator: single-pass, validation feedback loop (3 attempts)
+│   ├── cost.py                 ← lightweight utility: converts DataScannedInBytes to USD
+│   ├── executor.py             ← Athena SDK: execute, poll, read results from S3, record actual cost
+│   ├── result_validator.py     ← result sanity checks: numeric bounds, null rates (zero rows is valid)
 │   ├── insight.py              ← insight generator: final Claude call, structured output
 │   ├── charts.py               ← matplotlib PNG and Plotly HTML chart generation
 │   └── audit.py                ← structured JSON audit log writer to S3
@@ -480,8 +510,7 @@ platform-analytics-agent/
 │   ├── test_validator.py
 │   ├── test_claude_client.py
 │   ├── test_generator.py
-│   ├── test_cost.py
-│   ├── test_executor.py
+│   ├── test_executor.py        ← includes cost conversion tests
 │   ├── test_result_validator.py
 │   ├── test_insight.py
 │   └── test_integration.py     ← marked @pytest.mark.integration, runs against real AWS dev
