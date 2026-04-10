@@ -156,8 +156,8 @@ class TestQueryResult:
     ) -> QueryResult:
         return QueryResult(
             execution_id="exec-123",
-            columns=columns or ["country", "total_revenue"],
-            rows=rows or [
+            columns=columns if columns is not None else ["country", "total_revenue"],
+            rows=rows if rows is not None else [
                 {"country": "Germany", "total_revenue": "432701.55"},
                 {"country": "France", "total_revenue": "301245.20"},
             ],
@@ -417,6 +417,7 @@ class TestAthenaExecutorPoll:
 
     def test_missing_statistics_defaults_to_zero_bytes(self) -> None:
         executor, mock_athena = self._setup([])
+        mock_athena.get_query_execution.side_effect = None
         mock_athena.get_query_execution.return_value = {
             "QueryExecution": {
                 "QueryExecutionId": "exec-poll",
