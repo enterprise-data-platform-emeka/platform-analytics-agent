@@ -15,7 +15,7 @@ substituted later without changing the interface.
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import ClassVar
 
 
@@ -36,7 +36,7 @@ class Turn:
     insight: str
     assumptions: list[str]
     timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
 
 
@@ -54,7 +54,7 @@ class Conversation:
     session_id: str
     turns: list[Turn] = field(default_factory=list)
     created_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
 
     # Maximum number of prior turns to include in the context summary.
@@ -135,7 +135,7 @@ class SessionStore:
 
     def _evict_expired(self) -> None:
         """Remove sessions that have exceeded the TTL."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expired = [
             sid
             for sid, conv in self._store.items()

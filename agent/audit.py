@@ -26,7 +26,7 @@ Schema of each JSON record:
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import boto3
@@ -116,7 +116,7 @@ class AuditLogger:
     ) -> dict[str, Any]:
         """Build the JSON-serialisable audit record dict."""
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "question": question,
             "sql": sql,
             "assumptions": response.assumptions,

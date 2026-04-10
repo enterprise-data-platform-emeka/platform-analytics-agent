@@ -25,7 +25,7 @@ stripped before building the dict list.
 
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import boto3
@@ -289,7 +289,7 @@ class AthenaExecutor:
                         )
                         return columns, rows
 
-                    rows.append(dict(zip(columns, values)))
+                    rows.append(dict(zip(columns, values, strict=False)))
 
         except ClientError as exc:
             raise ExecutionError(

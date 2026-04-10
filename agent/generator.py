@@ -100,7 +100,6 @@ class SQLGenerator:
         messages = build_sql_request_messages(question)
         last_validation_error: SQLValidationError | None = None
         last_sql: str = ""
-        last_assumptions: list[str] = []
 
         for attempt in range(1, MAX_ATTEMPTS + 1):
             logger.info(
@@ -120,7 +119,6 @@ class SQLGenerator:
             except SQLValidationError as exc:
                 last_validation_error = exc
                 last_sql = raw_sql
-                last_assumptions = assumptions
 
                 logger.warning(
                     "Attempt %d/%d: validation failed — %s",

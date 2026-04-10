@@ -33,7 +33,7 @@ an exception from this module.
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import boto3
 from botocore.exceptions import ClientError
