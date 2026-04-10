@@ -252,7 +252,7 @@ try:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
         # Create a new session on first turn; reuse the existing one on follow-ups.
-        session_id = body.session_id if conversation is not None else _store.create()
+        session_id: str = body.session_id if conversation is not None else _store.create()  # type: ignore[assignment]
         _store.append_turn(
             session_id,
             Turn(

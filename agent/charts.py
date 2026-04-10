@@ -395,7 +395,7 @@ def _plotly_bar(
         margin={"l": 150, "r": 20, "t": 50, "b": 40},
         height=max(300, len(labels) * 30),
     )
-    return fig.to_html(full_html=False, include_plotlyjs="cdn")
+    return str(fig.to_html(full_html=False, include_plotlyjs="cdn"))
 
 
 def _plotly_line(
@@ -423,7 +423,7 @@ def _plotly_line(
         margin={"l": 60, "r": 20, "t": 50, "b": 60},
         height=400,
     )
-    return fig.to_html(full_html=False, include_plotlyjs="cdn")
+    return str(fig.to_html(full_html=False, include_plotlyjs="cdn"))
 
 
 def _plotly_table(
@@ -444,4 +444,4 @@ def _plotly_table(
         )
     )
     fig.update_layout(title=title, margin={"l": 20, "r": 20, "t": 50, "b": 20})
-    return fig.to_html(full_html=False, include_plotlyjs="cdn")
+    return str(fig.to_html(full_html=False, include_plotlyjs="cdn"))

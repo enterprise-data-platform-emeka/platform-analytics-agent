@@ -266,7 +266,7 @@ def build_system_prompt(
     )
 
 
-def _format_table_block(table_name: str, table_schema: Any) -> str:  # type: ignore[misc]
+def _format_table_block(table_name: str, table_schema: Any) -> str:
     """Format a live TableSchema, supplemented with static hints."""
     hints = GOLD_TABLE_CATALOG.get(table_name, {})
 

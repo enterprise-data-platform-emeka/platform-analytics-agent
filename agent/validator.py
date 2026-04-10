@@ -20,7 +20,7 @@ import logging
 import re
 from typing import Final
 
-import sqlparse
+import sqlparse  # type: ignore[import-untyped]
 
 from agent.exceptions import SQLValidationError
 
@@ -195,9 +195,9 @@ class SQLValidator:
                     ),
                 )
 
-        match = _NON_GOLD_UNQUOTED_RE.search(sql)
-        if match:
-            db = match.group(1).lower()
+        unquoted_match = _NON_GOLD_UNQUOTED_RE.search(sql)
+        if unquoted_match:
+            db = unquoted_match.group(1).lower()
             raise SQLValidationError(
                 f"Query references non-Gold database '{db}'.",
                 reason=(

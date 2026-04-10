@@ -384,7 +384,7 @@ class TestNonFatalErrors:
         result = _result(REVENUE_BY_COUNTRY_COLS, REVENUE_BY_COUNTRY_ROWS)
         with patch.object(gen, "_render", side_effect=RuntimeError("render failed")):
             output = gen.generate(result, "Any question")
-        assert "render failed" in output.error
+        assert output.error is not None and "render failed" in output.error
 
     def test_rendering_exception_no_png_bytes(self) -> None:
         gen, _ = _generator()

@@ -18,7 +18,7 @@ internally expand to multiple HTTP requests when tool use is involved.
 import logging
 import re
 import time
-from typing import Any, Final
+from typing import Any, Final, cast
 
 import anthropic
 import boto3
@@ -223,7 +223,7 @@ class ClaudeClient:
         last_exc: Exception | None = None
         for attempt in range(1, _MAX_RETRIES + 1):
             try:
-                return self._client.messages.create(**kwargs)
+                return self._client.messages.create(**kwargs)  # type: ignore[no-any-return]
             except _TRANSIENT_ERRORS as exc:
                 last_exc = exc
                 if attempt < _MAX_RETRIES:
@@ -270,9 +270,7 @@ class ClaudeClient:
                 )
 
             # Add the assistant's tool-use turn to the conversation.
-            current_messages.append(
-                {"role": "assistant", "content": response.content}  # type: ignore[arg-type]
-            )
+            current_messages.append({"role": "assistant", "content": response.content})
 
             # Build the tool_result block for each tool_use content block.
             tool_results: list[dict[str, Any]] = []
@@ -284,7 +282,7 @@ class ClaudeClient:
                         f"Claude requested unknown tool '{block.name}'. "
                         "Only 'get_schema' is defined."
                     )
-                table_name: str = block.input.get("table_name", "")
+                table_name: str = cast(dict[str, Any], block.input).get("table_name", "")
                 logger.debug(
                     "Tool call: get_schema(table_name=%r) — round %d",
                     table_name,
@@ -302,7 +300,7 @@ class ClaudeClient:
             current_messages.append({"role": "user", "content": tool_results})
 
             response = self._call(
-                messages=current_messages,  # type: ignore[arg-type]
+                messages=current_messages,
                 system=system,
                 tools=[GET_SCHEMA_TOOL],
                 max_tokens=_MAX_TOKENS_SQL,

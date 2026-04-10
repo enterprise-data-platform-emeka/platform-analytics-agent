@@ -117,7 +117,7 @@ class SchemaResolver:
                 ) from exc
             raise SchemaResolutionError(f"Glue error fetching table '{table_name}': {exc}") from exc
 
-        return self._merge_table(response["Table"], dbt_catalog)
+        return self._merge_table(response["Table"], dbt_catalog)  # type: ignore[arg-type]
 
     # ── Private helpers ────────────────────────────────────────────────────────
 
@@ -127,7 +127,7 @@ class SchemaResolver:
         paginator = self._glue.get_paginator("get_tables")
         try:
             for page in paginator.paginate(DatabaseName=self._config.glue_gold_database):
-                tables.extend(page["TableList"])
+                tables.extend(page["TableList"])  # type: ignore[arg-type]
         except ClientError as exc:
             code = exc.response["Error"]["Code"]
             if code == "EntityNotFoundException":
@@ -237,5 +237,5 @@ class SchemaResolver:
         for section in ("nodes", "sources"):
             for key, node in dbt_catalog.get(section, {}).items():
                 if key.endswith(f".{table_name}"):
-                    return node  # type: ignore[return-value]
+                    return node  # type: ignore[no-any-return]
         return None

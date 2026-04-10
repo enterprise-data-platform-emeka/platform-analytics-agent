@@ -5,6 +5,7 @@ calls, no AWS calls, no sqlparse parsing. The generator's job is purely
 to drive the correction loop, so we test the loop logic in isolation.
 """
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -38,7 +39,7 @@ def _mock_validator(
       - str: validate() raises SQLValidationError with that reason
     """
     validator = MagicMock()
-    effects = []
+    effects: list[Any] = []
     for effect in side_effects:
         if effect is None:
             # Success: return the argument as-is
@@ -51,7 +52,7 @@ def _mock_validator(
         item = effects.pop(0)
         if isinstance(item, Exception):
             raise item
-        return item(sql)
+        return item(sql)  # type: ignore[no-any-return]
 
     validator.validate.side_effect = _validate
     return validator

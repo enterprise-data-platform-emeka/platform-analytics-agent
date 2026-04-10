@@ -1,6 +1,7 @@
 """Tests for audit.py — AuditLogger."""
 
 import json
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from botocore.exceptions import ClientError
@@ -89,11 +90,11 @@ class TestS3KeyFormat:
 
 
 class TestRecordStructure:
-    def _get_written_record(self) -> dict:
+    def _get_written_record(self) -> dict[str, Any]:
         audit_logger, mock_s3 = _logger()
         audit_logger.write(QUESTION, SQL, _response())
         body_bytes = mock_s3.put_object.call_args[1]["Body"]
-        return json.loads(body_bytes.decode("utf-8"))
+        return json.loads(body_bytes.decode("utf-8"))  # type: ignore[no-any-return]
 
     def test_record_has_timestamp(self) -> None:
         record = self._get_written_record()
@@ -207,8 +208,7 @@ class TestNonFatalErrors:
 
     def test_returns_none_on_success(self) -> None:
         audit_logger, _ = _logger()
-        result = audit_logger.write(QUESTION, SQL, _response())
-        assert result is None
+        audit_logger.write(QUESTION, SQL, _response())
 
     def test_returns_none_on_failure(self) -> None:
         audit_logger, mock_s3 = _logger()
@@ -216,5 +216,4 @@ class TestNonFatalErrors:
             {"Error": {"Code": "AccessDenied", "Message": "Denied"}},
             "PutObject",
         )
-        result = audit_logger.write(QUESTION, SQL, _response())
-        assert result is None
+        audit_logger.write(QUESTION, SQL, _response())

@@ -292,7 +292,7 @@ class TestAthenaExecutorStart:
 class TestAthenaExecutorPoll:
     def _setup(
         self,
-        poll_responses: list[dict[str, Any]],
+        poll_responses: list[Any],
         result_pages: list[dict[str, Any]] | None = None,
     ) -> tuple[AthenaExecutor, MagicMock]:
         executor, mock_athena = _executor()

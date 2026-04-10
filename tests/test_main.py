@@ -1,5 +1,6 @@
 """Tests for main.py — AgentSession and CLI entry point."""
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -46,7 +47,7 @@ def _make_ask_result(
     )
 
 
-def _patch_session_deps(mock_ask_result: AskResult | None = None):
+def _patch_session_deps(mock_ask_result: AskResult | None = None) -> list[Any]:
     """Patch all AgentSession dependencies so it constructs without AWS/Claude.
 
     Returns a list of patches that must be started and stopped by the caller.
@@ -92,11 +93,11 @@ def _patch_session_deps(mock_ask_result: AskResult | None = None):
     return patches
 
 
-def _start_patches(patches):
+def _start_patches(patches: list[Any]) -> list[Any]:
     return [p.start() for p in patches]
 
 
-def _stop_patches(patches):
+def _stop_patches(patches: list[Any]) -> None:
     for p in patches:
         p.stop()
 
@@ -368,13 +369,13 @@ class TestAgentSessionAsk:
                     # Capture what system_prompt the generator receives.
                     captured = {}
 
-                    def capture_generate(question, system_prompt):
+                    def capture_generate(question: str, system_prompt: str) -> Any:
                         captured["system_prompt"] = system_prompt
                         from agent.generator import GeneratedSQL
 
                         return GeneratedSQL(sql="SELECT 1 LIMIT 1", assumptions=[], attempts=1)
 
-                    session._generator.generate = capture_generate
+                    session._generator.generate = capture_generate  # type: ignore[method-assign]
                     try:
                         session.ask(
                             "Follow-up?", prior_context="Prior conversation:\nQ: ...\nA: ..."
@@ -410,11 +411,11 @@ class TestCliMain:
         mock.ask.return_value = ask_result or _make_ask_result()
         return mock
 
-    def test_no_args_returns_exit_code_1(self, capsys) -> None:
+    def test_no_args_returns_exit_code_1(self, capsys: pytest.CaptureFixture[str]) -> None:
         code = _cli_main([])
         assert code == 1
 
-    def test_no_args_prints_usage_to_stderr(self, capsys) -> None:
+    def test_no_args_prints_usage_to_stderr(self, capsys: pytest.CaptureFixture[str]) -> None:
         _cli_main([])
         captured = capsys.readouterr()
         assert "Usage" in captured.err
@@ -431,7 +432,7 @@ class TestCliMain:
             code = _cli_main(["Which country leads?"])
         assert code == 0
 
-    def test_insight_printed_to_stdout(self, capsys) -> None:
+    def test_insight_printed_to_stdout(self, capsys: pytest.CaptureFixture[str]) -> None:
         ask_result = _make_ask_result(response=_make_response(insight="Germany leads."))
         mock_session = self._mock_session(ask_result)
         with patch("agent.main.AgentSession", return_value=mock_session):
@@ -439,7 +440,7 @@ class TestCliMain:
         captured = capsys.readouterr()
         assert "Germany leads." in captured.out
 
-    def test_presigned_url_printed_to_stdout(self, capsys) -> None:
+    def test_presigned_url_printed_to_stdout(self, capsys: pytest.CaptureFixture[str]) -> None:
         ask_result = _make_ask_result(chart=_make_chart(presigned_url="https://example.com/c.png"))
         mock_session = self._mock_session(ask_result)
         with patch("agent.main.AgentSession", return_value=mock_session):
@@ -447,7 +448,7 @@ class TestCliMain:
         captured = capsys.readouterr()
         assert "https://example.com/c.png" in captured.out
 
-    def test_no_chart_line_when_no_presigned_url(self, capsys) -> None:
+    def test_no_chart_line_when_no_presigned_url(self, capsys: pytest.CaptureFixture[str]) -> None:
         ask_result = _make_ask_result(chart=_make_chart(presigned_url=None))
         mock_session = self._mock_session(ask_result)
         with patch("agent.main.AgentSession", return_value=mock_session):
@@ -462,7 +463,9 @@ class TestCliMain:
             code = _cli_main(["Any question?"])
         assert code == 1
 
-    def test_configuration_error_message_to_stderr(self, capsys) -> None:
+    def test_configuration_error_message_to_stderr(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         with patch(
             "agent.main.AgentSession", side_effect=ConfigurationError("missing ENVIRONMENT")
         ):
