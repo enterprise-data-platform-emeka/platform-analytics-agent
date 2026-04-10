@@ -165,9 +165,34 @@ The agent reads this path at query time, never from a local cache. When a dbt mo
 
 ## End-to-end testing
 
-This section covers exactly how to test the agent against live AWS infrastructure and ask real questions against your Gold data.
+This section explains exactly where you type your question and what to do step by step. There are two ways to ask the agent a question.
 
-There are two test tracks. Start with Track 1 (local). It's faster to iterate on, proves all the AWS integrations work, and produces the same output as ECS. Once that passes, Track 2 confirms the deployed container and ECS service work.
+---
+
+### Quick-start checklist (do this when you come back tomorrow)
+
+Run these in order. Each one takes about a minute. If any step fails, the numbered troubleshooting items below will tell you exactly what to do.
+
+```
+[ ] 1. Buy Anthropic API credits at console.anthropic.com > Plans & Billing
+[ ] 2. Apply infra:   cd terraform-platform-infra-live && make apply dev
+[ ] 3. Trigger the Airflow DAG (edp_pipeline) in the MWAA console and wait for it to finish
+[ ] 4. Test locally:  cd platform-analytics-agent && source .venv/bin/activate
+                      export $(grep -v '^#' .env | xargs)
+                      python -m agent.main "Which country has the highest total revenue?"
+[ ] 5. If local works, test ECS:  see Track 2 below
+[ ] 6. Destroy when done:  cd terraform-platform-infra-live && make destroy dev
+```
+
+Step 4 is where you type your question. The agent runs on your Mac, talks to AWS, and prints the answer directly in your terminal. If you only have a few minutes, steps 1-4 are all you need.
+
+---
+
+**Track 1 (recommended, start here):** You type your question in your Mac terminal. The agent code runs on your Mac but connects to the real AWS dev environment (real Athena, real Glue, real S3). No ECS needed. This is the fastest way to iterate and confirms all AWS integrations are working.
+
+**Track 2:** The agent is deployed to ECS Fargate. You shell into the running container using the AWS CLI and make HTTP requests to the agent's FastAPI server from inside the container. This confirms the deployed Docker image and ECS service are healthy.
+
+Start with Track 1. Only move to Track 2 once Track 1 is producing correct answers.
 
 ---
 
@@ -341,77 +366,9 @@ For multi-turn follow-up (where the agent remembers the previous question), you 
 
 ### Track 2: Test the deployed ECS service
 
-Once Track 1 passes, this confirms the Docker image that was pushed to ECR works correctly when run as an ECS task, and that the ECS service behind the ALB (Application Load Balancer) is healthy.
+Once Track 1 passes, this confirms the Docker image running on ECS Fargate is working. The ALB (Application Load Balancer) in front of the service is internal-only — it can't be reached from your browser directly. Instead, you use `aws ecs execute-command` to open a shell inside the running container and make HTTP requests from there.
 
-**Step 1: Get the resource names from Terraform outputs.**
-
-```bash
-cd terraform-platform-infra-live/environments/dev
-terraform output analytics_agent_cluster
-terraform output analytics_agent_task_definition
-terraform output analytics_agent_log_group
-terraform output analytics_agent_alb_dns
-```
-
-Write down these values. You'll use them in the commands below.
-
-**Step 2: Get the private subnet ID and security group ID.**
-
-The ECS task runs in a private subnet inside the VPC. You need one private subnet ID and the agent security group ID for the `network-configuration` flag.
-
-```bash
-# List private subnets (look for subnets tagged Name=edp-dev-private-*)
-aws ec2 describe-subnets \
-  --filters "Name=tag:Name,Values=edp-dev-private-*" \
-  --query "Subnets[*].[SubnetId,Tags[?Key=='Name'].Value|[0]]" \
-  --output table \
-  --profile dev-admin \
-  --region eu-central-1
-
-# Get the agent security group ID
-aws ec2 describe-security-groups \
-  --filters "Name=group-name,Values=edp-dev-analytics-agent-tasks" \
-  --query "SecurityGroups[0].GroupId" \
-  --output text \
-  --profile dev-admin \
-  --region eu-central-1
-```
-
-**Step 3: Run a one-off ECS task with a question.**
-
-This launches the container, asks a single question, writes the result to CloudWatch Logs, and exits. Replace `SUBNET_ID` and `SG_ID` with the values from Step 2.
-
-```bash
-aws ecs run-task \
-  --cluster edp-dev-analytics-agent \
-  --task-definition edp-dev-analytics-agent \
-  --launch-type FARGATE \
-  --network-configuration 'awsvpcConfiguration={subnets=[SUBNET_ID],securityGroups=[SG_ID],assignPublicIp=DISABLED}' \
-  --overrides '{"containerOverrides":[{"name":"agent","command":["Which country has the highest total revenue?"]}]}' \
-  --profile dev-admin \
-  --region eu-central-1
-```
-
-This command returns immediately with a `taskArn`. The container is now starting up in the background.
-
-**Step 4: Watch the logs.**
-
-The agent writes structured JSON logs to CloudWatch. Stream them live in your terminal:
-
-```bash
-aws logs tail /edp/dev/analytics-agent \
-  --follow \
-  --profile dev-admin \
-  --region eu-central-1
-```
-
-You'll see log lines as the agent starts up (schema loading), generates SQL, executes the Athena query, and produces the insight. The final log lines will contain the insight text and the presigned chart URL.
-
-Wait for the log stream to go quiet (about 15-20 seconds after startup). When you see a log line containing `"insight"`, the run is complete. Press Ctrl-C to stop tailing.
-
-**Step 5: Check the ECS service is healthy.**
-
-The ECS service runs one task continuously so the HTTP endpoint is always available. Confirm it's healthy:
+**Step 1: Confirm the ECS service has a running task.**
 
 ```bash
 aws ecs describe-services \
@@ -419,58 +376,147 @@ aws ecs describe-services \
   --services edp-dev-analytics-agent \
   --profile dev-admin \
   --region eu-central-1 \
-  --query "services[0].{Status:status,Running:runningCount,Desired:desiredCount,Health:healthCheckGracePeriodSeconds}"
+  --query "services[0].{running:runningCount,pending:pendingCount,taskDef:taskDefinition}" \
+  --output json
 ```
 
-You want `runningCount` to equal `desiredCount` (both should be `1`) and `status` to be `ACTIVE`.
+You want `running: 1`. If it shows `running: 0`, wait a minute and run it again. If it stays at zero, check the CloudWatch logs (Step 3).
 
-**Step 6: Test the HTTP endpoint (multi-turn questions).**
-
-The ALB is internal — it's only reachable from inside the VPC. The simplest way to reach it is via an SSM (Systems Manager) port-forwarding session from your Mac.
-
-First, you need an EC2 instance running inside the VPC to forward through. If the ingestion module's bastion host is deployed (`aws_instance.bastion` in `environments/dev/main.tf`), uncomment the bastion outputs in `environments/dev/outputs.tf`, run `terraform apply`, and note the bastion instance ID.
-
-Then open an SSM port-forwarding tunnel. This command creates a tunnel from port 8080 on your Mac to port 80 on the internal ALB, through the bastion:
+**Step 2: Get the running task ID.**
 
 ```bash
-# Replace BASTION_INSTANCE_ID and ALB_DNS with values from terraform output
-aws ssm start-session \
-  --target BASTION_INSTANCE_ID \
-  --document-name AWS-StartPortForwardingSessionToRemoteHost \
-  --parameters "host=ALB_DNS,portNumber=80,localPortNumber=8080" \
+aws ecs list-tasks \
+  --cluster edp-dev-analytics-agent \
+  --desired-status RUNNING \
+  --profile dev-admin \
+  --region eu-central-1 \
+  --query "taskArns[0]" \
+  --output text
+```
+
+This returns a long ARN. The task ID is the last segment after the final `/`. For example, from:
+
+```
+arn:aws:ecs:eu-central-1:123456789012:task/edp-dev-analytics-agent/3e4ea78b0be54d61
+```
+
+The task ID is `3e4ea78b0be54d61`. You'll use this in the next steps.
+
+**Step 3: Check the health endpoint.**
+
+Replace `TASK_ID` with the value from Step 2.
+
+```bash
+aws ecs execute-command \
+  --cluster edp-dev-analytics-agent \
+  --task TASK_ID \
+  --container agent \
+  --interactive \
+  --command "python -c \"import urllib.request; print(urllib.request.urlopen('http://localhost:8080/health').read().decode())\"" \
   --profile dev-admin \
   --region eu-central-1
 ```
 
-Leave this running in one terminal window. In a second terminal, you can now hit the agent as if it were running locally on your Mac:
+Expected output: `{"status":"ok"}`
 
-**Ask a question:**
-
-```bash
-curl -s -X POST http://localhost:8080/ask \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Which country has the highest total revenue?"}' | python3 -m json.tool
-```
-
-The response JSON includes `insight`, `assumptions`, `execution_id`, `bytes_scanned`, `cost_usd`, `session_id`, `chart_type`, and `presigned_url`.
-
-**Ask a follow-up question (multi-turn):**
-
-Copy the `session_id` from the first response and pass it in the next request. The agent will remember the previous question and can resolve references like "now break it down by city" without re-stating the original question.
+If you get `SessionManagerPlugin is not found`, install it first:
 
 ```bash
-# Replace SESSION_ID with the value from the first response
-curl -s -X POST http://localhost:8080/ask \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Now break that down by city", "session_id": "SESSION_ID"}' | python3 -m json.tool
+brew install --cask session-manager-plugin
 ```
 
-**Check the health endpoint:**
+**Step 4: Ask your first question to the ECS-deployed agent.**
+
+This is where you type your question. Replace `TASK_ID` with your task ID and replace the question text with anything you want to ask.
 
 ```bash
-curl http://localhost:8080/health
-# Expected: {"status": "ok"}
+aws ecs execute-command \
+  --cluster edp-dev-analytics-agent \
+  --task TASK_ID \
+  --container agent \
+  --interactive \
+  --command "python -c \"
+import urllib.request, json
+body = json.dumps({'question': 'Which country has the highest total revenue?'}).encode()
+req = urllib.request.Request(
+    'http://localhost:8080/ask',
+    data=body,
+    headers={'Content-Type': 'application/json'},
+    method='POST'
+)
+resp = urllib.request.urlopen(req, timeout=120)
+data = json.loads(resp.read().decode())
+print()
+print('INSIGHT:', data['insight'])
+print()
+print('SQL EXECUTED:')
+for a in data.get('assumptions', []):
+    print(' -', a)
+print()
+print('BYTES SCANNED:', data['bytes_scanned'])
+print('COST USD:', data['cost_usd'])
+print('CHART TYPE:', data['chart_type'])
+print('CHART URL:', data.get('presigned_url'))
+print('SESSION ID:', data['session_id'])
+\"" \
+  --profile dev-admin \
+  --region eu-central-1
 ```
+
+The command takes 15-30 seconds. The agent is loading schemas from Glue, generating SQL with Claude, running the Athena query, and producing the insight.
+
+**What you'll see in the output:**
+
+- `INSIGHT` — a 2-3 sentence plain-English answer to your question based on the actual data
+- The assumptions list — what the agent interpreted (for example, "'revenue' means total price on completed orders only")
+- `BYTES SCANNED` — how much Athena data was read (should be small for Gold tables, under 10 MB)
+- `COST USD` — the Athena query cost (should be under $0.001)
+- `CHART URL` — an S3 presigned URL. Copy it and open it in your browser to see the chart image.
+- `SESSION ID` — copy this if you want to ask a follow-up question
+
+**Step 5: Ask a follow-up question (multi-turn).**
+
+Copy the `SESSION ID` from Step 4 and paste it into this command as `YOUR_SESSION_ID`. The agent will remember the previous question and answer.
+
+```bash
+aws ecs execute-command \
+  --cluster edp-dev-analytics-agent \
+  --task TASK_ID \
+  --container agent \
+  --interactive \
+  --command "python -c \"
+import urllib.request, json
+body = json.dumps({
+    'question': 'Now break that down by city',
+    'session_id': 'YOUR_SESSION_ID'
+}).encode()
+req = urllib.request.Request(
+    'http://localhost:8080/ask',
+    data=body,
+    headers={'Content-Type': 'application/json'},
+    method='POST'
+)
+resp = urllib.request.urlopen(req, timeout=120)
+data = json.loads(resp.read().decode())
+print('INSIGHT:', data['insight'])
+print('SESSION ID:', data['session_id'])
+\"" \
+  --profile dev-admin \
+  --region eu-central-1
+```
+
+**Step 6: Read the CloudWatch logs if something goes wrong.**
+
+All errors and startup messages are written to CloudWatch. This is the first place to look when a request fails.
+
+```bash
+aws logs tail /ecs/edp-dev-analytics-agent \
+  --follow \
+  --profile dev-admin \
+  --region eu-central-1
+```
+
+Press Ctrl-C to stop tailing. The most common startup errors are documented in the troubleshooting section below.
 
 ---
 
@@ -516,25 +562,20 @@ The agent runs as an ECS (Elastic Container Service) Fargate service. It starts 
 **ECS cluster:** `edp-dev-analytics-agent`
 **ECS service:** `edp-dev-analytics-agent`
 **ECR repository:** `edp-dev-analytics-agent`
-**CloudWatch log group:** `/edp/dev/analytics-agent`
+**CloudWatch log group:** `/ecs/edp-dev-analytics-agent`
 
-**HTTP endpoint (from within the VPC):**
+**HTTP endpoints (reachable from inside the container via ECS Exec):**
 ```
-POST http://{alb-dns-name}/ask
-GET  http://{alb-dns-name}/health
+POST http://localhost:8080/ask
+GET  http://localhost:8080/health
 ```
 
-**One-off CLI question (from your Mac via ECS run-task):**
-```bash
-aws ecs run-task \
-  --cluster edp-dev-analytics-agent \
-  --task-definition edp-dev-analytics-agent \
-  --launch-type FARGATE \
-  --network-configuration 'awsvpcConfiguration={subnets=[SUBNET_ID],securityGroups=[SG_ID],assignPublicIp=DISABLED}' \
-  --overrides '{"containerOverrides":[{"name":"agent","command":["Which country has the highest revenue?"]}]}' \
-  --profile dev-admin \
-  --region eu-central-1
+**ALB DNS (internal, not reachable from the public internet):**
 ```
+internal-edp-dev-agent-alb-753909442.eu-central-1.elb.amazonaws.com
+```
+
+The ALB is intentionally internal-only. To reach it from outside the VPC you would need a bastion host or VPN tunnel. For dev testing, use ECS Exec as described in Track 2 above — it's simpler and doesn't require any additional infrastructure.
 
 ### IAM role permissions
 
