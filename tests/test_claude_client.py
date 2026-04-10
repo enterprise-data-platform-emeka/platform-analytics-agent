@@ -360,7 +360,9 @@ class TestToolUse:
         )
         responses = iter([tool_response, final_response])
 
-        with patch.object(client._client.messages, "create", side_effect=lambda **kw: next(responses)):
+        with patch.object(
+            client._client.messages, "create", side_effect=lambda **kw: next(responses)
+        ):
             sql, assumptions = client.generate_sql(
                 messages=[{"role": "user", "content": "show revenue by year"}],
                 system_prompt="sys",
@@ -399,7 +401,9 @@ class TestToolUse:
         final_response = _sql_response("SELECT 1 LIMIT 1", [])
         responses = iter([tool_response, final_response])
 
-        with patch.object(client._client.messages, "create", side_effect=lambda **kw: next(responses)):
+        with patch.object(
+            client._client.messages, "create", side_effect=lambda **kw: next(responses)
+        ):
             # Should not raise even though get_schema failed.
             sql, _ = client.generate_sql(
                 messages=[{"role": "user", "content": "test"}],

@@ -162,8 +162,7 @@ class ChartGenerator:
             return "table"
 
         time_cols = [
-            col for col in result.columns
-            if any(hint in col.lower() for hint in _TIME_HINTS)
+            col for col in result.columns if any(hint in col.lower() for hint in _TIME_HINTS)
         ]
         non_time_numeric = [c for c in numeric_cols if c not in time_cols]
 
@@ -211,6 +210,7 @@ class ChartGenerator:
     def _render_bar(self, result: QueryResult, question: str) -> tuple[bytes, str]:
         """Render a horizontal bar chart: first categorical col vs first numeric col."""
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
@@ -239,13 +239,13 @@ class ChartGenerator:
     def _render_line(self, result: QueryResult, question: str) -> tuple[bytes, str]:
         """Render a line chart: time axis vs first numeric column."""
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
         numeric_cols = self._numeric_columns(result)
         time_cols = [
-            col for col in result.columns
-            if any(hint in col.lower() for hint in _TIME_HINTS)
+            col for col in result.columns if any(hint in col.lower() for hint in _TIME_HINTS)
         ]
         non_time_numeric = [c for c in numeric_cols if c not in time_cols]
 
@@ -281,6 +281,7 @@ class ChartGenerator:
     def _render_table(self, result: QueryResult, question: str) -> tuple[bytes, str]:
         """Render a plain text table as a matplotlib figure (fallback)."""
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
@@ -361,6 +362,7 @@ class ChartGenerator:
 def _fig_to_png(fig) -> bytes:  # type: ignore[no-untyped-def]
     """Render a matplotlib figure to PNG bytes without writing a file."""
     import io
+
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
     buf.seek(0)
@@ -433,10 +435,7 @@ def _plotly_table(
     import plotly.graph_objects as go
 
     # Transpose rows-of-columns into columns-of-values for Plotly Table.
-    columns_of_values = [
-        [row[i] for row in cell_data]
-        for i in range(len(col_labels))
-    ]
+    columns_of_values = [[row[i] for row in cell_data] for i in range(len(col_labels))]
 
     fig = go.Figure(
         go.Table(

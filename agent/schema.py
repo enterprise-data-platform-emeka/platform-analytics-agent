@@ -115,9 +115,7 @@ class SchemaResolver:
                     f"Table '{table_name}' not found in '{self._config.glue_gold_database}'. "
                     f"Check the table name against the Gold database."
                 ) from exc
-            raise SchemaResolutionError(
-                f"Glue error fetching table '{table_name}': {exc}"
-            ) from exc
+            raise SchemaResolutionError(f"Glue error fetching table '{table_name}': {exc}") from exc
 
         return self._merge_table(response["Table"], dbt_catalog)
 
@@ -137,9 +135,7 @@ class SchemaResolver:
                     f"Glue database '{self._config.glue_gold_database}' not found. "
                     f"Has the platform infrastructure been applied?"
                 ) from exc
-            raise SchemaResolutionError(
-                f"Failed to list Glue tables: {exc}"
-            ) from exc
+            raise SchemaResolutionError(f"Failed to list Glue tables: {exc}") from exc
 
         if not tables:
             raise SchemaResolutionError(
@@ -186,10 +182,7 @@ class SchemaResolver:
         glue_tables: list[dict[str, Any]],
         dbt_catalog: dict[str, Any],
     ) -> AllSchemas:
-        return {
-            table["Name"]: self._merge_table(table, dbt_catalog)
-            for table in glue_tables
-        }
+        return {table["Name"]: self._merge_table(table, dbt_catalog) for table in glue_tables}
 
     def _merge_table(
         self,

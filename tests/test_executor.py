@@ -157,7 +157,9 @@ class TestQueryResult:
         return QueryResult(
             execution_id="exec-123",
             columns=columns if columns is not None else ["country", "total_revenue"],
-            rows=rows if rows is not None else [
+            rows=rows
+            if rows is not None
+            else [
                 {"country": "Germany", "total_revenue": "432701.55"},
                 {"country": "France", "total_revenue": "301245.20"},
             ],
@@ -208,9 +210,7 @@ class TestQueryResult:
 class TestAthenaExecutorStart:
     def test_calls_start_query_execution(self) -> None:
         executor, mock_athena = _executor()
-        mock_athena.start_query_execution.return_value = {
-            "QueryExecutionId": "exec-abc"
-        }
+        mock_athena.start_query_execution.return_value = {"QueryExecutionId": "exec-abc"}
         mock_athena.get_query_execution.return_value = _execution_response("SUCCEEDED")
         mock_athena.get_paginator.return_value.paginate.return_value = [
             _result_page(["col"], [["val"]], include_header=True)
@@ -296,65 +296,73 @@ class TestAthenaExecutorPoll:
         result_pages: list[dict[str, Any]] | None = None,
     ) -> tuple[AthenaExecutor, MagicMock]:
         executor, mock_athena = _executor()
-        mock_athena.start_query_execution.return_value = {
-            "QueryExecutionId": "exec-poll"
-        }
+        mock_athena.start_query_execution.return_value = {"QueryExecutionId": "exec-poll"}
         mock_athena.get_query_execution.side_effect = poll_responses
-        pages = result_pages or [
-            _result_page(["col"], [["val"]], include_header=True)
-        ]
+        pages = result_pages or [_result_page(["col"], [["val"]], include_header=True)]
         mock_athena.get_paginator.return_value.paginate.return_value = pages
         return executor, mock_athena
 
     def test_succeeds_after_one_running_poll(self) -> None:
-        executor, mock_athena = self._setup([
-            _execution_response("RUNNING"),
-            _execution_response("SUCCEEDED"),
-        ])
+        executor, mock_athena = self._setup(
+            [
+                _execution_response("RUNNING"),
+                _execution_response("SUCCEEDED"),
+            ]
+        )
         with patch("agent.executor.time.sleep"):
             result = executor.execute("SELECT 1 LIMIT 1")
         assert result.execution_id == "exec-poll"
 
     def test_polls_until_terminal_state(self) -> None:
-        executor, mock_athena = self._setup([
-            _execution_response("QUEUED"),
-            _execution_response("RUNNING"),
-            _execution_response("RUNNING"),
-            _execution_response("SUCCEEDED"),
-        ])
+        executor, mock_athena = self._setup(
+            [
+                _execution_response("QUEUED"),
+                _execution_response("RUNNING"),
+                _execution_response("RUNNING"),
+                _execution_response("SUCCEEDED"),
+            ]
+        )
         with patch("agent.executor.time.sleep"):
             executor.execute("SELECT 1 LIMIT 1")
         assert mock_athena.get_query_execution.call_count == 4
 
     def test_failed_state_raises_execution_error(self) -> None:
-        executor, mock_athena = self._setup([
-            _execution_response("FAILED", reason="Table not found"),
-        ])
+        executor, mock_athena = self._setup(
+            [
+                _execution_response("FAILED", reason="Table not found"),
+            ]
+        )
         with patch("agent.executor.time.sleep"):
             with pytest.raises(ExecutionError, match="failed"):
                 executor.execute("SELECT 1 LIMIT 1")
 
     def test_failed_error_includes_reason(self) -> None:
-        executor, mock_athena = self._setup([
-            _execution_response("FAILED", reason="Column 'xyz' does not exist"),
-        ])
+        executor, mock_athena = self._setup(
+            [
+                _execution_response("FAILED", reason="Column 'xyz' does not exist"),
+            ]
+        )
         with patch("agent.executor.time.sleep"):
             with pytest.raises(ExecutionError, match="xyz"):
                 executor.execute("SELECT 1 LIMIT 1")
 
     def test_cancelled_state_raises_execution_error(self) -> None:
-        executor, mock_athena = self._setup([
-            _execution_response("CANCELLED"),
-        ])
+        executor, mock_athena = self._setup(
+            [
+                _execution_response("CANCELLED"),
+            ]
+        )
         with patch("agent.executor.time.sleep"):
             with pytest.raises(ExecutionError, match="cancelled"):
                 executor.execute("SELECT 1 LIMIT 1")
 
     def test_throttling_during_poll_retried(self) -> None:
-        executor, mock_athena = self._setup([
-            _client_error("ThrottlingException"),
-            _execution_response("SUCCEEDED"),
-        ])
+        executor, mock_athena = self._setup(
+            [
+                _client_error("ThrottlingException"),
+                _execution_response("SUCCEEDED"),
+            ]
+        )
         mock_athena.get_query_execution.side_effect = [
             _client_error("ThrottlingException"),
             _execution_response("SUCCEEDED"),
@@ -365,9 +373,7 @@ class TestAthenaExecutorPoll:
 
     def test_non_throttle_poll_error_raises(self) -> None:
         executor, mock_athena = self._setup([])
-        mock_athena.get_query_execution.side_effect = _client_error(
-            "AccessDeniedException"
-        )
+        mock_athena.get_query_execution.side_effect = _client_error("AccessDeniedException")
         with patch("agent.executor.time.sleep"):
             with pytest.raises(ExecutionError, match="polling"):
                 executor.execute("SELECT 1 LIMIT 1")
@@ -452,43 +458,47 @@ class TestAthenaExecutorFetchResults:
             return executor.execute("SELECT 1 LIMIT 1")
 
     def test_columns_extracted_from_metadata(self) -> None:
-        result = self._run([
-            _result_page(["country", "total_revenue"], [["Germany", "432701.55"]], include_header=True)
-        ])
+        result = self._run(
+            [
+                _result_page(
+                    ["country", "total_revenue"], [["Germany", "432701.55"]], include_header=True
+                )
+            ]
+        )
         assert result.columns == ["country", "total_revenue"]
 
     def test_rows_are_dicts_keyed_by_column_name(self) -> None:
-        result = self._run([
-            _result_page(
-                ["country", "total_revenue"],
-                [["Germany", "432701.55"], ["France", "301245.20"]],
-                include_header=True,
-            )
-        ])
+        result = self._run(
+            [
+                _result_page(
+                    ["country", "total_revenue"],
+                    [["Germany", "432701.55"], ["France", "301245.20"]],
+                    include_header=True,
+                )
+            ]
+        )
         assert result.rows[0] == {"country": "Germany", "total_revenue": "432701.55"}
         assert result.rows[1] == {"country": "France", "total_revenue": "301245.20"}
 
     def test_header_row_is_stripped(self) -> None:
         # Athena includes column names as first data row on page 1.
-        result = self._run([
-            _result_page(["a", "b"], [["1", "2"]], include_header=True)
-        ])
+        result = self._run([_result_page(["a", "b"], [["1", "2"]], include_header=True)])
         # Should have only 1 data row, not 2 (one being the header).
         assert len(result.rows) == 1
         assert result.rows[0] == {"a": "1", "b": "2"}
 
     def test_empty_result_set_returns_empty_rows(self) -> None:
-        result = self._run([
-            _result_page(["a", "b"], [], include_header=True)
-        ])
+        result = self._run([_result_page(["a", "b"], [], include_header=True)])
         assert result.rows == []
         assert result.columns == ["a", "b"]
 
     def test_multi_page_results_merged(self) -> None:
-        result = self._run([
-            _result_page(["country"], [["Germany"], ["France"]], include_header=True),
-            _result_page(["country"], [["Spain"], ["Italy"]]),
-        ])
+        result = self._run(
+            [
+                _result_page(["country"], [["Germany"], ["France"]], include_header=True),
+                _result_page(["country"], [["Spain"], ["Italy"]]),
+            ]
+        )
         countries = [r["country"] for r in result.rows]
         assert countries == ["Germany", "France", "Spain", "Italy"]
 
@@ -519,9 +529,7 @@ class TestAthenaExecutorFetchResults:
 
     def test_execution_id_in_result(self) -> None:
         executor, mock_athena = _executor()
-        mock_athena.start_query_execution.return_value = {
-            "QueryExecutionId": "unique-exec-id-999"
-        }
+        mock_athena.start_query_execution.return_value = {"QueryExecutionId": "unique-exec-id-999"}
         mock_athena.get_query_execution.return_value = _execution_response("SUCCEEDED")
         mock_athena.get_paginator.return_value.paginate.return_value = [
             _result_page(["c"], [["v"]], include_header=True)

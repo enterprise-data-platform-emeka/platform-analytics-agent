@@ -76,9 +76,7 @@ def _make_resolver(
     # Mock Glue paginator
     mock_glue = MagicMock()
     if glue_error_code:
-        mock_glue.get_paginator.return_value.paginate.side_effect = _client_error(
-            glue_error_code
-        )
+        mock_glue.get_paginator.return_value.paginate.side_effect = _client_error(glue_error_code)
         mock_glue.get_table.side_effect = _client_error(glue_error_code)
     else:
         mock_page = {"TableList": glue_tables}

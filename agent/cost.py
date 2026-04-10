@@ -45,8 +45,6 @@ def bytes_to_usd(bytes_scanned: int) -> float:
         4.6e-04  (approximately)
     """
     if bytes_scanned < 0:
-        raise ValueError(
-            f"bytes_scanned must be >= 0, got {bytes_scanned}."
-        )
+        raise ValueError(f"bytes_scanned must be >= 0, got {bytes_scanned}.")
     billable = max(bytes_scanned, _MIN_BYTES)
     return round(billable * _PRICE_PER_BYTE, 6)

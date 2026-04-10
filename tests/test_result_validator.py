@@ -1,6 +1,5 @@
 """Tests for result_validator.py."""
 
-
 from agent.executor import QueryResult
 from agent.result_validator import (
     ValidationReport,

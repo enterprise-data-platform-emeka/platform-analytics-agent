@@ -344,8 +344,7 @@ def build_sql_correction_messages(
     """
     assumptions_text = "\n".join(f"- {a}" for a in prior_assumptions)
     assistant_content = (
-        f"<sql>\n{prior_sql}\n</sql>\n"
-        f"<assumptions>\n{assumptions_text}\n</assumptions>"
+        f"<sql>\n{prior_sql}\n</sql>\n" f"<assumptions>\n{assumptions_text}\n</assumptions>"
     )
 
     correction_content = (

@@ -36,9 +36,7 @@ class TestEmptyInput:
         assert "empty" in exc_info.value.reason.lower()
 
     def test_trailing_semicolon_is_stripped(self) -> None:
-        result = _validator().validate(
-            "SELECT order_year FROM monthly_revenue_trend LIMIT 10;"
-        )
+        result = _validator().validate("SELECT order_year FROM monthly_revenue_trend LIMIT 10;")
         assert not result.endswith(";")
 
     def test_multiple_statements_raises(self) -> None:
@@ -83,31 +81,24 @@ class TestForbiddenKeywords:
     def test_forbidden_keyword_inside_cte_raises(self) -> None:
         # UPDATE inside a CTE must still be caught.
         sql = (
-            "WITH bad AS (UPDATE monthly_revenue_trend SET total_revenue = 0) "
-            "SELECT * FROM bad"
+            "WITH bad AS (UPDATE monthly_revenue_trend SET total_revenue = 0) " "SELECT * FROM bad"
         )
         with pytest.raises(SQLValidationError):
             _validator().validate(sql)
 
     def test_column_named_updated_at_does_not_raise(self) -> None:
         # 'UPDATE' is a word-boundary match; 'updated_at' must not trigger it.
-        result = _validator().validate(
-            "SELECT updated_at FROM customer_segments LIMIT 10"
-        )
+        result = _validator().validate("SELECT updated_at FROM customer_segments LIMIT 10")
         assert "updated_at" in result
 
     def test_column_named_created_at_does_not_raise(self) -> None:
         # 'CREATE' must not match inside 'created_at'.
-        result = _validator().validate(
-            "SELECT created_at FROM customer_segments LIMIT 10"
-        )
+        result = _validator().validate("SELECT created_at FROM customer_segments LIMIT 10")
         assert "created_at" in result
 
     def test_column_named_last_update_does_not_raise(self) -> None:
         # 'UPDATE' must not match inside 'last_update'.
-        result = _validator().validate(
-            "SELECT last_update FROM monthly_revenue_trend LIMIT 10"
-        )
+        result = _validator().validate("SELECT last_update FROM monthly_revenue_trend LIMIT 10")
         assert "last_update" in result
 
 
@@ -116,9 +107,7 @@ class TestForbiddenKeywords:
 
 class TestSelectOnly:
     def test_plain_select_passes(self) -> None:
-        result = _validator().validate(
-            "SELECT * FROM monthly_revenue_trend LIMIT 10"
-        )
+        result = _validator().validate("SELECT * FROM monthly_revenue_trend LIMIT 10")
         assert result
 
     def test_select_with_where_passes(self) -> None:
@@ -152,7 +141,7 @@ class TestSelectOnly:
     def test_table_alias_dot_column_passes(self) -> None:
         # t.column_name must not trigger the database reference check.
         result = _validator().validate(
-            'SELECT t.order_year, t.total_revenue '
+            "SELECT t.order_year, t.total_revenue "
             'FROM "edp_dev_gold"."monthly_revenue_trend" t '
             "LIMIT 10"
         )
@@ -164,9 +153,7 @@ class TestSelectOnly:
 
 class TestDatabaseReferences:
     def test_unqualified_table_passes(self) -> None:
-        result = _validator().validate(
-            "SELECT * FROM monthly_revenue_trend LIMIT 10"
-        )
+        result = _validator().validate("SELECT * FROM monthly_revenue_trend LIMIT 10")
         assert result
 
     def test_gold_database_double_quoted_passes(self) -> None:
@@ -177,16 +164,12 @@ class TestDatabaseReferences:
 
     def test_bronze_database_quoted_raises(self) -> None:
         with pytest.raises(SQLValidationError) as exc_info:
-            _validator().validate(
-                'SELECT * FROM "edp_dev_bronze"."orders" LIMIT 10'
-            )
+            _validator().validate('SELECT * FROM "edp_dev_bronze"."orders" LIMIT 10')
         assert "edp_dev_bronze" in exc_info.value.reason
 
     def test_silver_database_quoted_raises(self) -> None:
         with pytest.raises(SQLValidationError) as exc_info:
-            _validator().validate(
-                'SELECT * FROM "edp_dev_silver"."fact_orders" LIMIT 10'
-            )
+            _validator().validate('SELECT * FROM "edp_dev_silver"."fact_orders" LIMIT 10')
         assert "edp_dev_silver" in exc_info.value.reason
 
     def test_unquoted_bronze_reference_raises(self) -> None:
@@ -196,9 +179,7 @@ class TestDatabaseReferences:
 
     def test_unquoted_silver_reference_raises(self) -> None:
         with pytest.raises(SQLValidationError) as exc_info:
-            _validator().validate(
-                "SELECT * FROM edp_dev_silver.fact_orders LIMIT 10"
-            )
+            _validator().validate("SELECT * FROM edp_dev_silver.fact_orders LIMIT 10")
         assert "edp_dev_silver" in exc_info.value.reason
 
     def test_staging_bronze_quoted_raises(self) -> None:
@@ -227,7 +208,7 @@ class TestDatabaseReferences:
 
     def test_multiple_gold_tables_joined_passes(self) -> None:
         sql = (
-            'SELECT r.country, r.total_revenue, c.total_customers '
+            "SELECT r.country, r.total_revenue, c.total_customers "
             'FROM "edp_dev_gold"."revenue_by_country" r '
             'JOIN "edp_dev_gold"."customer_segments" c ON r.country = c.country '
             "LIMIT 10"
@@ -241,15 +222,11 @@ class TestDatabaseReferences:
 
 class TestLimit:
     def test_missing_limit_is_injected(self) -> None:
-        result = _validator(max_rows=500).validate(
-            "SELECT * FROM monthly_revenue_trend"
-        )
+        result = _validator(max_rows=500).validate("SELECT * FROM monthly_revenue_trend")
         assert "LIMIT 500" in result.upper()
 
     def test_limit_within_bounds_is_unchanged(self) -> None:
-        result = _validator(max_rows=1000).validate(
-            "SELECT * FROM monthly_revenue_trend LIMIT 10"
-        )
+        result = _validator(max_rows=1000).validate("SELECT * FROM monthly_revenue_trend LIMIT 10")
         assert "LIMIT 10" in result.upper()
         assert "LIMIT 1000" not in result.upper()
 
@@ -270,9 +247,7 @@ class TestLimit:
 
     def test_limit_zero_not_replaced(self) -> None:
         # LIMIT 0 is valid Athena SQL and within bounds (0 <= max_rows).
-        result = _validator(max_rows=1000).validate(
-            "SELECT * FROM monthly_revenue_trend LIMIT 0"
-        )
+        result = _validator(max_rows=1000).validate("SELECT * FROM monthly_revenue_trend LIMIT 0")
         assert "LIMIT 0" in result.upper()
 
     def test_cte_without_outer_limit_gets_injected(self) -> None:

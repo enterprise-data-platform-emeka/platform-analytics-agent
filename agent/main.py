@@ -302,8 +302,8 @@ def _cli_main(argv: list[str] | None = None) -> int:
 
     if not args:
         print(
-            "Usage: python -m agent.main \"<question>\"\n"
-            "Example: python -m agent.main \"Which country has the highest revenue?\"",
+            'Usage: python -m agent.main "<question>"\n'
+            'Example: python -m agent.main "Which country has the highest revenue?"',
             file=sys.stderr,
         )
         return 1

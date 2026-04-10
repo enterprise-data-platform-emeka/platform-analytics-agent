@@ -63,8 +63,18 @@ MONTHLY_TREND_ROWS = [
 
 PRODUCT_COLS = ["product_name", "category", "total_orders", "total_revenue"]
 PRODUCT_ROWS = [
-    {"product_name": "Widget A", "category": "Electronics", "total_orders": "120", "total_revenue": "12000.00"},
-    {"product_name": "Widget B", "category": "Clothing", "total_orders": "95", "total_revenue": "9500.00"},
+    {
+        "product_name": "Widget A",
+        "category": "Electronics",
+        "total_orders": "120",
+        "total_revenue": "12000.00",
+    },
+    {
+        "product_name": "Widget B",
+        "category": "Clothing",
+        "total_orders": "95",
+        "total_revenue": "9500.00",
+    },
 ]
 
 TEXT_ONLY_COLS = ["country", "customer_frequency_band"]
@@ -333,6 +343,7 @@ class TestS3Upload:
 
     def test_s3_upload_failure_does_not_raise(self) -> None:
         from botocore.exceptions import ClientError
+
         gen, mock_s3 = _generator()
         mock_s3.put_object.side_effect = ClientError(
             {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
@@ -345,6 +356,7 @@ class TestS3Upload:
 
     def test_s3_upload_failure_png_bytes_still_returned(self) -> None:
         from botocore.exceptions import ClientError
+
         gen, mock_s3 = _generator()
         mock_s3.put_object.side_effect = ClientError(
             {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},

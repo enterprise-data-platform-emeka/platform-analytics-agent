@@ -35,9 +35,7 @@ class Turn:
     sql: str
     insight: str
     assumptions: list[str]
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
-    )
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 @dataclass
@@ -53,9 +51,7 @@ class Conversation:
 
     session_id: str
     turns: list[Turn] = field(default_factory=list)
-    created_at: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
-    )
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     # Maximum number of prior turns to include in the context summary.
     # Older turns are dropped to keep the prompt size bounded.
@@ -139,8 +135,7 @@ class SessionStore:
         expired = [
             sid
             for sid, conv in self._store.items()
-            if (now - datetime.fromisoformat(conv.created_at)).total_seconds()
-            > self._ttl_seconds
+            if (now - datetime.fromisoformat(conv.created_at)).total_seconds() > self._ttl_seconds
         ]
         for sid in expired:
             del self._store[sid]

@@ -61,9 +61,7 @@ _RETRY_DELAYS: Final[tuple[float, ...]] = (2.0, 5.0, 10.0)
 _MAX_TOOL_ROUNDS: Final[int] = 2
 
 # Regex to extract <sql> and <assumptions> blocks from Claude's response.
-_SQL_TAG_RE: Final[re.Pattern[str]] = re.compile(
-    r"<sql>(.*?)</sql>", re.DOTALL | re.IGNORECASE
-)
+_SQL_TAG_RE: Final[re.Pattern[str]] = re.compile(r"<sql>(.*?)</sql>", re.DOTALL | re.IGNORECASE)
 _ASSUMPTIONS_TAG_RE: Final[re.Pattern[str]] = re.compile(
     r"<assumptions>(.*?)</assumptions>", re.DOTALL | re.IGNORECASE
 )
@@ -196,9 +194,7 @@ class ClaudeClient:
                     f"Cannot fetch Anthropic API key from SSM parameter "
                     f"'{aws_config.ssm_api_key_param}': {exc}"
                 ) from exc
-            raise ConfigurationError(
-                f"Unexpected SSM error fetching API key: {exc}"
-            ) from exc
+            raise ConfigurationError(f"Unexpected SSM error fetching API key: {exc}") from exc
 
     def _call(
         self,
@@ -303,9 +299,7 @@ class ClaudeClient:
                     }
                 )
 
-            current_messages.append(
-                {"role": "user", "content": tool_results}
-            )
+            current_messages.append({"role": "user", "content": tool_results})
 
             response = self._call(
                 messages=current_messages,  # type: ignore[arg-type]
@@ -360,9 +354,7 @@ class ClaudeClient:
 
         sql = sql_match.group(1).strip()
         if not sql:
-            raise SQLGenerationError(
-                "Claude returned an empty <sql> block."
-            )
+            raise SQLGenerationError("Claude returned an empty <sql> block.")
 
         assumptions: list[str] = []
         assumptions_match = _ASSUMPTIONS_TAG_RE.search(text)
@@ -397,9 +389,7 @@ class ClaudeClient:
         """
         text = self._extract_text(response).strip()
         if not text:
-            raise InsightGenerationError(
-                "Claude returned an empty insight response."
-            )
+            raise InsightGenerationError("Claude returned an empty insight response.")
         return text
 
     @staticmethod

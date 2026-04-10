@@ -346,9 +346,7 @@ class TestAgentSessionAsk:
             _stop_patches(patches)
 
     def test_validation_flags_preserved_in_result(self) -> None:
-        ask_result = _make_ask_result(
-            response=_make_response(flags=["Negative revenue detected."])
-        )
+        ask_result = _make_ask_result(response=_make_response(flags=["Negative revenue detected."]))
         patches = _patch_session_deps(ask_result)
         _start_patches(patches)
         try:
@@ -373,11 +371,14 @@ class TestAgentSessionAsk:
                     def capture_generate(question, system_prompt):
                         captured["system_prompt"] = system_prompt
                         from agent.generator import GeneratedSQL
+
                         return GeneratedSQL(sql="SELECT 1 LIMIT 1", assumptions=[], attempts=1)
 
                     session._generator.generate = capture_generate
                     try:
-                        session.ask("Follow-up?", prior_context="Prior conversation:\nQ: ...\nA: ...")
+                        session.ask(
+                            "Follow-up?", prior_context="Prior conversation:\nQ: ...\nA: ..."
+                        )
                     except Exception:
                         pass  # executor will fail — we only care about the system_prompt
                     if "system_prompt" in captured:
@@ -455,12 +456,16 @@ class TestCliMain:
         assert "Chart:" not in captured.out
 
     def test_configuration_error_returns_exit_code_1(self) -> None:
-        with patch("agent.main.AgentSession", side_effect=ConfigurationError("missing ENVIRONMENT")):
+        with patch(
+            "agent.main.AgentSession", side_effect=ConfigurationError("missing ENVIRONMENT")
+        ):
             code = _cli_main(["Any question?"])
         assert code == 1
 
     def test_configuration_error_message_to_stderr(self, capsys) -> None:
-        with patch("agent.main.AgentSession", side_effect=ConfigurationError("missing ENVIRONMENT")):
+        with patch(
+            "agent.main.AgentSession", side_effect=ConfigurationError("missing ENVIRONMENT")
+        ):
             _cli_main(["Any question?"])
         captured = capsys.readouterr()
         assert "missing ENVIRONMENT" in captured.err

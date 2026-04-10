@@ -36,10 +36,7 @@ class Config:
 
     def __repr__(self) -> str:
         # Never expose bucket names or SSM paths in logs accidentally.
-        return (
-            f"Config(environment={self.aws.environment!r}, "
-            f"region={self.aws.region!r})"
-        )
+        return f"Config(environment={self.aws.environment!r}, " f"region={self.aws.region!r})"
 
     @classmethod
     def from_env(cls) -> "Config":

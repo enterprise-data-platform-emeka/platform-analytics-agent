@@ -149,10 +149,12 @@ class TestSuccessOnSecondAttempt:
         bad_sql = "DROP TABLE revenue_by_country"
         good_sql = "SELECT country, total_revenue FROM revenue_by_country LIMIT 10"
 
-        client = _mock_client([
-            (bad_sql, ["Table: revenue_by_country"]),
-            (good_sql, ["Table: revenue_by_country — corrected"]),
-        ])
+        client = _mock_client(
+            [
+                (bad_sql, ["Table: revenue_by_country"]),
+                (good_sql, ["Table: revenue_by_country — corrected"]),
+            ]
+        )
         validator = _mock_validator(["Forbidden keyword DROP.", None])
 
         result = _generator(client, validator).generate(QUESTION, SYSTEM)
@@ -161,10 +163,12 @@ class TestSuccessOnSecondAttempt:
         assert result.attempts == 2
 
     def test_client_called_twice(self) -> None:
-        client = _mock_client([
-            ("DROP TABLE foo", []),
-            (VALID_SQL, []),
-        ])
+        client = _mock_client(
+            [
+                ("DROP TABLE foo", []),
+                (VALID_SQL, []),
+            ]
+        )
         validator = _mock_validator(["DROP not allowed.", None])
 
         _generator(client, validator).generate(QUESTION, SYSTEM)
@@ -174,10 +178,12 @@ class TestSuccessOnSecondAttempt:
     def test_correction_messages_extended_with_prior_sql(self) -> None:
         """The second call must receive a messages list that includes the failed SQL."""
         bad_sql = "DELETE FROM revenue_by_country"
-        client = _mock_client([
-            (bad_sql, ["assumption one"]),
-            (VALID_SQL, []),
-        ])
+        client = _mock_client(
+            [
+                (bad_sql, ["assumption one"]),
+                (VALID_SQL, []),
+            ]
+        )
         validator = _mock_validator(["DELETE not allowed.", None])
 
         _generator(client, validator).generate(QUESTION, SYSTEM)
@@ -185,18 +191,18 @@ class TestSuccessOnSecondAttempt:
         second_call = client.generate_sql.call_args_list[1]
         messages = second_call[1].get("messages") or second_call[0][0]
         # The correction messages list must include the bad SQL in the assistant turn.
-        full_content = " ".join(
-            str(m.get("content", "")) for m in messages
-        )
+        full_content = " ".join(str(m.get("content", "")) for m in messages)
         assert bad_sql in full_content
 
     def test_correction_messages_include_validation_reason(self) -> None:
         """The correction user message must include the guardrail reason."""
         reason = "Only SELECT statements are allowed."
-        client = _mock_client([
-            ("INSERT INTO foo VALUES (1)", ["assumption"]),
-            (VALID_SQL, []),
-        ])
+        client = _mock_client(
+            [
+                ("INSERT INTO foo VALUES (1)", ["assumption"]),
+                (VALID_SQL, []),
+            ]
+        )
         validator = _mock_validator([reason, None])
 
         _generator(client, validator).generate(QUESTION, SYSTEM)
@@ -207,10 +213,12 @@ class TestSuccessOnSecondAttempt:
         assert reason in full_content
 
     def test_second_attempt_assumptions_returned(self) -> None:
-        client = _mock_client([
-            ("DROP TABLE foo", ["wrong assumption"]),
-            (VALID_SQL, ["corrected assumption"]),
-        ])
+        client = _mock_client(
+            [
+                ("DROP TABLE foo", ["wrong assumption"]),
+                (VALID_SQL, ["corrected assumption"]),
+            ]
+        )
         validator = _mock_validator(["DROP not allowed.", None])
 
         result = _generator(client, validator).generate(QUESTION, SYSTEM)
@@ -223,16 +231,20 @@ class TestSuccessOnSecondAttempt:
 
 class TestSuccessOnThirdAttempt:
     def test_returns_third_attempt_sql(self) -> None:
-        client = _mock_client([
-            ("DROP TABLE foo", []),
-            ("DELETE FROM foo", []),
-            (VALID_SQL, ["final assumption"]),
-        ])
-        validator = _mock_validator([
-            "DROP not allowed.",
-            "DELETE not allowed.",
-            None,
-        ])
+        client = _mock_client(
+            [
+                ("DROP TABLE foo", []),
+                ("DELETE FROM foo", []),
+                (VALID_SQL, ["final assumption"]),
+            ]
+        )
+        validator = _mock_validator(
+            [
+                "DROP not allowed.",
+                "DELETE not allowed.",
+                None,
+            ]
+        )
 
         result = _generator(client, validator).generate(QUESTION, SYSTEM)
 
@@ -240,16 +252,20 @@ class TestSuccessOnThirdAttempt:
         assert result.attempts == 3
 
     def test_client_called_three_times(self) -> None:
-        client = _mock_client([
-            ("DROP TABLE foo", []),
-            ("DELETE FROM foo", []),
-            (VALID_SQL, []),
-        ])
-        validator = _mock_validator([
-            "DROP not allowed.",
-            "DELETE not allowed.",
-            None,
-        ])
+        client = _mock_client(
+            [
+                ("DROP TABLE foo", []),
+                ("DELETE FROM foo", []),
+                (VALID_SQL, []),
+            ]
+        )
+        validator = _mock_validator(
+            [
+                "DROP not allowed.",
+                "DELETE not allowed.",
+                None,
+            ]
+        )
 
         _generator(client, validator).generate(QUESTION, SYSTEM)
 
@@ -261,32 +277,40 @@ class TestSuccessOnThirdAttempt:
 
 class TestAllAttemptsExhausted:
     def test_raises_sql_generation_error(self) -> None:
-        client = _mock_client([
-            ("DROP TABLE foo", []),
-            ("DELETE FROM foo", []),
-            ("INSERT INTO foo VALUES (1)", []),
-        ])
-        validator = _mock_validator([
-            "DROP not allowed.",
-            "DELETE not allowed.",
-            "INSERT not allowed.",
-        ])
+        client = _mock_client(
+            [
+                ("DROP TABLE foo", []),
+                ("DELETE FROM foo", []),
+                ("INSERT INTO foo VALUES (1)", []),
+            ]
+        )
+        validator = _mock_validator(
+            [
+                "DROP not allowed.",
+                "DELETE not allowed.",
+                "INSERT not allowed.",
+            ]
+        )
 
         with pytest.raises(SQLGenerationError):
             _generator(client, validator).generate(QUESTION, SYSTEM)
 
     def test_error_message_contains_last_validation_reason(self) -> None:
         last_reason = "INSERT not allowed — only SELECT statements."
-        client = _mock_client([
-            ("DROP TABLE foo", []),
-            ("DELETE FROM foo", []),
-            ("INSERT INTO foo VALUES (1)", []),
-        ])
-        validator = _mock_validator([
-            "DROP not allowed.",
-            "DELETE not allowed.",
-            last_reason,
-        ])
+        client = _mock_client(
+            [
+                ("DROP TABLE foo", []),
+                ("DELETE FROM foo", []),
+                ("INSERT INTO foo VALUES (1)", []),
+            ]
+        )
+        validator = _mock_validator(
+            [
+                "DROP not allowed.",
+                "DELETE not allowed.",
+                last_reason,
+            ]
+        )
 
         with pytest.raises(SQLGenerationError) as exc_info:
             _generator(client, validator).generate(QUESTION, SYSTEM)
@@ -295,16 +319,20 @@ class TestAllAttemptsExhausted:
 
     def test_error_message_contains_last_generated_sql(self) -> None:
         last_sql = "INSERT INTO foo VALUES (1)"
-        client = _mock_client([
-            ("DROP TABLE foo", []),
-            ("DELETE FROM foo", []),
-            (last_sql, []),
-        ])
-        validator = _mock_validator([
-            "DROP not allowed.",
-            "DELETE not allowed.",
-            "INSERT not allowed.",
-        ])
+        client = _mock_client(
+            [
+                ("DROP TABLE foo", []),
+                ("DELETE FROM foo", []),
+                (last_sql, []),
+            ]
+        )
+        validator = _mock_validator(
+            [
+                "DROP not allowed.",
+                "DELETE not allowed.",
+                "INSERT not allowed.",
+            ]
+        )
 
         with pytest.raises(SQLGenerationError) as exc_info:
             _generator(client, validator).generate(QUESTION, SYSTEM)
@@ -373,9 +401,7 @@ class TestClaudeApiFailure:
         """SQLGenerationError from ClaudeClient (e.g. exhausted retries) must
         propagate immediately without being wrapped or swallowed."""
         client = MagicMock()
-        client.generate_sql.side_effect = SQLGenerationError(
-            "API unavailable after 3 retries."
-        )
+        client.generate_sql.side_effect = SQLGenerationError("API unavailable after 3 retries.")
         validator = _mock_validator([])
 
         with pytest.raises(SQLGenerationError, match="API unavailable"):

@@ -185,9 +185,9 @@ class TestInsightGeneratorNormalResult:
         markdown = call_args[1].get("result_markdown") or call_args[0][2]
         # Count data rows in markdown (lines that start with '|' and contain values, not header/sep)
         data_lines = [
-            line for line in markdown.splitlines()
-            if line.startswith("|") and "---" not in line
-            and "country" not in line  # skip header
+            line
+            for line in markdown.splitlines()
+            if line.startswith("|") and "---" not in line and "country" not in line  # skip header
         ]
         assert len(data_lines) <= _INSIGHT_SAMPLE_ROWS
 

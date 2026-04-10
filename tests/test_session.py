@@ -174,7 +174,9 @@ class TestSessionStoreAppendTurn:
     def test_append_turn_context_summary_updates(self) -> None:
         store = SessionStore()
         session_id = store.create()
-        store.append_turn(session_id, _turn(question="Revenue by country?", insight="Germany leads."))
+        store.append_turn(
+            session_id, _turn(question="Revenue by country?", insight="Germany leads.")
+        )
         conv = store.get(session_id)
         assert conv is not None
         summary = conv.context_summary()

@@ -31,15 +31,17 @@ logger = logging.getLogger(__name__)
 # anchors so column names like 'last_updated' or 'created_at' do not trigger
 # false positives ('_' is a word character in Python regex, so UPDATE does not
 # match inside LAST_UPDATED or UPDATE_AT).
-_FORBIDDEN_KEYWORDS: Final[frozenset[str]] = frozenset({
-    "DROP",
-    "DELETE",
-    "INSERT",
-    "UPDATE",
-    "CREATE",
-    "ALTER",
-    "TRUNCATE",
-})
+_FORBIDDEN_KEYWORDS: Final[frozenset[str]] = frozenset(
+    {
+        "DROP",
+        "DELETE",
+        "INSERT",
+        "UPDATE",
+        "CREATE",
+        "ALTER",
+        "TRUNCATE",
+    }
+)
 
 # Matches "database"."table" in Athena double-quoted identifier style.
 # Captures the database name in group 1.
@@ -188,7 +190,7 @@ class SQLValidator:
                     reason=(
                         f"Database '{db}' is not allowed. "
                         f"Only '{self._gold_database}' may be queried. "
-                        f'Use unqualified table names or prefix with '
+                        f"Use unqualified table names or prefix with "
                         f'"{self._gold_database}"."table_name".'
                     ),
                 )
@@ -219,9 +221,7 @@ class SQLValidator:
 
         existing = int(match.group(1))
         if existing > self._max_rows:
-            logger.debug(
-                "LIMIT %d exceeds max_rows %d; capping.", existing, self._max_rows
-            )
+            logger.debug("LIMIT %d exceeds max_rows %d; capping.", existing, self._max_rows)
             return _TRAILING_LIMIT_RE.sub(f"LIMIT {self._max_rows}", sql)
 
         return sql

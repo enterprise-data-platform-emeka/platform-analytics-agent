@@ -62,21 +62,25 @@ SQL = "SELECT country, total_revenue FROM revenue_by_country ORDER BY total_reve
 class TestS3KeyFormat:
     def test_key_starts_with_audit_prefix(self) -> None:
         from agent.audit import AuditLogger
+
         key = AuditLogger._s3_key("exec-123", "2026-04-09T14:23:01+00:00")
         assert key.startswith(_AUDIT_PREFIX)
 
     def test_key_contains_year_month_day(self) -> None:
         from agent.audit import AuditLogger
+
         key = AuditLogger._s3_key("exec-123", "2026-04-09T14:23:01+00:00")
         assert "2026/04/09" in key
 
     def test_key_ends_with_execution_id_json(self) -> None:
         from agent.audit import AuditLogger
+
         key = AuditLogger._s3_key("my-exec-id", "2026-04-09T14:23:01+00:00")
         assert key.endswith("my-exec-id.json")
 
     def test_key_full_format(self) -> None:
         from agent.audit import AuditLogger
+
         key = AuditLogger._s3_key("exec-xyz", "2026-04-09T00:00:00+00:00")
         assert key == f"{_AUDIT_PREFIX}/2026/04/09/exec-xyz.json"
 
@@ -178,6 +182,7 @@ class TestS3PutObjectCall:
         call_kwargs = mock_s3.put_object.call_args[1]
         # Key must contain at least one date segment (YYYY/MM/DD pattern)
         import re
+
         assert re.search(r"\d{4}/\d{2}/\d{2}", call_kwargs["Key"])
 
 

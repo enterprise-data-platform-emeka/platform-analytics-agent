@@ -33,11 +33,28 @@ class JSONFormatter(logging.Formatter):
 
         # Include any extra fields passed via logger.info("msg", extra={...})
         standard_attrs = {
-            "args", "created", "exc_info", "exc_text", "filename",
-            "funcName", "levelname", "levelno", "lineno", "message",
-            "module", "msecs", "msg", "name", "pathname", "process",
-            "processName", "relativeCreated", "stack_info", "thread",
-            "threadName", "taskName",
+            "args",
+            "created",
+            "exc_info",
+            "exc_text",
+            "filename",
+            "funcName",
+            "levelname",
+            "levelno",
+            "lineno",
+            "message",
+            "module",
+            "msecs",
+            "msg",
+            "name",
+            "pathname",
+            "process",
+            "processName",
+            "relativeCreated",
+            "stack_info",
+            "thread",
+            "threadName",
+            "taskName",
         }
         for key, value in record.__dict__.items():
             if key not in standard_attrs:

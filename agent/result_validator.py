@@ -34,12 +34,14 @@ from agent.executor import QueryResult
 logger = logging.getLogger(__name__)
 
 # Column name substrings that indicate a monetary/value column.
-_REVENUE_COLUMN_HINTS: frozenset[str] = frozenset({
-    "revenue",
-    "amount",
-    "value",
-    "price",
-})
+_REVENUE_COLUMN_HINTS: frozenset[str] = frozenset(
+    {
+        "revenue",
+        "amount",
+        "value",
+        "price",
+    }
+)
 
 # Null rate above this threshold triggers a flag (0.0 – 1.0 scale).
 _HIGH_NULL_THRESHOLD: float = 0.50
@@ -151,9 +153,7 @@ def _check_high_null_rate(result: QueryResult, report: ValidationReport) -> None
         return
 
     for col in result.columns:
-        null_count = sum(
-            1 for row in result.rows if not row.get(col, "").strip()
-        )
+        null_count = sum(1 for row in result.rows if not row.get(col, "").strip())
         null_rate = null_count / total_rows
         if null_rate > _HIGH_NULL_THRESHOLD:
             report.flags.append(

@@ -160,16 +160,12 @@ class AthenaExecutor:
                     "Database": self._config.glue_gold_database,
                 },
                 ResultConfiguration={
-                    "OutputLocation": (
-                        f"s3://{self._config.athena_results_bucket}/query-results/"
-                    ),
+                    "OutputLocation": (f"s3://{self._config.athena_results_bucket}/query-results/"),
                 },
                 WorkGroup=self._config.athena_workgroup,
             )
         except ClientError as exc:
-            raise ExecutionError(
-                f"Failed to start Athena query: {exc}"
-            ) from exc
+            raise ExecutionError(f"Failed to start Athena query: {exc}") from exc
 
         return str(response["QueryExecutionId"])
 
@@ -193,21 +189,15 @@ class AthenaExecutor:
                 )
 
             try:
-                response = self._athena.get_query_execution(
-                    QueryExecutionId=execution_id
-                )
+                response = self._athena.get_query_execution(QueryExecutionId=execution_id)
             except ClientError as exc:
                 # Throttling during polling is transient. Sleep and retry.
                 code = exc.response["Error"]["Code"]
                 if code == "ThrottlingException":
-                    logger.debug(
-                        "Throttled polling query %s; backing off.", execution_id
-                    )
+                    logger.debug("Throttled polling query %s; backing off.", execution_id)
                     time.sleep(_SLOW_POLL_INTERVAL)
                     continue
-                raise ExecutionError(
-                    f"Error polling Athena query {execution_id}: {exc}"
-                ) from exc
+                raise ExecutionError(f"Error polling Athena query {execution_id}: {exc}") from exc
 
             execution = response["QueryExecution"]
             state = execution["Status"]["State"]
@@ -215,9 +205,7 @@ class AthenaExecutor:
             if state not in _TERMINAL_STATES:
                 poll_number += 1
                 interval = (
-                    _FAST_POLL_INTERVAL
-                    if poll_number <= _FAST_POLL_COUNT
-                    else _SLOW_POLL_INTERVAL
+                    _FAST_POLL_INTERVAL if poll_number <= _FAST_POLL_COUNT else _SLOW_POLL_INTERVAL
                 )
                 logger.debug(
                     "Query %s state: %s (poll %d, %.1fs elapsed)",
@@ -233,12 +221,8 @@ class AthenaExecutor:
                 return dict(execution.get("Statistics", {}))
 
             # FAILED or CANCELLED
-            reason = (
-                execution["Status"].get("StateChangeReason", "no reason provided")
-            )
-            raise ExecutionError(
-                f"Athena query {execution_id} {state.lower()}: {reason}"
-            )
+            reason = execution["Status"].get("StateChangeReason", "no reason provided")
+            raise ExecutionError(f"Athena query {execution_id} {state.lower()}: {reason}")
 
     def _cancel(self, execution_id: str) -> None:
         """Best-effort query cancellation. Logs but does not raise on failure."""
@@ -246,9 +230,7 @@ class AthenaExecutor:
             self._athena.stop_query_execution(QueryExecutionId=execution_id)
             logger.info("Cancelled timed-out query %s.", execution_id)
         except ClientError as exc:
-            logger.warning(
-                "Could not cancel query %s: %s", execution_id, exc
-            )
+            logger.warning("Could not cancel query %s: %s", execution_id, exc)
 
     def _fetch_results(self, execution_id: str) -> tuple[list[str], list[dict[str, str]]]:
         """Paginate through GetQueryResults and return (columns, rows).
@@ -271,8 +253,7 @@ class AthenaExecutor:
 
                 if first_page:
                     columns = [
-                        col["Label"]
-                        for col in result_set["ResultSetMetadata"]["ColumnInfo"]
+                        col["Label"] for col in result_set["ResultSetMetadata"]["ColumnInfo"]
                     ]
                     first_page = False
 
