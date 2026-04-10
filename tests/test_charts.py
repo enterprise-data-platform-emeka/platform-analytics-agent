@@ -2,12 +2,9 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-from agent.charts import ChartGenerator, ChartOutput, _CHARTS_PREFIX, _PRESIGNED_URL_EXPIRY
+from agent.charts import _CHARTS_PREFIX, _PRESIGNED_URL_EXPIRY, ChartGenerator, ChartOutput
 from agent.config import AWSConfig
 from agent.executor import QueryResult
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 

@@ -5,7 +5,6 @@ Integration test fixtures (marked @pytest.mark.integration) use
 real AWS credentials and require deployed dev infrastructure.
 """
 
-import os
 
 import pytest
 

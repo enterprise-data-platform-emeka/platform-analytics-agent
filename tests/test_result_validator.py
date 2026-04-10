@@ -1,14 +1,11 @@
 """Tests for result_validator.py."""
 
-import pytest
 
 from agent.executor import QueryResult
 from agent.result_validator import (
     ValidationReport,
-    _HIGH_NULL_THRESHOLD,
     validate,
 )
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 

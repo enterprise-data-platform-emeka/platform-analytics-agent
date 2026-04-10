@@ -4,7 +4,7 @@ All Athena boto3 calls are mocked — no real AWS calls.
 """
 
 from typing import Any
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError

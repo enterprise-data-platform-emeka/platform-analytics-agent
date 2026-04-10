@@ -2,10 +2,7 @@
 
 import time
 
-import pytest
-
 from agent.session import Conversation, SessionStore, Turn
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 

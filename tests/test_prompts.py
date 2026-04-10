@@ -6,8 +6,8 @@ expected conversation structure for SQL generation and insight generation.
 """
 
 from agent.prompts import (
-    GOLD_TABLE_CATALOG,
     GET_SCHEMA_TOOL,
+    GOLD_TABLE_CATALOG,
     build_insight_messages,
     build_sql_correction_messages,
     build_sql_request_messages,

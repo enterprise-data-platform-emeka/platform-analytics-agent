@@ -9,9 +9,9 @@ from agent.exceptions import (
     ExecutionError,
     InsightGenerationError,
     ResultValidationError,
+    SchemaResolutionError,
     SQLGenerationError,
     SQLValidationError,
-    SchemaResolutionError,
 )
 
 

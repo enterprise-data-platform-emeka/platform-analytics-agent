@@ -1,5 +1,7 @@
 """Tests for Config.from_env()."""
 
+import dataclasses
+
 import pytest
 
 from agent.config import Config
@@ -50,7 +52,7 @@ def test_config_repr_does_not_expose_bucket_names(agent_env_vars: None) -> None:
 
 def test_config_is_frozen(agent_env_vars: None) -> None:
     config = Config.from_env()
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         config.aws = config.aws  # type: ignore[misc]
 
 

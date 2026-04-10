@@ -2,12 +2,9 @@
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from agent.executor import QueryResult
-from agent.insight import InsightGenerator, InsightResponse, _INSIGHT_SAMPLE_ROWS
+from agent.insight import _INSIGHT_SAMPLE_ROWS, InsightGenerator, InsightResponse
 from agent.result_validator import ValidationReport
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 

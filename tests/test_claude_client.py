@@ -11,8 +11,8 @@ from unittest.mock import MagicMock, patch
 import anthropic
 import pytest
 
-from agent.claude_client import ClaudeClient, MODEL
-from agent.config import AWSConfig, AgentConfig, Config
+from agent.claude_client import MODEL, ClaudeClient
+from agent.config import AgentConfig, AWSConfig, Config
 from agent.exceptions import (
     ConfigurationError,
     InsightGenerationError,
@@ -110,7 +110,7 @@ class TestFetchApiKey:
             ssm.get_parameter.return_value = {"Parameter": {"Value": "sk-real-key"}}
             mock_boto.return_value = ssm
             with patch("agent.claude_client.anthropic.Anthropic"):
-                client = ClaudeClient(
+                ClaudeClient(
                     config=_config(),
                     schema_resolver=_schema_resolver(),
                 )

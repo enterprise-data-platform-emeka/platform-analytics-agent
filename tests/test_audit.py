@@ -3,13 +3,11 @@
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
 from botocore.exceptions import ClientError
 
-from agent.audit import AuditLogger, _AUDIT_PREFIX
+from agent.audit import _AUDIT_PREFIX, AuditLogger
 from agent.config import AWSConfig
 from agent.insight import InsightResponse
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 

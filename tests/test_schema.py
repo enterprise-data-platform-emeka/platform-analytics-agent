@@ -3,7 +3,7 @@
 import json
 from io import BytesIO
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from botocore.exceptions import ClientError
@@ -11,7 +11,6 @@ from botocore.exceptions import ClientError
 from agent.config import AWSConfig
 from agent.exceptions import SchemaResolutionError
 from agent.schema import ColumnSchema, SchemaResolver, TableSchema
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 

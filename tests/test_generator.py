@@ -5,13 +5,12 @@ calls, no AWS calls, no sqlparse parsing. The generator's job is purely
 to drive the correction loop, so we test the loop logic in isolation.
 """
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from agent.exceptions import SQLGenerationError, SQLValidationError
 from agent.generator import MAX_ATTEMPTS, GeneratedSQL, SQLGenerator
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -25,9 +24,7 @@ def _mock_client(
 ) -> MagicMock:
     """Build a ClaudeClient mock that returns (sql, assumptions) in sequence."""
     client = MagicMock()
-    client.generate_sql.side_effect = [
-        (sql, assumptions) for sql, assumptions in responses
-    ]
+    client.generate_sql.side_effect = list(responses)
     return client
 
 

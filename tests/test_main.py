@@ -9,7 +9,6 @@ from agent.exceptions import AgentError, ConfigurationError, SQLGenerationError
 from agent.insight import InsightResponse
 from agent.main import AgentSession, AskResult, _cli_main
 
-
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 
@@ -52,8 +51,8 @@ def _patch_session_deps(mock_ask_result: AskResult | None = None):
 
     Returns a list of patches that must be started and stopped by the caller.
     """
-    from agent.generator import GeneratedSQL
     from agent.executor import QueryResult
+    from agent.generator import GeneratedSQL
 
     generated_sql = GeneratedSQL(
         sql="SELECT country, total_revenue FROM revenue_by_country LIMIT 10",
@@ -181,8 +180,8 @@ class TestAgentSessionAsk:
             _stop_patches(patches)
 
     def test_ask_passes_question_to_generator(self) -> None:
-        from agent.generator import GeneratedSQL
         from agent.executor import QueryResult
+        from agent.generator import GeneratedSQL
 
         generated = GeneratedSQL(
             sql="SELECT country FROM revenue_by_country LIMIT 10",
@@ -228,8 +227,8 @@ class TestAgentSessionAsk:
             _stop_patches(patches)
 
     def test_ask_passes_sql_to_executor(self) -> None:
-        from agent.generator import GeneratedSQL
         from agent.executor import QueryResult
+        from agent.generator import GeneratedSQL
 
         expected_sql = "SELECT country FROM revenue_by_country LIMIT 10"
         generated = GeneratedSQL(sql=expected_sql, assumptions=[], attempts=1)
@@ -270,8 +269,8 @@ class TestAgentSessionAsk:
             _stop_patches(patches)
 
     def test_ask_calls_audit_write(self) -> None:
-        from agent.generator import GeneratedSQL
         from agent.executor import QueryResult
+        from agent.generator import GeneratedSQL
 
         generated = GeneratedSQL(sql="SELECT 1 LIMIT 1", assumptions=[], attempts=1)
         query_result = QueryResult(
