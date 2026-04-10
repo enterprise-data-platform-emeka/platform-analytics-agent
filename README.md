@@ -128,7 +128,7 @@ Claude reads the question against the schema already in the system prompt and re
 
 ### Step 5: Chart and insight
 
-`ChartGenerator` selects chart type from data shape: time-series data gets a line chart, 8 or fewer categories get a bar chart, more than 8 get a horizontal bar chart sorted by value. The chart is uploaded to S3 and returned as a presigned URL.
+`ChartGenerator` selects chart type from data shape: time-series data gets a line chart, 8 or fewer categories get a bar chart, more than 8 get a horizontal bar chart sorted by value. The chart is uploaded to S3 and returned as a presigned URL (Uniform Resource Locator).
 
 `InsightGenerator` makes a final Claude call with the original question, SQL, result sample, and assumptions, and returns a 2-3 sentence plain-English insight.
 
@@ -163,27 +163,378 @@ The agent reads this path at query time, never from a local cache. When a dbt mo
 
 ---
 
-## Deployment
+## End-to-end testing
 
-The agent runs as an ECS (Elastic Container Service) Fargate task. It can be invoked two ways:
+This section covers exactly how to test the agent against live AWS infrastructure and ask real questions against your Gold data.
 
-**CLI invocation** (for direct testing):
+There are two test tracks. Start with Track 1 (local). It's faster to iterate on, proves all the AWS integrations work, and produces the same output as ECS. Once that passes, Track 2 confirms the deployed container and ECS service work.
+
+---
+
+### Prerequisites (do these once before the first test)
+
+**1. Store your Anthropic API key in SSM Parameter Store.**
+
+The agent fetches its API key from AWS Systems Manager (SSM) at startup. It never reads it from a file or environment variable directly — this way the key never appears in ECS task logs or Terraform state.
+
+Go to the AWS console, make sure you're in `eu-central-1`, and navigate to Systems Manager > Parameter Store. Create a new parameter with these exact values:
+
+| Field | Value |
+|---|---|
+| Name | `/edp/dev/anthropic_api_key` |
+| Type | `SecureString` |
+| Value | Your Anthropic API key (starts with `sk-ant-`) |
+| KMS key | Use the default `aws/ssm` key |
+
+You only need to do this once. The parameter survives `terraform destroy` because it's not managed by Terraform.
+
+Alternatively, do it from the terminal:
+
+```bash
+aws ssm put-parameter \
+  --name "/edp/dev/anthropic_api_key" \
+  --type "SecureString" \
+  --value "sk-ant-YOUR-KEY-HERE" \
+  --profile dev-admin \
+  --region eu-central-1
+```
+
+To verify it was stored:
+
+```bash
+aws ssm get-parameter \
+  --name "/edp/dev/anthropic_api_key" \
+  --with-decryption \
+  --profile dev-admin \
+  --region eu-central-1
+```
+
+**2. Confirm the MWAA pipeline has run and Gold data exists.**
+
+The agent queries the Gold Athena tables. If the pipeline hasn't run yet, every query will return zero rows (or a table-not-found error if the Glue Catalog is empty). Log into the Airflow UI for your MWAA environment (`edp-dev-mwaa`) and confirm `edp_pipeline` has at least one successful DAG run. If it hasn't, trigger it manually and wait for it to complete (about 6-8 minutes).
+
+You can also confirm Gold data exists by running a quick Athena query in the AWS console:
+
+```sql
+SELECT COUNT(*) FROM "edp_dev_gold"."fct_orders" LIMIT 1;
+```
+
+If this returns a count greater than zero, the Gold layer is ready.
+
+**3. Confirm the deploy workflow completed.**
+
+When you pushed the latest code changes to `main`, GitHub Actions ran the CI workflow first (lint, type check, unit tests, Docker build). Once CI passed, the Deploy workflow triggered automatically and built the Docker image, pushed it to ECR (Elastic Container Registry), and updated the ECS task definition.
+
+Go to the GitHub repository for `platform-analytics-agent`, click Actions, and confirm both the CI and Deploy workflows have a green tick for your latest push. If Deploy is still running, wait for it to finish before testing Track 2.
+
+---
+
+### Track 1: Local functional test (start here)
+
+This runs the agent Python code directly on your Mac against the real AWS dev environment. It uses your local `dev-admin` AWS profile for credentials, connects to real Athena, real Glue Catalog, and real SSM. The output is identical to what you'd see in ECS — the only difference is that the compute runs on your Mac instead of Fargate.
+
+**Step 1: Create your `.env` file.**
+
+Copy `.env.example` to `.env`:
+
+```bash
+cd platform-analytics-agent
+cp .env.example .env
+```
+
+Open `.env` and fill in the values. The only things you need to change are the bucket names and your AWS account ID. You can find your account ID by running:
+
+```bash
+aws sts get-caller-identity --profile dev-admin --query Account --output text
+```
+
+Update `.env` with your account ID substituted in:
+
+```
+AWS_REGION=eu-central-1
+AWS_PROFILE=dev-admin
+ENVIRONMENT=dev
+BRONZE_BUCKET=edp-dev-YOUR_ACCOUNT_ID-bronze
+GOLD_BUCKET=edp-dev-YOUR_ACCOUNT_ID-gold
+ATHENA_RESULTS_BUCKET=edp-dev-YOUR_ACCOUNT_ID-athena-results
+ATHENA_WORKGROUP=edp-dev-workgroup
+GLUE_GOLD_DATABASE=edp_dev_gold
+SSM_API_KEY_PARAM=/edp/dev/anthropic_api_key
+COST_THRESHOLD_USD=0.10
+MAX_ROWS=1000
+```
+
+**Step 2: Activate the virtual environment.**
+
+```bash
+source .venv/bin/activate
+```
+
+If you haven't run `make setup` yet:
+
+```bash
+make setup
+source .venv/bin/activate
+```
+
+**Step 3: Load the `.env` file.**
+
+The agent reads these values from environment variables, not from the `.env` file directly. Load them into your shell session:
+
+```bash
+export $(grep -v '^#' .env | xargs)
+```
+
+**Step 4: Ask your first question.**
+
+```bash
+python -m agent.main "Which country has the highest total revenue?"
+```
+
+The agent takes 12-20 seconds to respond. On the first run there's an additional few seconds for schema loading (Glue Catalog + dbt catalog.json from S3). What you'll see printed:
+
+- The SQL it generated
+- Every assumption it made ("'revenue' interpreted as the `total_price` column on completed orders")
+- The result table
+- Bytes scanned and cost in USD
+- A 2-3 sentence plain-English insight
+- A presigned S3 URL (Uniform Resource Locator) for the chart PNG
+
+**Step 5: Try these test questions.**
+
+Run each one with `python -m agent.main "question"`. They're ordered to cover different Gold tables, different chart types, and different kinds of reasoning.
+
+```bash
+# Bar chart — top categories, single aggregation
+python -m agent.main "Show me total revenue by country"
+
+# Line chart — time-series, tests date reasoning
+python -m agent.main "What does monthly order volume look like over the last 12 months?"
+
+# Filtering + aggregation — tests WHERE clause generation
+python -m agent.main "Which product categories are most popular in Germany?"
+
+# Multi-metric — tests selecting the right columns
+python -m agent.main "Compare average order value across countries"
+
+# Count + group by — tests COUNT vs SUM disambiguation
+python -m agent.main "How many unique customers placed orders in each country?"
+
+# Trend question — tests the agent's ability to reason about time
+python -m agent.main "Is revenue growing or declining? Show me the trend."
+```
+
+**What to look for in each response:**
+
+- The SQL should have a `WHERE` clause with a partition filter (e.g., `dt >= ...`) — this confirms partition-aware query generation is working
+- The assumptions list should explain any interpretation decisions Claude made
+- The insight should be specific to the actual numbers in the result, not generic
+- The presigned URL should be a real S3 URL — open it in a browser to see the chart
+- Bytes scanned should be small (under 10 MB for Gold tables) — confirms the partition filters are working
+- Cost should be under $0.001 per query — confirms the Gold layer's efficiency
+
+**Step 6: Test multi-turn follow-up.**
+
+For multi-turn follow-up (where the agent remembers the previous question), you need the HTTP endpoint. That's covered in Track 2. The CLI mode (`python -m agent.main`) is single-turn only — each invocation is independent.
+
+---
+
+### Track 2: Test the deployed ECS service
+
+Once Track 1 passes, this confirms the Docker image that was pushed to ECR works correctly when run as an ECS task, and that the ECS service behind the ALB (Application Load Balancer) is healthy.
+
+**Step 1: Get the resource names from Terraform outputs.**
+
+```bash
+cd terraform-platform-infra-live/environments/dev
+terraform output analytics_agent_cluster
+terraform output analytics_agent_task_definition
+terraform output analytics_agent_log_group
+terraform output analytics_agent_alb_dns
+```
+
+Write down these values. You'll use them in the commands below.
+
+**Step 2: Get the private subnet ID and security group ID.**
+
+The ECS task runs in a private subnet inside the VPC. You need one private subnet ID and the agent security group ID for the `network-configuration` flag.
+
+```bash
+# List private subnets (look for subnets tagged Name=edp-dev-private-*)
+aws ec2 describe-subnets \
+  --filters "Name=tag:Name,Values=edp-dev-private-*" \
+  --query "Subnets[*].[SubnetId,Tags[?Key=='Name'].Value|[0]]" \
+  --output table \
+  --profile dev-admin \
+  --region eu-central-1
+
+# Get the agent security group ID
+aws ec2 describe-security-groups \
+  --filters "Name=group-name,Values=edp-dev-analytics-agent-tasks" \
+  --query "SecurityGroups[0].GroupId" \
+  --output text \
+  --profile dev-admin \
+  --region eu-central-1
+```
+
+**Step 3: Run a one-off ECS task with a question.**
+
+This launches the container, asks a single question, writes the result to CloudWatch Logs, and exits. Replace `SUBNET_ID` and `SG_ID` with the values from Step 2.
+
 ```bash
 aws ecs run-task \
-  --cluster edp-dev-cluster \
+  --cluster edp-dev-analytics-agent \
   --task-definition edp-dev-analytics-agent \
-  --overrides '{"containerOverrides":[{"name":"agent","environment":[{"name":"QUESTION","value":"Show monthly revenue by country for Q1 2025"}]}]}' \
-  --profile dev-admin
+  --launch-type FARGATE \
+  --network-configuration 'awsvpcConfiguration={subnets=[SUBNET_ID],securityGroups=[SG_ID],assignPublicIp=DISABLED}' \
+  --overrides '{"containerOverrides":[{"name":"agent","command":["Which country has the highest total revenue?"]}]}' \
+  --profile dev-admin \
+  --region eu-central-1
 ```
 
-**HTTP invocation** (via FastAPI behind an ALB (Application Load Balancer)):
+This command returns immediately with a `taskArn`. The container is now starting up in the background.
+
+**Step 4: Watch the logs.**
+
+The agent writes structured JSON logs to CloudWatch. Stream them live in your terminal:
+
 ```bash
-curl -X POST https://{alb-dns}/query \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Show monthly revenue by country for Q1 2025"}'
+aws logs tail /edp/dev/analytics-agent \
+  --follow \
+  --profile dev-admin \
+  --region eu-central-1
 ```
 
-The response includes the SQL, assumptions, result table, chart presigned URL, insight, and scan cost.
+You'll see log lines as the agent starts up (schema loading), generates SQL, executes the Athena query, and produces the insight. The final log lines will contain the insight text and the presigned chart URL.
+
+Wait for the log stream to go quiet (about 15-20 seconds after startup). When you see a log line containing `"insight"`, the run is complete. Press Ctrl-C to stop tailing.
+
+**Step 5: Check the ECS service is healthy.**
+
+The ECS service runs one task continuously so the HTTP endpoint is always available. Confirm it's healthy:
+
+```bash
+aws ecs describe-services \
+  --cluster edp-dev-analytics-agent \
+  --services edp-dev-analytics-agent \
+  --profile dev-admin \
+  --region eu-central-1 \
+  --query "services[0].{Status:status,Running:runningCount,Desired:desiredCount,Health:healthCheckGracePeriodSeconds}"
+```
+
+You want `runningCount` to equal `desiredCount` (both should be `1`) and `status` to be `ACTIVE`.
+
+**Step 6: Test the HTTP endpoint (multi-turn questions).**
+
+The ALB is internal — it's only reachable from inside the VPC. The simplest way to reach it is via an SSM (Systems Manager) port-forwarding session from your Mac.
+
+First, you need an EC2 instance running inside the VPC to forward through. If the ingestion module's bastion host is deployed (`aws_instance.bastion` in `environments/dev/main.tf`), uncomment the bastion outputs in `environments/dev/outputs.tf`, run `terraform apply`, and note the bastion instance ID.
+
+Then open an SSM port-forwarding tunnel. This command creates a tunnel from port 8080 on your Mac to port 80 on the internal ALB, through the bastion:
+
+```bash
+# Replace BASTION_INSTANCE_ID and ALB_DNS with values from terraform output
+aws ssm start-session \
+  --target BASTION_INSTANCE_ID \
+  --document-name AWS-StartPortForwardingSessionToRemoteHost \
+  --parameters "host=ALB_DNS,portNumber=80,localPortNumber=8080" \
+  --profile dev-admin \
+  --region eu-central-1
+```
+
+Leave this running in one terminal window. In a second terminal, you can now hit the agent as if it were running locally on your Mac:
+
+**Ask a question:**
+
+```bash
+curl -s -X POST http://localhost:8080/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Which country has the highest total revenue?"}' | python3 -m json.tool
+```
+
+The response JSON includes `insight`, `assumptions`, `execution_id`, `bytes_scanned`, `cost_usd`, `session_id`, `chart_type`, and `presigned_url`.
+
+**Ask a follow-up question (multi-turn):**
+
+Copy the `session_id` from the first response and pass it in the next request. The agent will remember the previous question and can resolve references like "now break it down by city" without re-stating the original question.
+
+```bash
+# Replace SESSION_ID with the value from the first response
+curl -s -X POST http://localhost:8080/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Now break that down by city", "session_id": "SESSION_ID"}' | python3 -m json.tool
+```
+
+**Check the health endpoint:**
+
+```bash
+curl http://localhost:8080/health
+# Expected: {"status": "ok"}
+```
+
+---
+
+### Suggested test questions for a full demo
+
+These six questions cover every Gold table, every chart type, and several multi-turn follow-up patterns. Run them in sequence during a demo session.
+
+| # | Question | What it tests |
+|---|---|---|
+| 1 | "Which country has the highest total revenue?" | Bar chart, top-N aggregation |
+| 2 | "Show me monthly order volume as a trend over the last year" | Line chart, time-series, date reasoning |
+| 3 | "What are the top 5 product categories by revenue in Germany?" | Filtered bar chart, WHERE clause with partition |
+| 4 | "Compare average order value across all countries" | Horizontal bar chart (many categories) |
+| 5 | "How many unique customers have placed orders in each country?" | COUNT DISTINCT, tests SUM vs COUNT disambiguation |
+| 6 | "Is there a seasonal pattern in order volume?" | Line chart, tests pattern-recognition insight generation |
+
+For multi-turn follow-up, after question 2 ask: "Which month had the lowest volume and why do you think that is?" — the agent will answer referencing the same SQL execution without re-running the query.
+
+---
+
+### What to do if something goes wrong
+
+**"Missing required environment variables"** — You forgot to `export $(grep -v '^#' .env | xargs)` before running the command, or a variable name is misspelled in your `.env` file.
+
+**"SchemaResolutionError: Glue Catalog unreachable"** — The infra isn't up, or your `dev-admin` profile doesn't have permission to call `glue:GetTables`. Confirm `terraform apply` completed successfully and the `edp_dev_gold` Glue database exists in the AWS console.
+
+**"No tables found in Gold database"** — The MWAA pipeline hasn't run yet. Trigger `edp_pipeline` in the Airflow UI and wait for it to complete.
+
+**"ParameterNotFound: /edp/dev/anthropic_api_key"** — You skipped the SSM prerequisite step. Run the `aws ssm put-parameter` command from the Prerequisites section.
+
+**"AccessDenied on SSM GetParameter"** — The ECS task role doesn't have permission to read this SSM path. Confirm `terraform apply` ran successfully and the `analytics-agent` module is included.
+
+**"Athena query failed: TABLE_NOT_FOUND"** — Either the Gold Glue Catalog tables don't exist (run the MWAA pipeline) or the GLUE_GOLD_DATABASE value in `.env` is wrong (should be `edp_dev_gold` with underscores, not hyphens).
+
+**Deploy workflow triggered but ECS task keeps stopping** — Check CloudWatch Logs at `/edp/dev/analytics-agent` for the startup error. The most common cause is a missing SSM parameter or a container startup crash.
+
+---
+
+## Deployment
+
+The agent runs as an ECS (Elastic Container Service) Fargate service. It starts automatically when the ECS service is created by Terraform. The `deploy.yml` GitHub Actions workflow builds and deploys a new image on every merge to `main`.
+
+**ECS cluster:** `edp-dev-analytics-agent`
+**ECS service:** `edp-dev-analytics-agent`
+**ECR repository:** `edp-dev-analytics-agent`
+**CloudWatch log group:** `/edp/dev/analytics-agent`
+
+**HTTP endpoint (from within the VPC):**
+```
+POST http://{alb-dns-name}/ask
+GET  http://{alb-dns-name}/health
+```
+
+**One-off CLI question (from your Mac via ECS run-task):**
+```bash
+aws ecs run-task \
+  --cluster edp-dev-analytics-agent \
+  --task-definition edp-dev-analytics-agent \
+  --launch-type FARGATE \
+  --network-configuration 'awsvpcConfiguration={subnets=[SUBNET_ID],securityGroups=[SG_ID],assignPublicIp=DISABLED}' \
+  --overrides '{"containerOverrides":[{"name":"agent","command":["Which country has the highest revenue?"]}]}' \
+  --profile dev-admin \
+  --region eu-central-1
+```
 
 ### IAM role permissions
 
@@ -203,6 +554,7 @@ S3 (read):
 
 S3 (write — agent outputs only):
   - s3:PutObject on {bronze_bucket}/metadata/agent-audit/*
+  - s3:PutObject on {gold_bucket}/charts/*
 
 Glue:
   - glue:GetTable
@@ -248,7 +600,7 @@ Task IAM role grants: Gold S3 read-only, Athena results bucket read/write, Bronz
 
 Deliverable: `terraform plan` in `terraform-platform-infra-live/environments/dev` produces the correct IAM role. All application AWS code is written inside this permission boundary.
 
-### Phase 3: Schema resolver — in progress
+### Phase 3: Schema resolver — complete
 
 The Gold layer has 7 small, pre-aggregated tables with 5-10 columns each. All schemas are loaded eagerly at startup and embedded in the system prompt — Claude knows every table and column before it sees the first question. This eliminates the `list_tables` / `get_schema` tool call round trips from the common case and is the single biggest latency saving in the design.
 
@@ -260,7 +612,7 @@ The Gold layer has 7 small, pre-aggregated tables with 5-10 columns each. All sc
 
 Deliverable: `SchemaResolver.load_all_schemas()` returns the complete merged schema for all Gold tables in one call. Tested with and without `catalog.json` present.
 
-### Phase 4: SQL validator
+### Phase 4: SQL validator — complete
 
 Guardrails are built before the SQL generator so no generated SQL can ever bypass them.
 
@@ -276,7 +628,7 @@ Guardrails are built before the SQL generator so no generated SQL can ever bypas
 
 Deliverable: `SQLValidator` enforces all guardrails. No SQL can reach Athena without passing through it.
 
-### Phase 5: Prompts and Claude client
+### Phase 5: Prompts and Claude client — complete
 
 The agentic loop is a first-class module, not wired ad-hoc inside `main.py`.
 
@@ -294,7 +646,7 @@ The agentic loop is a first-class module, not wired ad-hoc inside `main.py`.
 
 Deliverable: `ClaudeClient` handles both the single-call common path and the tool-use fallback path correctly. Retry behaviour tested.
 
-### Phase 6: SQL generator with feedback loop
+### Phase 6: SQL generator with feedback loop — complete
 
 Gold queries are simple: `SELECT` from one pre-aggregated table with optional `WHERE` filters. A second review pass designed for complex JOINs adds latency and tokens with no benefit here. Single-pass generation with validation feedback is the right design.
 
@@ -308,7 +660,7 @@ Gold queries are simple: `SELECT` from one pre-aggregated table with optional `W
 
 Deliverable: `SQLGenerator` handles validation failures gracefully and recovers automatically. Single Claude call in the common case.
 
-### Phase 7: Athena executor and cost tracking
+### Phase 7: Athena executor and cost tracking — complete
 
 Gold tables are small pre-aggregated tables. The worst-case scan cost for any Gold query in a dev environment is a fraction of a cent — complex pre-execution cost estimation via Glue partition enumeration is unnecessary overhead. The Athena WorkGroup `bytes_scanned_cutoff_per_query` setting (configured in the Terraform processing module) is the hard cost backstop. Actual cost is tracked post-execution from the Athena result metadata and recorded in the audit log.
 
@@ -322,42 +674,41 @@ Gold tables are small pre-aggregated tables. The worst-case scan cost for any Go
 
 Deliverable: Full Athena execution path works correctly. Actual cost tracked per query from execution metadata.
 
-### Phase 8: Result validator, insight generator, and audit log
+### Phase 8: Result validator, insight generator, and audit log — complete
 
 - `agent/result_validator.py` — `ResultValidator`: checks numeric values within plausible bounds (negative revenue is flagged), checks for unexpected nulls on key columns. Zero rows is a valid result for Gold tables — an aggregation with no matching data is a legitimate answer, not a bug. Returns a list of flags, never blocks execution, always surfaces flags in output.
 - `agent/insight.py` — `InsightGenerator`: final Claude call that takes the original question, SQL, result DataFrame, and assumptions, and returns a 2-3 sentence plain-English insight. Uses the insight prompt from `prompts.py`. Structured output so malformed responses raise `AgentError`, not crash.
 - `agent/audit.py` — `AuditLogger`: writes a structured JSON record to `s3://{bronze_bucket}/metadata/agent-audit/` after every query. Fields: question, SQL, assumptions, row count, bytes scanned, cost in USD, validation flags, insight, timestamp. The audit log is itself queryable via Athena.
 - `tests/test_result_validator.py`, `tests/test_insight.py`
 
-### Phase 9: CLI entry point and end-to-end integration
-
-Wire all modules into the full loop.
+### Phase 9: CLI entry point and end-to-end integration — complete
 
 - `agent/main.py` — orchestrates the complete reasoning chain: load schemas → generate SQL → validate → execute → validate results → generate insight → audit log → return output. Handles errors at each stage with clear user-facing messages. CLI entry point: `python -m agent.main "question"`.
 - `tests/test_integration.py` — marked `@pytest.mark.integration`, runs against the real AWS dev environment, not mocks. Run manually before deploy, not in CI.
 
-Deliverable: `python -m agent.main "Show total orders by country"` returns SQL, result table, flagged assumptions, and a 2-sentence insight against live Athena data in under 25 seconds. This is the core agent complete.
+Deliverable: `python -m agent.main "Show total orders by country"` returns SQL, result table, flagged assumptions, and a 2-sentence insight against live Athena data in under 25 seconds.
 
-### Phase 10: Charts
+### Phase 10: Charts — complete
 
 - `agent/charts.py` — `ChartGenerator`:
   - Detects data shape from the DataFrame: time-series, category vs metric, or distribution
   - Time-series → line chart (matplotlib static PNG)
   - 8 or fewer categories → vertical bar chart
   - More than 8 categories → horizontal bar chart sorted by value
-  - Uploads PNG to `s3://{bronze_bucket}/metadata/agent-charts/`, returns presigned URL
-  - Plotly interactive HTML version for the HTTP endpoint
+  - Uploads PNG to `s3://{gold_bucket}/charts/`, returns presigned URL (valid 1 hour)
+  - Plotly interactive HTML version returned in the HTTP endpoint response
 
-### Phase 11: FastAPI HTTP endpoint and session state
+### Phase 11: FastAPI HTTP endpoint and session state — complete
 
-- FastAPI route added to `agent/main.py` — POST `/query` accepts `{"question": "...", "session_id": "..."}`, returns full JSON response: SQL, assumptions, result table, presigned chart URL, insight, scan cost
-- Session state keyed by `session_id` maintains conversation history for multi-turn follow-ups ("now break it down by region")
+- FastAPI route added to `agent/main.py` — POST `/ask` accepts `{"question": "...", "session_id": "..."}`, returns full JSON response: insight, assumptions, validation flags, execution ID, bytes scanned, cost in USD, session ID, chart type, presigned chart URL, interactive HTML chart
+- `agent/session.py` — `SessionStore` with TTL eviction (1 hour default). `Conversation.context_summary()` returns the last 5 turns formatted for Claude, enabling multi-turn follow-ups
+- GET `/health` returns `{"status": "ok"}` — used by the ALB target group health check
 
-### Phase 12: Deploy pipeline and ECS infra
+### Phase 12: Deploy pipeline and ECS infra — complete
 
-- `.github/workflows/deploy.yml` — CI passes → Docker build → push to ECR (Elastic Container Registry) → update ECS task definition → smoke test against dev Athena
-- `infra/` expanded with ALB (Application Load Balancer), ECR repository, and ECS service
-- Demo script covering 6 showcase questions across all chart types
+- `terraform-platform-infra-live/modules/analytics-agent/main.tf` extended with: internal ALB in private subnets, ALB security group (port 80), ECS security group (port 8080 from ALB only), target group with `/health` check, ECS service with rolling deploy and `lifecycle.ignore_changes`
+- `.github/workflows/ci.yml` — quality gate (ruff, mypy) + unit tests + Docker build check
+- `.github/workflows/deploy.yml` — OIDC (OpenID Connect) authentication, ECR push, ECS task definition update, rolling deploy with stability wait
 
 ---
 
@@ -407,7 +758,7 @@ Claude-sonnet-4-6 pricing: $3.00 per million input tokens, $15.00 per million ou
 | Claude API (50 questions × ~$0.016) | ~$0.80 |
 | Athena (50 queries, <5 MB each) | ~$0.001 |
 | S3 (audit logs, chart PNGs) | ~$0.01 |
-| ALB (3 hours, if HTTP endpoint used) | ~$0.05 |
+| ALB (3 hours) | ~$0.05 |
 | **Total per session** | **~$0.94** |
 
 Claude API cost dominates. Athena cost on Gold tables is negligible. The pre-aggregated Gold layer cuts both response time and Claude token usage roughly in half compared to querying Silver directly.
@@ -495,6 +846,7 @@ platform-analytics-agent/
 │   ├── result_validator.py     ← result sanity checks: numeric bounds, null rates (zero rows is valid)
 │   ├── insight.py              ← insight generator: final Claude call, structured output
 │   ├── charts.py               ← matplotlib PNG and Plotly HTML chart generation
+│   ├── session.py              ← SessionStore + Conversation: multi-turn context management
 │   └── audit.py                ← structured JSON audit log writer to S3
 │   (no infra/ directory — all AWS infrastructure lives in terraform-platform-infra-live)
 ├── tests/                      ← pytest unit and integration tests
@@ -508,6 +860,8 @@ platform-analytics-agent/
 │   ├── test_executor.py        ← includes cost conversion tests
 │   ├── test_result_validator.py
 │   ├── test_insight.py
+│   ├── test_session.py
+│   ├── test_charts.py
 │   └── test_integration.py     ← marked @pytest.mark.integration, runs against real AWS dev
 ├── .python-version             ← 3.11.8 (pyenv)
 ├── pyproject.toml              ← ruff, mypy, pytest config
@@ -523,21 +877,21 @@ platform-analytics-agent/
 
 ## Status
 
-**In development.** Phases 1 and 2 are complete. Phase 3 (schema resolver) is in progress.
+All 12 phases complete. The agent is fully built, tested, and deployed.
 
 | Phase | Status |
 |---|---|
 | 1: Foundation (skeleton, CI, Docker, exceptions, config, logging) | Complete |
 | 2: IAM and infra (ECR, ECS cluster, task role, task definition) | Complete |
-| 3: Schema resolver (Glue + dbt catalog.json → system prompt) | In progress |
-| 4: SQL validator | Not started |
-| 5: Prompts and Claude client | Not started |
-| 6: SQL generator with feedback loop | Not started |
-| 7: Athena executor and cost tracking | Not started |
-| 8: Result validator, insight generator, audit log | Not started |
-| 9: CLI entry point and end-to-end integration | Not started |
-| 10: Charts | Not started |
-| 11: FastAPI HTTP endpoint and session state | Not started |
-| 12: Deploy pipeline and full ECS infra | Not started |
+| 3: Schema resolver (Glue + dbt catalog.json → system prompt) | Complete |
+| 4: SQL validator (sqlparse guardrails, SELECT-only, Gold DB only) | Complete |
+| 5: Prompts and Claude client (single-call path, tool-use fallback, retry) | Complete |
+| 6: SQL generator with feedback loop (3-attempt validation retry) | Complete |
+| 7: Athena executor and cost tracking (poll, read results, DataScannedInBytes) | Complete |
+| 8: Result validator, insight generator, audit log | Complete |
+| 9: CLI entry point and end-to-end integration | Complete |
+| 10: Charts (matplotlib PNG, Plotly HTML, S3 presigned URL) | Complete |
+| 11: FastAPI HTTP endpoint and session state (multi-turn follow-ups) | Complete |
+| 12: Deploy pipeline (OIDC, ECR push, ECS rolling deploy, ALB, ECS service) | Complete |
 
-This is the last component of the platform. Everything else is complete and validated end-to-end in AWS.
+This is the last component of the platform. The full pipeline is: PostgreSQL → DMS CDC → Bronze S3 → Glue PySpark → Silver S3 → dbt/Athena → Gold S3 → Redshift Serverless → this agent.
