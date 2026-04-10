@@ -4,6 +4,9 @@ name: CI
 # Skips when only README or docs files changed.
 # Integration tests are excluded — they require live AWS credentials
 # and are run manually before deploy.
+#
+# Deploys are handled by deploy.yml, triggered automatically after this
+# workflow passes on main.
 
 on:
   push:

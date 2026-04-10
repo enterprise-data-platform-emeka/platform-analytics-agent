@@ -1,0 +1,146 @@
+name: Deploy
+
+# Deploys the Analytics Agent to ECS Fargate (dev).
+#
+# What "deploy" means here:
+#   1. Build the Docker image and push it to ECR with a sha-{git_sha} tag
+#      and update the :latest tag.
+#   2. Register a new ECS task definition revision with the new image.
+#   3. Update the ECS service to roll out the new revision.
+#      Wait for service stability (new task healthy, old task stopped).
+#
+# AWS authentication uses OIDC (OpenID Connect), no long-lived access keys
+# are stored in GitHub secrets. The OIDC provider and IAM role are created
+# once in terraform-bootstrap and are never torn down with the rest of the
+# platform infrastructure.
+#
+# Prerequisites (must be done once before the first deploy):
+#   1. Run terraform apply in terraform-bootstrap — creates the OIDC provider
+#      and edp-{env}-github-actions-role for all environments.
+#   2. Run terraform apply in terraform-platform-infra-live — creates the ECS
+#      cluster, ECR repository, ALB, and ECS service for the analytics agent.
+#   3. Run terraform apply in terraform-github-setup — creates the dev/staging/prod
+#      GitHub Environments and sets the AWS_ACCOUNT_ID repository variable.
+#
+# Required GitHub configuration:
+#   Repository variable (Settings -> Secrets and variables -> Actions -> Variables):
+#     AWS_ACCOUNT_ID: 12-digit AWS account ID (not a secret, appears in S3 names)
+#   Environments: dev, staging, prod (created by terraform-github-setup)
+#
+# Triggers:
+#   - workflow_run (CI passes on main) -> auto deploys to dev
+#   - workflow_dispatch                -> manually deploys to staging or prod
+#
+# Promotion path: dev (auto) -> staging (manual) -> prod (manual)
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [dev, staging, prod]
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.environment || 'dev' }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'dev' }}
+
+    # When triggered by workflow_run, only proceed if CI actually passed.
+    # workflow_dispatch bypasses this check — manual deploys are intentional.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
+    permissions:
+      # id-token: write is required for OIDC authentication to AWS.
+      id-token: write
+      contents: read
+
+    env:
+      ENV:                 ${{ inputs.environment || 'dev' }}
+      AWS_REGION:          eu-central-1
+      CONTAINER_NAME:      agent
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        # Assumes the GitHub Actions IAM role via OIDC — no access keys stored.
+        # The role is created by terraform-bootstrap/modules/github-oidc and has
+        # AdministratorAccess, scoped at the trust layer to this repository only.
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/edp-${{ env.ENV }}-github-actions-role
+          aws-region:     ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to ECR
+        id: build-image
+        env:
+          ECR_REGISTRY:   ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: edp-${{ env.ENV }}-analytics-agent
+          IMAGE_TAG:      sha-${{ github.sha }}
+        run: |
+          IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          docker build --target runtime \
+            -t "${IMAGE_URI}" \
+            -t "${ECR_REGISTRY}/${ECR_REPOSITORY}:latest" \
+            .
+          docker push "${IMAGE_URI}"
+          docker push "${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+          echo "image=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
+
+      - name: Download current task definition
+        env:
+          TASK_FAMILY: edp-${{ env.ENV }}-analytics-agent
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "${TASK_FAMILY}" \
+            --query taskDefinition \
+            > task-definition.json
+
+      - name: Update task definition with new image
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name:  ${{ env.CONTAINER_NAME }}
+          image:           ${{ steps.build-image.outputs.image }}
+
+      - name: Deploy new task definition to ECS service
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition:            ${{ steps.task-def.outputs.task-definition }}
+          service:                    edp-${{ env.ENV }}-analytics-agent
+          cluster:                    edp-${{ env.ENV }}-analytics-agent
+          wait-for-service-stability: true
+
+      - name: Deployment summary
+        run: |
+          echo ""
+          echo "Deployed analytics agent to ECS:"
+          echo "  Environment : ${{ env.ENV }}"
+          echo "  Image       : ${{ steps.build-image.outputs.image }}"
+          echo "  Cluster     : edp-${{ env.ENV }}-analytics-agent"
+          echo "  Service     : edp-${{ env.ENV }}-analytics-agent"
+          echo ""
+          echo "To query the agent from within the VPC:"
+          echo "  curl -X POST http://<alb-dns-name>/ask -H 'Content-Type: application/json' \\"
+          echo "       -d '{\"question\": \"Which country has the highest revenue?\"}'"
+          echo ""
+          echo "To run a one-off CLI question directly:"
+          echo "  aws ecs run-task --cluster edp-${{ env.ENV }}-analytics-agent \\"
+          echo "    --task-definition edp-${{ env.ENV }}-analytics-agent \\"
+          echo "    --launch-type FARGATE \\"
+          echo "    --network-configuration '...' \\"
+          echo "    --overrides '{\"containerOverrides\":[{\"name\":\"agent\",\"command\":[\"Which country has the highest revenue?\"]}]}'"
