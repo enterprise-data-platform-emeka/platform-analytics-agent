@@ -53,10 +53,26 @@ _PRESIGNED_URL_EXPIRY = 3600
 _TIME_HINTS: frozenset[str] = frozenset({"year", "month", "date", "week", "quarter"})
 
 # Metric column name hints: prefer these over raw IDs when picking the y-axis for bar charts.
-_METRIC_HINTS: frozenset[str] = frozenset({
-    "revenue", "total", "amount", "sales", "count", "sum", "value", "profit",
-    "margin", "spend", "cost", "quantity", "qty", "orders", "avg", "average",
-})
+_METRIC_HINTS: frozenset[str] = frozenset(
+    {
+        "revenue",
+        "total",
+        "amount",
+        "sales",
+        "count",
+        "sum",
+        "value",
+        "profit",
+        "margin",
+        "spend",
+        "cost",
+        "quantity",
+        "qty",
+        "orders",
+        "avg",
+        "average",
+    }
+)
 
 # EDP brand colour used for matplotlib charts.
 _BRAND_COLOUR = "#2563EB"  # blue-600
@@ -245,7 +261,11 @@ class ChartGenerator:
 
         # Sort descending so the largest bar is at the top.
         sorted_pairs = sorted(zip(values, labels, strict=False), reverse=True)
-        values, labels = [list(t) for t in zip(*sorted_pairs, strict=False)] if sorted_pairs else (values, labels)
+        values, labels = (
+            [list(t) for t in zip(*sorted_pairs, strict=False)]
+            if sorted_pairs
+            else (values, labels)
+        )
 
         fig, ax = plt.subplots(figsize=(10, max(4, len(labels) * 0.45)))
         bars = ax.barh(labels, values, color=_BRAND_COLOUR)
