@@ -954,7 +954,7 @@ platform-analytics-agent/
 
 ## Status
 
-All 12 phases complete. The agent is fully built, deployed to ECS Fargate on AWS dev, and end-to-end tested. Real natural language questions return Athena query results, insights, and interactive Plotly charts against the live Gold data layer. Phase 13 (Streamlit UI) is next.
+Phases 1-12 complete. The backend API is deployed to ECS Fargate on AWS dev and end-to-end tested: real natural language questions return Athena query results, insights, and interactive Plotly charts against the live Gold data layer. Phase 13 (Streamlit UI) is in progress — the agent is not considered fully built until non-technical stakeholders can query it through a browser interface.
 
 | Phase | Status |
 |---|---|
