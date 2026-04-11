@@ -265,7 +265,7 @@ class ChartGenerator:
             values = [v for v, _ in sorted_pairs]
             labels = [lbl for _, lbl in sorted_pairs]
 
-        fig, ax = plt.subplots(figsize=(10, max(4, len(labels) * 0.45)))
+        fig, ax = plt.subplots(figsize=(10, max(4, len(labels) * 0.6)))
         bars = ax.barh(labels, values, color=_BRAND_COLOUR)
         ax.bar_label(bars, fmt="%.0f", padding=4, fontsize=9)
         ax.set_xlabel(y_col.replace("_", " ").title())
