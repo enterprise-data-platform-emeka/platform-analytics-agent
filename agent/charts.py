@@ -263,7 +263,7 @@ class ChartGenerator:
         sorted_pairs = sorted(zip(values, labels, strict=False), reverse=True)
         if sorted_pairs:
             values = [v for v, _ in sorted_pairs]
-            labels = [l for _, l in sorted_pairs]
+            labels = [lbl for _, lbl in sorted_pairs]
 
         fig, ax = plt.subplots(figsize=(10, max(4, len(labels) * 0.45)))
         bars = ax.barh(labels, values, color=_BRAND_COLOUR)
