@@ -52,6 +52,12 @@ _PRESIGNED_URL_EXPIRY = 3600
 # Time dimension column name fragments (case-insensitive).
 _TIME_HINTS: frozenset[str] = frozenset({"year", "month", "date", "week", "quarter"})
 
+# Metric column name hints: prefer these over raw IDs when picking the y-axis for bar charts.
+_METRIC_HINTS: frozenset[str] = frozenset({
+    "revenue", "total", "amount", "sales", "count", "sum", "value", "profit",
+    "margin", "spend", "cost", "quantity", "qty", "orders", "avg", "average",
+})
+
 # EDP brand colour used for matplotlib charts.
 _BRAND_COLOUR = "#2563EB"  # blue-600
 
@@ -192,6 +198,21 @@ class ChartGenerator:
                 pass
         return numeric
 
+    @staticmethod
+    def _best_metric_column(numeric_cols: list[str]) -> str:
+        """Pick the most likely metric column from a list of numeric columns.
+
+        Prefers columns whose names contain metric hints (revenue, total, count,
+        etc.) over raw identifier columns (id, key). Falls back to the last
+        numeric column — identifiers typically appear first in SELECT lists.
+        """
+        for col in numeric_cols:
+            col_lower = col.lower()
+            if any(hint in col_lower for hint in _METRIC_HINTS):
+                return col
+        # Last column is the safest fallback: IDs come first, metrics come last.
+        return numeric_cols[-1]
+
     # ── Rendering ─────────────────────────────────────────────────────────────
 
     def _render(
@@ -208,7 +229,7 @@ class ChartGenerator:
         return self._render_table(result, question)
 
     def _render_bar(self, result: QueryResult, question: str) -> tuple[bytes, str]:
-        """Render a horizontal bar chart: first categorical col vs first numeric col."""
+        """Render a horizontal bar chart sorted descending by the metric column."""
         import matplotlib
 
         matplotlib.use("Agg")
@@ -217,10 +238,14 @@ class ChartGenerator:
         numeric_cols = self._numeric_columns(result)
         categorical_cols = [c for c in result.columns if c not in numeric_cols]
         x_col = categorical_cols[0]
-        y_col = numeric_cols[0]
+        y_col = self._best_metric_column(numeric_cols)
 
         labels = [str(row.get(x_col, "")) for row in result.rows]
         values = [float(row.get(y_col, 0) or 0) for row in result.rows]
+
+        # Sort descending so the largest bar is at the top.
+        sorted_pairs = sorted(zip(values, labels), reverse=True)
+        values, labels = [list(t) for t in zip(*sorted_pairs)] if sorted_pairs else (values, labels)
 
         fig, ax = plt.subplots(figsize=(10, max(4, len(labels) * 0.45)))
         bars = ax.barh(labels, values, color=_BRAND_COLOUR)
