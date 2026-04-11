@@ -565,7 +565,13 @@ For multi-turn follow-up, after question 2 ask: "Which month had the lowest volu
 
 **"Athena query failed: TABLE_NOT_FOUND"** — Either the Gold Glue Catalog tables don't exist (run the MWAA pipeline) or the GLUE_GOLD_DATABASE value in `.env` is wrong (should be `edp_dev_gold` with underscores, not hyphens).
 
-**Deploy workflow triggered but ECS task keeps stopping** — Check CloudWatch Logs at `/edp/dev/analytics-agent` for the startup error. The most common cause is a missing SSM parameter or a container startup crash.
+**Deploy workflow triggered but ECS task keeps stopping** — Check CloudWatch Logs at `/ecs/edp-dev-analytics-agent` for the startup error. The most common cause is a missing SSM parameter or a container startup crash.
+
+**"Athena query failed: Insufficient permissions on glue:GetDatabase for database/silver"** — dbt-athena embeds the dbt source name (`silver`) as the Glue database in Gold view definitions, not the full name (`edp_dev_silver`). The task role needs Glue read permissions on both `edp_dev_silver` and the literal name `silver`. This is already fixed in the Terraform module.
+
+**"Athena query failed: PERMISSION_DENIED s3:ListBucket on edp-dev-...-silver"** — Gold views read from the underlying Silver Parquet files. The task role needs `s3:GetObject` and `s3:ListBucket` on the Silver S3 bucket. This is already fixed in the Terraform module.
+
+**"Athena: Unable to verify/create output bucket"** — The task role needs `s3:GetBucketLocation` on the Athena results bucket (not just `s3:GetObject`). This is already fixed in the Terraform module.
 
 ---
 
@@ -948,7 +954,7 @@ platform-analytics-agent/
 
 ## Status
 
-All 12 phases complete. The agent is fully built, tested, and deployed.
+All 12 phases complete. The agent is fully built, deployed to ECS Fargate on AWS dev, and end-to-end tested. Real natural language questions return Athena query results, insights, and interactive Plotly charts against the live Gold data layer. Phase 13 (Streamlit UI) is next.
 
 | Phase | Status |
 |---|---|
