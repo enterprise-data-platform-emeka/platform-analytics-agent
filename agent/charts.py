@@ -256,16 +256,14 @@ class ChartGenerator:
         x_col = categorical_cols[0]
         y_col = self._best_metric_column(numeric_cols)
 
-        labels = [str(row.get(x_col, "")) for row in result.rows]
-        values = [float(row.get(y_col, 0) or 0) for row in result.rows]
+        labels: list[str] = [str(row.get(x_col, "")) for row in result.rows]
+        values: list[float] = [float(row.get(y_col, 0) or 0) for row in result.rows]
 
         # Sort descending so the largest bar is at the top.
         sorted_pairs = sorted(zip(values, labels, strict=False), reverse=True)
-        values, labels = (
-            [list(t) for t in zip(*sorted_pairs, strict=False)]
-            if sorted_pairs
-            else (values, labels)
-        )
+        if sorted_pairs:
+            values = [v for v, _ in sorted_pairs]
+            labels = [l for _, l in sorted_pairs]
 
         fig, ax = plt.subplots(figsize=(10, max(4, len(labels) * 0.45)))
         bars = ax.barh(labels, values, color=_BRAND_COLOUR)
