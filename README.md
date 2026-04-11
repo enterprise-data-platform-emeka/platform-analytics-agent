@@ -48,6 +48,8 @@ flowchart TD
 
     subgraph Input ["Input"]
         User([User NL Question\ne.g. via CLI or HTTP])
+        Streamlit[Streamlit UI\nBrowser interface]
+        User --> Streamlit
     end
 
     subgraph AgentLoop ["Agent Reasoning Loop - ECS Fargate"]
@@ -81,7 +83,7 @@ flowchart TD
     LoadSchemas --> GlueCatalog
     LoadSchemas --> DbtArtifacts
     LoadSchemas --> User
-    User --> GenerateSQL
+    Streamlit -->|POST /ask| GenerateSQL
     GenerateSQL --> ValidateSQL
     ValidateSQL -->|pass| Execute
     ValidateSQL -->|fail: reason sent back| GenerateSQL
@@ -97,6 +99,18 @@ flowchart TD
     classDef box fill:#f0f4f8,stroke:#333,stroke-width:1px;
     class Startup,Input,AgentLoop,AWS,OutputBlock box;
 ```
+
+---
+
+## Stakeholder interface
+
+The FastAPI backend is the analytical engine. Non-technical stakeholders don't interact with it directly. The user-facing layer is a Streamlit browser app that wraps the backend.
+
+A stakeholder opens a URL in their browser, types a plain-English question in a text box, and clicks submit. Streamlit POSTs the question to the FastAPI `/ask` endpoint. When the response arrives, Streamlit displays everything inline: the plain-English insight, the chart as an inline image (fetched from the presigned S3 URL (Uniform Resource Locator) the agent returns), the SQL in an expandable section, the list of assumptions the agent made, and the scan cost in USD.
+
+No command-line access needed. No SQL knowledge needed. No understanding of Athena, Glue, or partition structures required. That's the whole point.
+
+The Streamlit app runs as a separate ECS (Elastic Container Service) Fargate task alongside the agent, or locally with `streamlit run app.py` during demo recording. It's built specifically for the demo video — recruiters see a working browser UI on camera showing a real question answered with real AWS data. After the recording, the infra is destroyed as usual.
 
 ---
 
@@ -750,6 +764,22 @@ Deliverable: `python -m agent.main "Show total orders by country"` returns SQL, 
 - `terraform-platform-infra-live/modules/analytics-agent/main.tf` extended with: internal ALB in private subnets, ALB security group (port 80), ECS security group (port 8080 from ALB only), target group with `/health` check, ECS service with rolling deploy and `lifecycle.ignore_changes`
 - `.github/workflows/ci.yml` — quality gate (ruff, mypy) + unit tests + Docker build check
 - `.github/workflows/deploy.yml` — OIDC (OpenID Connect) authentication, ECR push, ECS task definition update, rolling deploy with stability wait
+
+### Phase 13: Streamlit UI — next
+
+A Streamlit Python app that wraps the FastAPI backend so non-technical stakeholders can use the agent from a browser. No command-line access required.
+
+What to build:
+
+- `streamlit/app.py` — text input box for the question, submit button, spinner while the agent runs
+- Result panel: insight text, inline chart (IMG tag from presigned URL), SQL in an `st.expander`, assumptions as `st.info` bullets, cost line at the bottom
+- Calls `POST /ask` on the FastAPI ALB (Application Load Balancer) endpoint, parses the JSON response, renders each field
+- `streamlit/Dockerfile` — two-stage build, non-root user, port 8501
+- ECS Fargate task definition for the Streamlit container, alongside the agent task in the same cluster
+- Security group: port 8501 open to the internet for demo access, or a public ALB (Application Load Balancer) in front of it
+- Destroy after the video is recorded
+
+Deliverable: a recruiter opens a URL in their browser, types a question, and sees the insight, chart, SQL, and cost without any technical knowledge. That's what appears on camera.
 
 ---
 
