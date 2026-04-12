@@ -110,7 +110,51 @@ A stakeholder opens a URL in their browser, types a plain-English question in a 
 
 No command-line access needed. No SQL knowledge needed. No understanding of Athena, Glue, or partition structures required. That's the whole point.
 
-The Streamlit app runs as a separate ECS (Elastic Container Service) Fargate task alongside the agent, or locally with `streamlit run app.py` during demo recording. It's built specifically for the demo video — recruiters see a working browser UI on camera showing a real question answered with real AWS data. After the recording, the infra is destroyed as usual.
+The Streamlit app runs in the same ECS (Elastic Container Service) Fargate container as the FastAPI backend. A startup script (`entrypoint.sh`) launches both together when the container starts: FastAPI on port 8080, Streamlit on port 8501. The AWS load balancer (ALB) has a separate listener for each port, so stakeholders open the Streamlit URL and FastAPI stays reachable for direct API access. For local development, the same startup script runs both with a single `docker-compose up`.
+
+---
+
+### How the browser interface works
+
+You don't need any web development experience to understand this. Here's what actually happens, step by step.
+
+**What Streamlit is**
+
+Streamlit is a Python library. You write Python code and Streamlit turns it into a web page with a text box, buttons, and charts. There's no HTML, CSS, or JavaScript involved. The entire UI is Python, which fits naturally into a project where everything else is already Python.
+
+**What "running on a server" means**
+
+When you type a web address into Chrome or Safari, your browser connects to a program that is listening for incoming connections. That program is called a server. In this project, Streamlit is that server. When a stakeholder opens `http://alb-url:8501`, their browser connects to the Streamlit program running inside the ECS container in AWS. Streamlit sends the web page back to their browser. This is no different from visiting any website: there's always a server somewhere that sends you the page.
+
+**Why the code calls localhost**
+
+Both Streamlit and FastAPI run inside the same ECS container. Think of a container as a small private computer with its own isolated network. When the Streamlit code calls `localhost:8080`, it means "call the program listening on port 8080 inside this container" — which is FastAPI. The stakeholder's browser never sees or uses localhost. They only ever type the ALB's DNS address. Localhost is purely internal, invisible to the outside world.
+
+```mermaid
+sequenceDiagram
+    participant SB as Stakeholder's Browser
+    participant ALB as AWS Load Balancer
+    participant ST as Streamlit (port 8501)
+    participant API as FastAPI (port 8080)
+    participant AWS as Athena + Claude API
+
+    Note over ST,API: Both run inside the same ECS container
+
+    SB->>ALB: Opens http://alb-url:8501
+    ALB->>ST: Routes request to Streamlit
+    ST-->>SB: Sends the web page (text box and Submit button)
+
+    Note over SB: Stakeholder types a question and clicks Submit
+
+    SB->>ST: Submits the question
+    ST->>API: POST localhost:8080/ask (same container, no network hop)
+    API->>AWS: Runs Athena query, calls Claude API
+    AWS-->>API: Query results and insight
+    API-->>ST: JSON with insight, chart HTML, cost
+    ST-->>SB: Renders insight, interactive chart, and cost in the browser
+```
+
+The stakeholder never runs a command. They open a URL, type a question, and read the answer. Everything else happens inside AWS.
 
 ---
 
@@ -890,7 +934,8 @@ Chart: [presigned S3 URL — time series line chart]
 | Claude API (claude-sonnet-4-6) | Question interpretation, SQL generation, insight summarisation |
 | boto3 | AWS SDK: Athena, Glue Catalog, S3, SSM |
 | sqlparse | SQL parsing and validation |
-| FastAPI | HTTP endpoint |
+| FastAPI | HTTP endpoint for the agent API |
+| Streamlit | Python library that turns Python code into a browser-accessible web page — the stakeholder UI |
 | matplotlib | Static chart PNG generation |
 | Plotly | Interactive chart HTML generation |
 | ECS Fargate | Serverless container runtime |
@@ -940,10 +985,13 @@ platform-analytics-agent/
 │   ├── test_session.py
 │   ├── test_charts.py
 │   └── test_integration.py     ← marked @pytest.mark.integration, runs against real AWS dev
+├── ui/                         ← Streamlit browser UI (Phase 13)
+│   └── app.py                  ← the web page: question input, insight display, chart rendering
 ├── .python-version             ← 3.11.8 (pyenv)
 ├── pyproject.toml              ← ruff, mypy, pytest config
 ├── requirements.txt            ← runtime dependencies
 ├── requirements-dev.txt        ← dev tools: ruff, mypy, pytest
+├── entrypoint.sh               ← starts FastAPI (port 8080) and Streamlit (port 8501) together
 ├── Dockerfile                  ← two-stage build, non-root user
 ├── docker-compose.yml          ← local dev
 ├── Makefile                    ← setup, lint, typecheck, test, run
@@ -954,7 +1002,7 @@ platform-analytics-agent/
 
 ## Status
 
-Phases 1-12 complete. The backend API is deployed to ECS Fargate on AWS dev and end-to-end tested: real natural language questions return Athena query results, insights, and interactive Plotly charts against the live Gold data layer. Phase 13 (Streamlit UI) is in progress — the agent is not considered fully built until non-technical stakeholders can query it through a browser interface.
+Phases 1-12 complete. The backend API is deployed to ECS Fargate on AWS dev and end-to-end tested: real natural language questions return Athena query results, insights, and interactive Plotly charts against the live Gold data layer. Phase 13 (Streamlit UI) is in progress. The agent is not considered complete until non-technical stakeholders can query it through a browser interface without touching a command line.
 
 | Phase | Status |
 |---|---|
@@ -970,5 +1018,6 @@ Phases 1-12 complete. The backend API is deployed to ECS Fargate on AWS dev and 
 | 10: Charts (matplotlib PNG, Plotly HTML, S3 presigned URL) | Complete |
 | 11: FastAPI HTTP endpoint and session state (multi-turn follow-ups) | Complete |
 | 12: Deploy pipeline (OIDC, ECR push, ECS rolling deploy, ALB, ECS service) | Complete |
+| 13: Streamlit UI (browser interface, same-container deploy, ALB port 8501) | In progress |
 
 This is the last component of the platform. The full pipeline is: PostgreSQL → DMS CDC → Bronze S3 → Glue PySpark → Silver S3 → dbt/Athena → Gold S3 → Redshift Serverless → this agent.
