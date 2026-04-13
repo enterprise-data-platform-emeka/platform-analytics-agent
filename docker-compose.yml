@@ -7,6 +7,10 @@ services:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
+    ports:
+      - "8080:8080"   # FastAPI — POST /ask
+      - "8501:8501"   # Streamlit UI — open http://localhost:8501 in browser
     volumes:
       # Mount source for hot-reload during local development
       - ./agent:/app/agent:ro
+      - ./ui:/app/ui:ro

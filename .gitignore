@@ -48,3 +48,14 @@ htmlcov/
 # Agent outputs (generated at runtime)
 output/
 charts/
+Agent-memory-images/
+
+# Sensitive files — never commit these
+*.tfvars
+secret*.tfvars
+*.pem
+*.key
+*.p12
+*.pfx
+credentials
+aws_credentials
