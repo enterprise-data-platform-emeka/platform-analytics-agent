@@ -44,7 +44,7 @@ for turn in st.session_state.history:
     with st.chat_message("user"):
         st.write(turn["question"])
     with st.chat_message("assistant"):
-        st.write(turn["insight"])
+        st.write(turn["insight"].replace("$", r"\$"))
         if turn.get("assumptions"):
             with st.expander("Assumptions"):
                 for assumption in turn["assumptions"]:
@@ -95,7 +95,7 @@ if question:
         # Reached only if the request succeeded.
         st.session_state.session_id = data["session_id"]
 
-        st.write(data["insight"])
+        st.write(data["insight"].replace("$", r"\$"))
 
         if data.get("assumptions"):
             with st.expander("Assumptions"):
