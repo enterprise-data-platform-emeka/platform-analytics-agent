@@ -13,7 +13,7 @@ echo "Starting FastAPI backend on port 8080..."
 uvicorn agent.main:app --host 0.0.0.0 --port 8080 &
 
 echo "Waiting for FastAPI to be ready..."
-until curl -sf http://localhost:8080/health > /dev/null 2>&1; do
+until python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" > /dev/null 2>&1; do
     sleep 1
 done
 echo "FastAPI is ready."
