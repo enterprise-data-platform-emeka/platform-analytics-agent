@@ -26,9 +26,17 @@ a JSON body with insight, chart URLs, and a session_id for multi-turn
 follow-up questions.
 """
 
+import base64
+import io
 import logging
+import os
 import sys
+import tempfile
 from dataclasses import dataclass
+from email import encoders
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 from agent.audit import AuditLogger
 from agent.charts import ChartGenerator, ChartOutput
@@ -221,6 +229,7 @@ try:
         chart_type: str
         presigned_url: str | None
         html_chart: str | None
+        png_b64: str | None  # base64-encoded matplotlib PNG for PDF report generation
 
     @app.post("/ask", response_model=AskResponse)
     async def ask_endpoint(body: AskRequest) -> AskResponse:
@@ -263,6 +272,12 @@ try:
             ),
         )
 
+        png_b64 = (
+            base64.b64encode(result.chart.png_bytes).decode()
+            if result.chart.png_bytes
+            else None
+        )
+
         return AskResponse(
             insight=result.response.insight,
             assumptions=result.response.assumptions,
@@ -274,7 +289,104 @@ try:
             chart_type=result.chart.chart_type,
             presigned_url=result.chart.presigned_url,
             html_chart=result.chart.html,
+            png_b64=png_b64,
         )
+
+    class SendReportRequest(BaseModel):
+        to_email: str
+        question: str
+        insight: str
+        png_b64: str | None = None
+
+    @app.post("/send-report")
+    async def send_report(body: SendReportRequest) -> dict[str, str]:
+        """Generate a PDF report (chart + summary) and send it via AWS SES.
+
+        Requires the SES_SENDER_EMAIL environment variable to be set and the
+        address to be verified in SES. In SES sandbox mode, the recipient
+        address must also be verified.
+        """
+        sender = os.environ.get("SES_SENDER_EMAIL", "")
+        region = os.environ.get("AWS_REGION", "eu-central-1")
+
+        if not sender:
+            raise HTTPException(
+                status_code=503,
+                detail="SES_SENDER_EMAIL is not configured. Set it in the ECS task environment.",
+            )
+
+        # Generate PDF using fpdf2.
+        try:
+            from fpdf import FPDF
+
+            pdf = FPDF()
+            pdf.set_auto_page_break(auto=True, margin=15)
+            pdf.add_page()
+
+            # Title
+            pdf.set_font("Helvetica", "B", 18)
+            pdf.cell(0, 12, "EDP Analytics Report", ln=True)
+            pdf.ln(4)
+
+            # Question
+            pdf.set_font("Helvetica", "B", 12)
+            pdf.cell(0, 8, "Question", ln=True)
+            pdf.set_font("Helvetica", "", 11)
+            pdf.multi_cell(0, 7, body.question)
+            pdf.ln(6)
+
+            # Chart image
+            if body.png_b64:
+                png_bytes = base64.b64decode(body.png_b64)
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                    tmp.write(png_bytes)
+                    tmp_path = tmp.name
+                pdf.image(tmp_path, x=10, w=190)
+                os.unlink(tmp_path)
+                pdf.ln(6)
+
+            # Summary
+            pdf.set_font("Helvetica", "B", 12)
+            pdf.cell(0, 8, "Summary", ln=True)
+            pdf.set_font("Helvetica", "", 11)
+            pdf.multi_cell(0, 7, body.insight)
+
+            pdf_bytes = bytes(pdf.output())
+        except Exception as exc:
+            logger.error("PDF generation failed: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail=f"PDF generation failed: {exc}") from exc
+
+        # Send via SES.
+        try:
+            msg = MIMEMultipart()
+            msg["Subject"] = f"EDP Report: {body.question[:60]}"
+            msg["From"] = sender
+            msg["To"] = body.to_email
+            msg.attach(MIMEText("Please find your analytics report attached.", "plain"))
+
+            attachment = MIMEBase("application", "pdf")
+            attachment.set_payload(pdf_bytes)
+            encoders.encode_base64(attachment)
+            attachment.add_header(
+                "Content-Disposition",
+                "attachment",
+                filename="edp_analytics_report.pdf",
+            )
+            msg.attach(attachment)
+
+            import boto3
+            ses = boto3.client("ses", region_name=region)
+            ses.send_raw_email(
+                Source=sender,
+                Destinations=[body.to_email],
+                RawMessage={"Data": msg.as_string()},
+            )
+        except Exception as exc:
+            logger.error("SES send failed: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Email send failed: {exc}") from exc
+
+        logger.info("Report sent to %s for question: %s", body.to_email, body.question[:60])
+        return {"status": "sent"}
 
     @app.get("/health")
     async def health() -> dict[str, str]:

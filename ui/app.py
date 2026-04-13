@@ -40,7 +40,7 @@ with st.sidebar:
         st.rerun()
 
 # ── Conversation history ──────────────────────────────────────────────────────
-for turn in st.session_state.history:
+for i, turn in enumerate(st.session_state.history):
     with st.chat_message("user"):
         st.write(turn["question"])
     with st.chat_message("assistant"):
@@ -51,6 +51,33 @@ for turn in st.session_state.history:
                     st.write(f"- {assumption}")
         if turn.get("html_chart"):
             components.html(turn["html_chart"], height=450, scrolling=False)
+        with st.expander("Send as email"):
+            with st.form(key=f"email_form_{i}"):
+                to_email = st.text_input("Recipient email address")
+                submitted = st.form_submit_button("Send PDF report")
+            if submitted:
+                if not to_email:
+                    st.warning("Enter a recipient email address.")
+                else:
+                    with st.spinner("Generating PDF and sending..."):
+                        try:
+                            r = requests.post(
+                                f"{BACKEND_URL}/send-report",
+                                json={
+                                    "to_email": to_email,
+                                    "question": turn["question"],
+                                    "insight": turn["insight"],
+                                    "png_b64": turn.get("png_b64"),
+                                },
+                                timeout=30,
+                            )
+                            r.raise_for_status()
+                            st.success(f"Report sent to {to_email}")
+                        except requests.exceptions.HTTPError as exc:
+                            detail = exc.response.json().get("detail", str(exc)) if exc.response else str(exc)
+                            st.error(f"Failed: {detail}")
+                        except Exception as exc:
+                            st.error(f"Failed: {exc}")
         with st.expander("Query details"):
             if turn.get("sql"):
                 st.code(turn["sql"], language="sql")
@@ -105,6 +132,34 @@ if question:
         if data.get("html_chart"):
             components.html(data["html_chart"], height=450, scrolling=False)
 
+        with st.expander("Send as email"):
+            with st.form(key="email_form_current"):
+                to_email = st.text_input("Recipient email address")
+                submitted = st.form_submit_button("Send PDF report")
+            if submitted:
+                if not to_email:
+                    st.warning("Enter a recipient email address.")
+                else:
+                    with st.spinner("Generating PDF and sending..."):
+                        try:
+                            r = requests.post(
+                                f"{BACKEND_URL}/send-report",
+                                json={
+                                    "to_email": to_email,
+                                    "question": question,
+                                    "insight": data["insight"],
+                                    "png_b64": data.get("png_b64"),
+                                },
+                                timeout=30,
+                            )
+                            r.raise_for_status()
+                            st.success(f"Report sent to {to_email}")
+                        except requests.exceptions.HTTPError as exc:
+                            detail = exc.response.json().get("detail", str(exc)) if exc.response else str(exc)
+                            st.error(f"Failed: {detail}")
+                        except Exception as exc:
+                            st.error(f"Failed: {exc}")
+
         with st.expander("Query details"):
             if data.get("sql"):
                 st.code(data["sql"], language="sql")
@@ -120,6 +175,7 @@ if question:
             "assumptions": data.get("assumptions", []),
             "html_chart": data.get("html_chart"),
             "sql": data.get("sql"),
+            "png_b64": data.get("png_b64"),
             "cost_usd": data["cost_usd"],
             "bytes_scanned": data["bytes_scanned"],
             "validation_flags": data.get("validation_flags", []),
