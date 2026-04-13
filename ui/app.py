@@ -52,6 +52,8 @@ for turn in st.session_state.history:
         if turn.get("html_chart"):
             components.html(turn["html_chart"], height=450, scrolling=False)
         with st.expander("Query details"):
+            if turn.get("sql"):
+                st.code(turn["sql"], language="sql")
             col1, col2 = st.columns(2)
             col1.metric("Cost", f"${turn['cost_usd']:.4f}")
             col2.metric("Bytes scanned", f"{turn['bytes_scanned']:,}")
@@ -104,6 +106,8 @@ if question:
             components.html(data["html_chart"], height=450, scrolling=False)
 
         with st.expander("Query details"):
+            if data.get("sql"):
+                st.code(data["sql"], language="sql")
             col1, col2 = st.columns(2)
             col1.metric("Cost", f"${data['cost_usd']:.4f}")
             col2.metric("Bytes scanned", f"{data['bytes_scanned']:,}")
@@ -115,6 +119,7 @@ if question:
             "insight": data["insight"],
             "assumptions": data.get("assumptions", []),
             "html_chart": data.get("html_chart"),
+            "sql": data.get("sql"),
             "cost_usd": data["cost_usd"],
             "bytes_scanned": data["bytes_scanned"],
             "validation_flags": data.get("validation_flags", []),
