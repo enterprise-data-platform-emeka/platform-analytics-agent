@@ -38,12 +38,14 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Lint (ruff)
-        run: ruff check agent/ tests/
+        run: ruff check agent/ ui/ tests/
 
       - name: Format check (ruff)
-        run: ruff format --check agent/ tests/
+        run: ruff format --check agent/ ui/ tests/
 
       - name: Type check (mypy)
+        # ui/ is a Streamlit app — Streamlit does not ship complete type stubs,
+        # so mypy is scoped to agent/ and tests/ only.
         run: mypy agent/ tests/
 
   unit-tests:
