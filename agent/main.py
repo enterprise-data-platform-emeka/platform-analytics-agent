@@ -68,10 +68,12 @@ class AskResult:
     Attributes:
         response: InsightResponse with insight text, assumptions, cost, flags.
         chart: ChartOutput with PNG bytes, Plotly HTML, and presigned S3 URL.
+        sql: The final SQL query executed against Athena.
     """
 
     response: InsightResponse
     chart: ChartOutput
+    sql: str
 
 
 class AgentSession:
@@ -187,7 +189,7 @@ class AgentSession:
 
         self._audit.write(question=question, sql=generated.sql, response=response)
 
-        return AskResult(response=response, chart=chart)
+        return AskResult(response=response, chart=chart, sql=generated.sql)
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +232,7 @@ try:
         presigned_url: str | None
         html_chart: str | None
         png_b64: str | None  # base64-encoded matplotlib PNG for PDF report generation
+        sql: str
 
     @app.post("/ask", response_model=AskResponse)
     async def ask_endpoint(body: AskRequest) -> AskResponse:
@@ -290,6 +293,7 @@ try:
             presigned_url=result.chart.presigned_url,
             html_chart=result.chart.html,
             png_b64=png_b64,
+            sql=result.sql,
         )
 
     class SendReportRequest(BaseModel):
