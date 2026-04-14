@@ -1159,6 +1159,37 @@ platform-analytics-agent/
 
 ---
 
+## How the tests work
+
+The agent calls real AWS services (S3, Athena, SSM, Glue) and the Claude API. If the tests made those real calls on every push, they would cost money, be slow, and require valid credentials in CI. Instead, the tests intercept those calls and return fake responses from memory. No real network traffic happens at all.
+
+Two tools make this possible.
+
+**moto** pretends to be AWS. When the application code calls `boto3.client("s3").put_object(...)`, moto catches that call and stores the data in a Python dictionary in RAM. The code never knows it isn't talking to real S3. When the test finishes, everything is discarded.
+
+**unittest.mock** replaces any Python function with a fake version. When the code calls the Claude API to generate SQL, mock substitutes that function with one that instantly returns a hardcoded string like `SELECT * FROM revenue_by_country LIMIT 10`. No HTTP request, no API key needed.
+
+There are no CSV test data files because the agent doesn't read CSV files — it reads AWS API responses and Claude API responses. Mocking those responses directly is more accurate than representing them as CSV, and the mocks stay in sync with the code automatically.
+
+```mermaid
+flowchart TD
+    A[Push to GitHub] --> B[Four jobs run in parallel]
+    B --> C[Lint\nruff checks code style]
+    B --> D[Type check\nmypy checks type correctness]
+    B --> E[Unit tests\nmoto replaces AWS calls\nunittest.mock replaces Claude API\nNo real network calls made]
+    B --> F[Docker build\nVerifies image builds cleanly]
+    C --> G{All four pass?}
+    D --> G
+    E --> G
+    F --> G
+    G -->|No| H[Pipeline stops here\nDeploy workflow is skipped]
+    G -->|Yes| I[Deploy workflow triggers\nBuilds Docker image\nPushes to ECR\nTriggers ECS rolling deploy]
+```
+
+Integration tests also exist but are not part of the standard CI run. They are marked `@pytest.mark.integration` and only run when explicitly triggered with real AWS credentials against the deployed dev environment. They validate the full pipeline end-to-end: real Glue schema loading, real Athena query, real Claude API call.
+
+---
+
 ## Status
 
 All 13 phases complete. The full agent is deployed to ECS Fargate on AWS dev and end-to-end tested: non-technical stakeholders open a browser, type a plain-English question, and see the insight, interactive Plotly chart, SQL, assumptions, and scan cost. PDF reports can be sent by email via AWS SES.
