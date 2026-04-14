@@ -1,5 +1,11 @@
 # platform-analytics-agent
 
+This repository is part of the [Enterprise Data Platform](https://github.com/enterprise-data-platform-emeka/platform-docs). For the full project overview, architecture diagram, and build order, start there.
+
+**Previous:** [platform-orchestration-mwaa-airflow](https://github.com/enterprise-data-platform-emeka/platform-orchestration-mwaa-airflow): the Airflow DAG on MWAA orchestrates the pipeline that produces the Gold tables this agent queries.
+
+---
+
 This is the Natural Language (NL) Analytics Agent for the Enterprise Data Platform. It's the final layer of the platform: everything before this (DMS (Database Migration Service), Glue, dbt, MWAA (Amazon Managed Workflows for Apache Airflow)) exists to produce a clean, curated Gold data layer. This agent makes that data accessible to anyone who can ask a question in plain English, without needing to know SQL, table names, or partition structures.
 
 ---
@@ -82,13 +88,13 @@ flowchart TD
 
     LoadSchemas --> GlueCatalog
     LoadSchemas --> DbtArtifacts
-    LoadSchemas --> User
+    LoadSchemas -->|pre-loads into system prompt| GenerateSQL
     Streamlit -->|POST /ask| GenerateSQL
     GenerateSQL --> ValidateSQL
     ValidateSQL -->|pass| Execute
     ValidateSQL -->|fail: reason sent back| GenerateSQL
     Execute --> Athena
-    Athena --> S3Gold
+    Athena -->|reads| S3Gold
     Execute --> TrackCost
     Execute --> ValidateResults
     ValidateResults --> RenderChart
@@ -218,6 +224,162 @@ These are non-negotiable and enforced before any query reaches Athena.
 The MWAA DAG includes a final task `upload_dbt_artifacts` that runs after every successful `dbt test`. It copies `target/manifest.json` and `target/catalog.json` from the dbt workspace to `s3://{bronze_bucket}/metadata/dbt/`.
 
 The agent reads this path at query time, never from a local cache. When a dbt model is renamed, a column description is updated, or a new Gold table is added, the agent sees the change automatically at the next query after the next pipeline run. Schema drift from dbt refactors is impossible because the agent never holds a stale copy.
+
+---
+
+## What you can ask
+
+The agent queries the Gold layer. There are 7 mart tables, each designed to answer a specific category of business question. The questions below are grounded in the exact columns those tables expose.
+
+Understanding the boundaries matters as much as knowing what works. Some questions sound reasonable but can't be answered with the current data, either because the mart doesn't have the right dimension, or because that field was never captured anywhere in the pipeline. Both sets are listed below.
+
+---
+
+### Revenue and finance
+
+**`monthly_revenue_trend`** — one row per year-month. Columns: `order_year`, `order_month`, `total_orders`, `unique_customers`, `total_revenue`, `cancelled_orders`.
+
+- What were total sales last month?
+- Show me revenue by month for this year.
+- How has total order volume changed over the past 12 months?
+- Which month had the highest number of cancellations?
+- How many unique customers placed an order in each month this year?
+- Is revenue trending up or down compared to the same month last year?
+
+**`revenue_by_country`** — one row per country, all-time totals for completed orders. Columns: `country`, `total_orders`, `total_customers`, `total_revenue`, `avg_order_value`.
+
+- Which country generates the most revenue?
+- What is the average order value for customers in Germany?
+- How many distinct customers have placed completed orders in France?
+- Rank all countries by total revenue.
+- Which country has the highest average order value?
+
+**`payment_method_performance`** — one row per payment method. Columns: `payment_method`, `total_transactions`, `successful`, `failed`, `refunded`, `success_rate_pct`, `total_processed`, `revenue_captured`.
+
+- Which payment method has the highest failure rate?
+- How much revenue was lost to refunds across all payment methods?
+- What percentage of bank transfer payments complete successfully?
+- Which payment method processes the most total volume?
+- How many transactions were refunded via credit card?
+
+---
+
+### Products
+
+**`top_selling_products`** — one row per product. Columns: `product_id`, `product_name`, `category`, `brand`, `total_orders`, `total_units_sold`, `total_revenue`, `avg_revenue_per_unit`, `revenue_rank`.
+
+- What are the top 10 best-selling products by total revenue?
+- Which product has sold the most units?
+- What is the average revenue per unit for the top 5 products?
+- Which brand appears most often in the top 20 products by revenue rank?
+- Which product generates the most revenue per unit sold?
+
+**`product_category_performance`** — one row per category-brand combination. Columns: `category`, `brand`, `total_orders`, `products_in_category`, `total_units_sold`, `total_revenue`, `avg_revenue_per_unit`.
+
+- Which product category generates the most revenue?
+- Which brand has the highest revenue across all categories?
+- How many distinct products has each category sold?
+- Which category sells the most units?
+- Compare average revenue per unit across Electronics, Clothing, and Sports.
+
+---
+
+### Logistics and delivery
+
+**`carrier_delivery_performance`** — one row per carrier. Columns: `carrier`, `total_shipments`, `delivered`, `failed`, `delivery_success_rate_pct`, `avg_delivery_days`, `fastest_delivery_days`, `slowest_delivery_days`.
+
+- Which carrier has the highest delivery success rate?
+- What is the average delivery time for DHL?
+- Which carrier has the most failed shipments?
+- How do FedEx and UPS compare on average delivery days?
+- Which carrier achieves the fastest single delivery on record?
+- What is the spread between fastest and slowest delivery times for each carrier?
+
+---
+
+### Customers
+
+**`customer_segments`** — one row per customer. Columns: `customer_id`, `first_name`, `last_name`, `email`, `country`, `signup_date`, `total_orders`, `lifetime_value`, `first_order_date`, `last_order_date`, `segment` (VIP / Regular / Low Value / Never Ordered), `order_frequency_band` (Loyal / Occasional / One-Time / No Orders).
+
+- How many VIP customers do we have?
+- Which country has the most Loyal customers?
+- Who are the top 10 customers by lifetime value?
+- How many customers have never placed an order?
+- What share of customers are one-time buyers?
+- Which customers signed up in the last 90 days and are already VIP?
+- How is lifetime value distributed across segments in the UK?
+
+---
+
+### Questions the agent cannot answer
+
+These questions sound reasonable but cannot be answered with the current Gold layer. The reason for each is specific: either the mart lacks a dimension, or the field was never captured anywhere in the pipeline.
+
+**No time dimension in `revenue_by_country`**
+
+> "What was Germany's revenue last month?"
+
+`revenue_by_country` is a lifetime aggregation with no `order_year` or `order_month` column. `monthly_revenue_trend` has time but no country. There's no mart that combines both. The agent will say it can't answer this precisely and explain why.
+
+**No country dimension in `monthly_revenue_trend`**
+
+> "Show me monthly revenue broken down by country."
+
+Same problem in reverse. The two finance marts cover different cuts of the same underlying data but there's no mart that crosses both dimensions. Adding one would require a new dbt model.
+
+**Stock levels not in Gold**
+
+> "Which products are running low on inventory?"
+
+`stock_qty` exists in the Silver `products` table and flows through `stg_products`, but no Gold mart exposes it. It was excluded because it's a point-in-time operational field, not a business aggregation. The agent has no visibility into it.
+
+**No cost-of-goods data**
+
+> "What is the gross margin on Electronics?"
+
+Revenue is captured throughout the pipeline (`line_total`, `payment_amount`), but cost of goods sold is not. There is no `unit_cost`, `cogs`, or `margin` column anywhere from the OLTP source through to Gold. Margin questions of any kind cannot be answered.
+
+**No shipping cost data**
+
+> "Which carrier is the most cost-effective?"
+
+`carrier_delivery_performance` tracks delivery days and success rates but not the fee charged per shipment. Shipping cost is not in the source OLTP schema and therefore not anywhere in the pipeline.
+
+**No city or region geography**
+
+> "Which cities in France drive the most revenue?"
+
+Customer geography is captured at country level only. The CDC simulator generates a `country` field but no city, region, state, or postal code. These fields don't exist in Silver or Gold.
+
+**No real-time data**
+
+> "What orders came in the last hour?"
+
+Gold is updated by the daily batch pipeline. The latest data reflects the most recent successful `edp_pipeline` run. The agent can't see anything more recent than that.
+
+**No marketing or acquisition data**
+
+> "Which marketing channel brings the most VIP customers?"
+
+The OLTP system records what customers ordered, not how they were acquired. There is no campaign, referral, UTM parameter, or acquisition source anywhere in the data model.
+
+**No cart abandonment or browse data**
+
+> "Which products do customers view but not buy?"
+
+The platform captures CDC events from a PostgreSQL OLTP database. Only database writes are tracked, which means only orders that were created. Browse events, add-to-cart actions, and session data don't exist.
+
+**No refund reason or return details**
+
+> "What is the most common reason customers return Electronics?"
+
+`payment_method_performance` tracks a refund count per payment method, but there is no refund reason, return category, or customer comment field anywhere. The OLTP schema has a `status` field on payments but no reason code.
+
+**No product co-purchase patterns**
+
+> "Customers who buy X also buy Y — what are the top product pairs?"
+
+There's no basket analysis mart. `top_selling_products` and `product_category_performance` aggregate each product independently. Building this would require a self-join on order items at the intermediate layer, which hasn't been modelled.
 
 ---
 
@@ -1021,3 +1183,7 @@ Phases 1-12 complete. The backend API is deployed to ECS Fargate on AWS dev and 
 | 13: Streamlit UI (browser interface, same-container deploy, ALB port 8501) | In progress |
 
 This is the last component of the platform. The full pipeline is: PostgreSQL → DMS CDC → Bronze S3 → Glue PySpark → Silver S3 → dbt/Athena → Gold S3 → Redshift Serverless → this agent.
+
+---
+
+**Full platform overview:** [platform-docs](https://github.com/enterprise-data-platform-emeka/platform-docs) has the complete build guide, architecture diagrams, design decisions, and step-by-step instructions for deploying the entire platform from scratch.
