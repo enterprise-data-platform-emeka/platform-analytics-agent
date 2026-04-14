@@ -40,10 +40,12 @@ def _make_chart(presigned_url: str | None = "https://s3.example.com/chart.png") 
 def _make_ask_result(
     response: InsightResponse | None = None,
     chart: ChartOutput | None = None,
+    sql: str = "SELECT 1",
 ) -> AskResult:
     return AskResult(
         response=response or _make_response(),
         chart=chart or _make_chart(),
+        sql=sql,
     )
 
 
