@@ -275,9 +275,7 @@ try:
         )
 
         png_b64 = (
-            base64.b64encode(result.chart.png_bytes).decode()
-            if result.chart.png_bytes
-            else None
+            base64.b64encode(result.chart.png_bytes).decode() if result.chart.png_bytes else None
         )
 
         return AskResponse(
@@ -378,6 +376,7 @@ try:
             msg.attach(attachment)
 
             import boto3
+
             ses = boto3.client("ses", region_name=region)
             ses.send_raw_email(
                 Source=sender,

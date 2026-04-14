@@ -19,7 +19,9 @@ st.set_page_config(
 )
 
 st.title("EDP Analytics Agent")
-st.caption("Ask plain-English questions about Gold data. Follow-up questions remember prior context.")
+st.caption(
+    "Ask plain-English questions about Gold data. Follow-up questions remember prior context."
+)
 
 # ── Session state initialisation ──────────────────────────────────────────────
 if "session_id" not in st.session_state:
@@ -74,7 +76,11 @@ for i, turn in enumerate(st.session_state.history):
                             r.raise_for_status()
                             st.success(f"Report sent to {to_email}")
                         except requests.exceptions.HTTPError as exc:
-                            detail = exc.response.json().get("detail", str(exc)) if exc.response else str(exc)
+                            detail = (
+                                exc.response.json().get("detail", str(exc))
+                                if exc.response
+                                else str(exc)
+                            )
                             st.error(f"Failed: {detail}")
                         except Exception as exc:
                             st.error(f"Failed: {exc}")
@@ -155,7 +161,11 @@ if question:
                             r.raise_for_status()
                             st.success(f"Report sent to {to_email}")
                         except requests.exceptions.HTTPError as exc:
-                            detail = exc.response.json().get("detail", str(exc)) if exc.response else str(exc)
+                            detail = (
+                                exc.response.json().get("detail", str(exc))
+                                if exc.response
+                                else str(exc)
+                            )
                             st.error(f"Failed: {detail}")
                         except Exception as exc:
                             st.error(f"Failed: {exc}")
@@ -169,14 +179,16 @@ if question:
             if data.get("validation_flags"):
                 st.warning("Flags: " + ", ".join(data["validation_flags"]))
 
-        st.session_state.history.append({
-            "question": question,
-            "insight": data["insight"],
-            "assumptions": data.get("assumptions", []),
-            "html_chart": data.get("html_chart"),
-            "sql": data.get("sql"),
-            "png_b64": data.get("png_b64"),
-            "cost_usd": data["cost_usd"],
-            "bytes_scanned": data["bytes_scanned"],
-            "validation_flags": data.get("validation_flags", []),
-        })
+        st.session_state.history.append(
+            {
+                "question": question,
+                "insight": data["insight"],
+                "assumptions": data.get("assumptions", []),
+                "html_chart": data.get("html_chart"),
+                "sql": data.get("sql"),
+                "png_b64": data.get("png_b64"),
+                "cost_usd": data["cost_usd"],
+                "bytes_scanned": data["bytes_scanned"],
+                "validation_flags": data.get("validation_flags", []),
+            }
+        )
