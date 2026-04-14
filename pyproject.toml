@@ -31,6 +31,7 @@ module = [
     "plotly.*",
     "matplotlib.*",
     "moto.*",
+    "fpdf.*",
 ]
 ignore_missing_imports = true
 
