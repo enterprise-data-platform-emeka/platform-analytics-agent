@@ -977,21 +977,18 @@ Deliverable: `python -m agent.main "Show total orders by country"` returns SQL, 
 - `.github/workflows/ci.yml` — quality gate (ruff, mypy) + unit tests + Docker build check
 - `.github/workflows/deploy.yml` — OIDC (OpenID Connect) authentication, ECR push, ECS task definition update, rolling deploy with stability wait
 
-### Phase 13: Streamlit UI — next
+### Phase 13: Streamlit UI — complete
 
-A Streamlit Python app that wraps the FastAPI backend so non-technical stakeholders can use the agent from a browser. No command-line access required.
+A Streamlit browser app (`ui/app.py`) that wraps the FastAPI backend so non-technical stakeholders can query the agent without touching a command line.
 
-What to build:
+What was built:
 
-- `streamlit/app.py` — text input box for the question, submit button, spinner while the agent runs
-- Result panel: insight text, inline chart (IMG tag from presigned URL), SQL in an `st.expander`, assumptions as `st.info` bullets, cost line at the bottom
-- Calls `POST /ask` on the FastAPI ALB (Application Load Balancer) endpoint, parses the JSON response, renders each field
-- `streamlit/Dockerfile` — two-stage build, non-root user, port 8501
-- ECS Fargate task definition for the Streamlit container, alongside the agent task in the same cluster
-- Security group: port 8501 open to the internet for demo access, or a public ALB (Application Load Balancer) in front of it
-- Destroy after the video is recorded
-
-Deliverable: a recruiter opens a URL in their browser, types a question, and sees the insight, chart, SQL, and cost without any technical knowledge. That's what appears on camera.
+- `ui/app.py` — chat-style text input, conversation history, session state for multi-turn follow-ups
+- Result panel: plain-English insight, inline Plotly chart, SQL in a "Query details" expander, assumptions list, scan cost and bytes scanned
+- "Send as email" form: generates a PDF report (question + chart + insight) and sends it via AWS SES
+- Runs in the same ECS Fargate container as FastAPI. `entrypoint.sh` starts uvicorn on port 8080 (background) then Streamlit on port 8501 (foreground)
+- ALB has separate listeners for port 80 (FastAPI) and port 8501 (Streamlit)
+- Deployed automatically via the existing CI/deploy pipeline on every push to main
 
 ---
 
@@ -1164,7 +1161,7 @@ platform-analytics-agent/
 
 ## Status
 
-Phases 1-12 complete. The backend API is deployed to ECS Fargate on AWS dev and end-to-end tested: real natural language questions return Athena query results, insights, and interactive Plotly charts against the live Gold data layer. Phase 13 (Streamlit UI) is in progress. The agent is not considered complete until non-technical stakeholders can query it through a browser interface without touching a command line.
+All 13 phases complete. The full agent is deployed to ECS Fargate on AWS dev and end-to-end tested: non-technical stakeholders open a browser, type a plain-English question, and see the insight, interactive Plotly chart, SQL, assumptions, and scan cost. PDF reports can be sent by email via AWS SES.
 
 | Phase | Status |
 |---|---|
@@ -1180,7 +1177,7 @@ Phases 1-12 complete. The backend API is deployed to ECS Fargate on AWS dev and 
 | 10: Charts (matplotlib PNG, Plotly HTML, S3 presigned URL) | Complete |
 | 11: FastAPI HTTP endpoint and session state (multi-turn follow-ups) | Complete |
 | 12: Deploy pipeline (OIDC, ECR push, ECS rolling deploy, ALB, ECS service) | Complete |
-| 13: Streamlit UI (browser interface, same-container deploy, ALB port 8501) | In progress |
+| 13: Streamlit UI (browser interface, same-container deploy, ALB port 8501) | Complete |
 
 This is the last component of the platform. The full pipeline is: PostgreSQL → DMS CDC → Bronze S3 → Glue PySpark → Silver S3 → dbt/Athena → Gold S3 → Redshift Serverless → this agent.
 
