@@ -7,9 +7,9 @@ Stakeholders open the ALB DNS address on port 8501 in a browser. All AWS API
 calls happen server-side in the container — the browser never touches AWS.
 """
 
+import requests
 import streamlit as st
 import streamlit.components.v1 as components
-import requests
 
 BACKEND_URL = "http://localhost:8080"
 
