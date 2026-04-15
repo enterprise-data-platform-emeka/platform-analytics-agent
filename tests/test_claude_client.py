@@ -444,7 +444,8 @@ class TestGenerateInsight:
                 result_markdown="| country | total_revenue |\n|---|---|\n| Germany | 432701.55 |",
             )
 
-        assert result == insight
+        insight_text, _ = result
+        assert insight_text == insight
 
     def test_tools_not_passed_for_insight(self) -> None:
         client = _client()
@@ -485,5 +486,6 @@ class TestGenerateInsight:
         with patch.object(client._client.messages, "create", side_effect=side_effect):
             with patch("agent.claude_client.time.sleep"):
                 result = client.generate_insight("q", "SELECT 1", "r")
-        assert result == "Insight after retry."
+        insight_text, _ = result
+        assert insight_text == "Insight after retry."
         assert call_count == 2
