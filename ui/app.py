@@ -71,12 +71,13 @@ if "pending_question" not in st.session_state:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _format_bytes(n: int) -> str:
     if n < 1024:
         return f"{n} B"
-    if n < 1024 ** 2:
+    if n < 1024**2:
         return f"{n / 1024:.1f} KB"
-    return f"{n / 1024 ** 2:.2f} MB"
+    return f"{n / 1024**2:.2f} MB"
 
 
 def _format_cost(usd: float) -> str:
@@ -226,9 +227,7 @@ if question:
                 st.error("Request timed out. The query may be complex — try again.")
                 st.stop()
             except requests.exceptions.HTTPError as exc:
-                detail = (
-                    exc.response.json().get("detail", str(exc)) if exc.response else str(exc)
-                )
+                detail = exc.response.json().get("detail", str(exc)) if exc.response else str(exc)
                 st.error(f"Agent error: {detail}")
                 st.stop()
             except requests.exceptions.RequestException as exc:
