@@ -196,21 +196,26 @@ class TestInsightGeneratorNormalResult:
 
 
 class TestInsightGeneratorZeroRows:
-    def test_zero_rows_does_not_call_claude(self) -> None:
+    def test_zero_rows_calls_claude_with_no_rows_marker(self) -> None:
         client = _mock_client()
         gen = _generator(client)
         gen.generate(QUESTION, SQL, _query_result(rows=[]), [], _zero_rows_report())
-        client.generate_insight.assert_not_called()
+        client.generate_insight.assert_called_once()
+        call_kwargs = client.generate_insight.call_args[1]
+        assert call_kwargs.get("result_markdown") == "(no rows returned)"
 
-    def test_zero_rows_returns_canned_insight(self) -> None:
-        gen = _generator()
+    def test_zero_rows_returns_claude_insight(self) -> None:
+        client = _mock_client(insight_text="No data matched the requested filters.")
+        gen = _generator(client)
         result = gen.generate(QUESTION, SQL, _query_result(rows=[]), [], _zero_rows_report())
-        assert "no results" in result.insight.lower() or "no rows" in result.insight.lower()
+        assert result.insight == "No data matched the requested filters."
 
-    def test_zero_rows_insight_mentions_question(self) -> None:
-        gen = _generator()
-        result = gen.generate(QUESTION, SQL, _query_result(rows=[]), [], _zero_rows_report())
-        assert QUESTION in result.insight
+    def test_zero_rows_passes_question_to_claude(self) -> None:
+        client = _mock_client()
+        gen = _generator(client)
+        gen.generate(QUESTION, SQL, _query_result(rows=[]), [], _zero_rows_report())
+        call_kwargs = client.generate_insight.call_args[1]
+        assert call_kwargs.get("question") == QUESTION
 
     def test_zero_rows_flags_still_included(self) -> None:
         gen = _generator()
