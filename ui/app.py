@@ -286,9 +286,9 @@ def _render_turn(turn: dict, form_key: str) -> None:
                 escaped_inferred = html_lib.escape(inferred)
                 st.markdown(
                     f'<div style="background:#f8fafc;border-left:3px solid #94a3b8;'
-                    f'padding:10px 14px;border-radius:0 4px 4px 0;font-size:14px;'
+                    f"padding:10px 14px;border-radius:0 4px 4px 0;font-size:14px;"
                     f'color:#334155;margin:4px 0;">'
-                    f'<strong>Inferred:</strong> {escaped_inferred}</div>',
+                    f"<strong>Inferred:</strong> {escaped_inferred}</div>",
                     unsafe_allow_html=True,
                 )
 
