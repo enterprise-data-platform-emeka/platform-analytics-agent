@@ -138,26 +138,26 @@ Both Streamlit and FastAPI run inside the same ECS container. Think of a contain
 
 ```mermaid
 sequenceDiagram
-    participant SB as Stakeholder's Browser
+    autonumber
+    actor S as Stakeholder
     participant ALB as AWS Load Balancer
-    participant ST as Streamlit (port 8501)
-    participant API as FastAPI (port 8080)
-    participant AWS as Athena + Claude API
+    participant UI as Streamlit UI<br/>(web page)
+    participant API as Analytics Backend<br/>(FastAPI)
+    participant AI as Athena + Claude
 
-    Note over ST,API: Both run inside the same ECS container
+    note over UI,API: These two live inside the same server (ECS container)
 
-    SB->>ALB: Opens http://alb-url:8501
-    ALB->>ST: Routes request to Streamlit
-    ST-->>SB: Sends the web page (text box and Submit button)
+    S->>ALB: Opens the app in their browser
+    ALB->>UI: Forwards the request to the UI
+    UI-->>S: Browser shows a text box and Submit button
 
-    Note over SB: Stakeholder types a question and clicks Submit
-
-    SB->>ST: Submits the question
-    ST->>API: POST localhost:8080/ask (same container, no network hop)
-    API->>AWS: Runs Athena query, calls Claude API
-    AWS-->>API: Query results and insight
-    API-->>ST: JSON with insight, chart HTML, cost
-    ST-->>SB: Renders insight, interactive chart, and cost in the browser
+    S->>ALB: Types a question and clicks Submit
+    ALB->>UI: Forwards the question
+    UI->>API: Sends the question internally<br/>(no network hop — same server)
+    API->>AI: Runs an Athena SQL query<br/>and asks Claude for an insight
+    AI-->>API: Returns query results and insight
+    API-->>UI: Returns insight, chart, and cost
+    UI-->>S: Renders the answer, chart, and cost in the browser
 ```
 
 The stakeholder never runs a command. They open a URL, type a question, and read the answer. Everything else happens inside AWS.
