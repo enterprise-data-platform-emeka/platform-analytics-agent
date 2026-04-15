@@ -185,8 +185,9 @@ GET_SCHEMA_TOOL: Final[dict[str, Any]] = {
 
 _SQL_SYSTEM_HEADER = """\
 You are a read-only analytics agent for an e-commerce data platform.
-Your job is to answer plain-English questions about business performance by \
+Your job is to answer questions about business performance by \
 querying the Gold layer of the data warehouse using Amazon Athena SQL (Presto/Trino dialect).
+Questions may be asked in any language. Always respond in the same language as the question.
 
 ## Rules you must follow
 
@@ -369,11 +370,12 @@ INSIGHT_SYSTEM_PROMPT: Final[str] = """\
 You are a concise data analyst. You will be given a business question, \
 the SQL query that answered it, and a sample of the results.
 
-Write a 2-3 sentence plain-English insight that directly answers the question. \
+Write a 2-3 sentence insight that directly answers the question. \
 Start with the key finding. Include the most relevant number or comparison. \
 Do not explain the SQL. Do not mention table names or column names. \
 Do not use words like 'leverage', 'utilize', or 'robust'. \
-Write as if talking to a non-technical business stakeholder.
+Write as if talking to a non-technical business stakeholder. \
+Always respond in the same language the question was asked in.
 """
 
 

@@ -311,6 +311,45 @@ Understanding the boundaries matters as much as knowing what works. Some questio
 
 ---
 
+### Multilingual questions
+
+The agent responds in the same language as the question. Any language Claude supports works. Here are three examples grounded in the actual Gold tables.
+
+**German**
+
+- *Welche Zahlungsmethode hat die höchste Ausfallrate, und wie viel Umsatz ging dadurch verloren?*
+  (Which payment method has the highest failure rate, and how much revenue was lost as a result?)
+
+- *Wie hat sich der monatliche Gesamtumsatz in diesem Jahr im Vergleich zum Vorjahreszeitraum entwickelt?*
+  (How has total monthly revenue developed this year compared to the same period last year?)
+
+- *Welche fünf Kunden haben den höchsten Lifetime Value, und aus welchem Land kommen sie?*
+  (Which five customers have the highest lifetime value, and which country are they from?)
+
+**Chinese (Simplified)**
+
+- *哪个运输承运商的平均配送天数最少，成功交付率最高？*
+  (Which shipping carrier has the lowest average delivery days and the highest delivery success rate?)
+
+- *按国家划分，哪个市场的总收入最高，平均订单价值是多少？*
+  (By country, which market has the highest total revenue, and what is the average order value?)
+
+- *在所有产品类别中，哪个品牌的单位平均收入最高？*
+  (Across all product categories, which brand has the highest average revenue per unit?)
+
+**Italian**
+
+- *Quali sono i 10 prodotti più venduti per fatturato totale e quante unità ha venduto ciascuno?*
+  (What are the top 10 products by total revenue, and how many units has each sold?)
+
+- *Quanti clienti VIP abbiamo e qual è il loro valore medio nel corso della vita?*
+  (How many VIP customers do we have, and what is their average lifetime value?)
+
+- *Qual è il tasso di successo delle transazioni per ogni metodo di pagamento?*
+  (What is the transaction success rate for each payment method?)
+
+---
+
 ### Questions the agent cannot answer
 
 These questions sound reasonable but cannot be answered with the current Gold layer. The reason for each is specific: either the mart lacks a dimension, or the field was never captured anywhere in the pipeline.
