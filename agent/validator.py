@@ -20,7 +20,7 @@ import logging
 import re
 from typing import Final
 
-import sqlparse  # type: ignore[import-untyped]
+import sqlparse
 
 from agent.exceptions import SQLValidationError
 
@@ -152,7 +152,7 @@ class SQLValidator:
             )
 
         stmt = statements[0]
-        stmt_type = stmt.get_type()
+        stmt_type = stmt.get_type()  # type: ignore[no-untyped-call]
 
         if stmt_type == "SELECT":
             return
