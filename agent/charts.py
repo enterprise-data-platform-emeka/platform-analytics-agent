@@ -221,11 +221,15 @@ class ChartGenerator:
     def _best_metric_column(numeric_cols: list[str]) -> str:
         """Pick the most likely metric column from a list of numeric columns.
 
-        Prefers columns whose names contain metric hints (revenue, total, count,
-        etc.) over raw identifier columns (id, key). Falls back to the last
-        numeric column — identifiers typically appear first in SELECT lists.
+        Iterates in reverse so the last matching column wins. Claude puts
+        general counts (total_orders, rank) early in the SELECT list and
+        the specific requested metric (avg_revenue_per_unit) last. Reversing
+        means a specific metric beats a general one when both match a hint.
+
+        Falls back to the last numeric column — identifiers appear first,
+        metrics appear last.
         """
-        for col in numeric_cols:
+        for col in reversed(numeric_cols):
             col_lower = col.lower()
             if any(hint in col_lower for hint in _METRIC_HINTS):
                 return col

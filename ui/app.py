@@ -114,11 +114,7 @@ def _build_pdf(turn: dict) -> bytes:
     """Generate a PDF report from a turn dict (question, insight, assumptions, chart PNG).
 
     Returns raw PDF bytes. Uses fpdf2 — same library as the email endpoint.
-    The PNG is written to a temp file because fpdf2 requires a file path for images.
     """
-    import os
-    import tempfile
-
     from fpdf import FPDF
 
     pdf = FPDF()
@@ -140,13 +136,10 @@ def _build_pdf(turn: dict) -> bytes:
     # Chart image
     if turn.get("png_b64"):
         import base64
+        import io
 
         png_bytes = base64.b64decode(turn["png_b64"])
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-            tmp.write(png_bytes)
-            tmp_path = tmp.name
-        pdf.image(tmp_path, x=10, w=190)
-        os.unlink(tmp_path)
+        pdf.image(io.BytesIO(png_bytes), x=10, w=190)
         pdf.ln(6)
 
     # Summary
