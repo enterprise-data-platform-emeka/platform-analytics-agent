@@ -52,10 +52,14 @@ _MAX_TOKENS_CONVERSATIONAL: Final[int] = 512
 # "ANALYTICAL" = needs a new Athena query. "CONVERSATIONAL" = answerable from prior context.
 _CLASSIFY_SYSTEM: Final[str] = (
     "Classify the user message. Reply with exactly one word.\n"
-    "ANALYTICAL — requires querying a database for new or updated data.\n"
-    "CONVERSATIONAL — can be answered from prior conversation context: asking what "
-    "was said, requesting a translation or reformatting of a prior answer, asking "
-    "for clarification, or any meta-question that does not need fresh data."
+    "ANALYTICAL — requires querying a database for new or updated data. Also use "
+    "ANALYTICAL when the user explicitly asks for a chart, plot, graph, or "
+    "visualisation — even if they are requesting a repeat or translation, because "
+    "charts are only produced by running a fresh query.\n"
+    "CONVERSATIONAL — can be answered from prior conversation context alone: asking "
+    "what was said, requesting a text-only translation or summary of a prior answer, "
+    "asking for clarification, or any meta-question that does not need fresh data "
+    "and does not require a chart."
 )
 
 # System prompt for answering conversational/meta questions without hitting Athena.
