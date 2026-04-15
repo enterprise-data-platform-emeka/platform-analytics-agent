@@ -481,6 +481,7 @@ def _plotly_line(
     fig.update_layout(
         title=title or None,
         xaxis_title=x_title,
+        xaxis={"type": "category"},
         yaxis_title=y_col.replace("_", " ").title(),
         margin={"l": 60, "r": 20, "t": 50 if title else 20, "b": 60},
         height=400,

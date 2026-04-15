@@ -25,8 +25,10 @@ COPY agent/ ./agent/
 COPY ui/ ./ui/
 COPY entrypoint.sh .
 
-# Make entrypoint executable and set ownership before dropping to non-root user.
-RUN chmod +x entrypoint.sh && chown -R agent:agent /app
+# Install DejaVu fonts (required for Unicode PDF export) and set permissions.
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/* \
+    && chmod +x entrypoint.sh && chown -R agent:agent /app
 
 USER agent
 

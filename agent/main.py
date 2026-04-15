@@ -32,7 +32,6 @@ import logging
 import os
 import random
 import sys
-import tempfile
 from collections.abc import Generator
 from dataclasses import dataclass, field
 from email import encoders
@@ -341,12 +340,15 @@ try:
     class SendReportRequest(BaseModel):
         to_email: str
         question: str
-        insight: str
-        png_b64: str | None = None
+        pdf_b64: str  # complete PDF built by the UI, base64-encoded
 
     @app.post("/send-report")
     async def send_report(body: SendReportRequest) -> dict[str, str]:
-        """Generate a PDF report (chart + summary) and send it via AWS SES.
+        """Attach a pre-built PDF report and send it via AWS SES.
+
+        The UI generates the full PDF (question, chart, insight, assumptions,
+        SQL, cost, query intent) and passes it as pdf_b64. The backend decodes
+        and attaches it without rebuilding anything.
 
         Requires the SES_SENDER_EMAIL environment variable to be set and the
         address to be verified in SES. In SES sandbox mode, the recipient
@@ -361,55 +363,10 @@ try:
                 detail="SES_SENDER_EMAIL is not configured. Set it in the ECS task environment.",
             )
 
-        # Generate PDF using fpdf2.
         try:
-            from fpdf import FPDF
-
-            pdf = FPDF()
-            pdf.set_margins(15, 15, 15)
-            pdf.set_auto_page_break(auto=True, margin=15)
-            pdf.add_page()
-            W = pdf.epw  # effective page width respecting margins
-
-            try:
-                pdf.add_font("DejaVu", fname="DejaVuSans.ttf")
-                pdf.add_font("DejaVu", style="B", fname="DejaVuSans-Bold.ttf")
-                font_name = "DejaVu"
-            except Exception:
-                font_name = "Helvetica"
-
-            # Title
-            pdf.set_font(font_name, "B", 18)
-            pdf.cell(W, 12, "EDP Analytics Report", new_x="LMARGIN", new_y="NEXT")
-            pdf.ln(4)
-
-            # Question
-            pdf.set_font(font_name, "B", 12)
-            pdf.cell(W, 8, "Question", new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font(font_name, "", 11)
-            pdf.multi_cell(W, 7, body.question)
-            pdf.ln(6)
-
-            # Chart image
-            if body.png_b64:
-                png_bytes = base64.b64decode(body.png_b64)
-                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                    tmp.write(png_bytes)
-                    tmp_path = tmp.name
-                pdf.image(tmp_path, x=15, w=W)
-                os.unlink(tmp_path)
-                pdf.ln(6)
-
-            # Summary
-            pdf.set_font(font_name, "B", 12)
-            pdf.cell(W, 8, "Summary", new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font(font_name, "", 11)
-            pdf.multi_cell(W, 7, body.insight)
-
-            pdf_bytes = bytes(pdf.output())
+            pdf_bytes = base64.b64decode(body.pdf_b64)
         except Exception as exc:
-            logger.error("PDF generation failed: %s", exc, exc_info=True)
-            raise HTTPException(status_code=500, detail=f"PDF generation failed: {exc}") from exc
+            raise HTTPException(status_code=400, detail=f"Invalid pdf_b64: {exc}") from exc
 
         # Send via SES.
         try:

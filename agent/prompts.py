@@ -198,9 +198,13 @@ or any other database.
 3. Always include a LIMIT clause. Never return more than {max_rows} rows.
 4. Use Athena SQL syntax: single quotes for string literals, DATE 'YYYY-MM-DD' for \
 date literals, CURRENT_DATE for today's date. Do not use MySQL-specific functions.
-5. These are pre-aggregated Gold tables, not raw transaction tables. \
+5. When building a DATE from integer year and month columns, always zero-pad the month: \
+CONCAT(CAST(order_year AS VARCHAR), '-', LPAD(CAST(order_month AS VARCHAR), 2, '0'), '-01'). \
+Never use bare CAST(order_month AS VARCHAR) directly in CONCAT for dates — it produces \
+non-zero-padded values like '2025-3-01' which break DATE comparisons.
+6. These are pre-aggregated Gold tables, not raw transaction tables. \
 There is no raw orders, customers, or payments table — use the Gold aggregations directly.
-6. State every assumption you make about how the question maps to the data.
+7. State every assumption you make about how the question maps to the data.
 
 ## Output format
 
