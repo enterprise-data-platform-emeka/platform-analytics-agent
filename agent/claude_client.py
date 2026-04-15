@@ -43,11 +43,12 @@ MODEL: Final[str] = "claude-sonnet-4-6"
 
 # Tokens for each call type. SQL responses include the query + assumptions list.
 # Insight responses are 2-3 sentences plus a short chart title tag.
-# Classify returns one word.
+# Classify returns one word. Intent inference is one sentence.
 _MAX_TOKENS_SQL: Final[int] = 1024
 _MAX_TOKENS_INSIGHT: Final[int] = 600
 _MAX_TOKENS_CLASSIFY: Final[int] = 5
 _MAX_TOKENS_CONVERSATIONAL: Final[int] = 512
+_MAX_TOKENS_INTENT: Final[int] = 150
 
 # System prompt for the binary question classifier.
 # "ANALYTICAL" = needs a new Athena query. "CONVERSATIONAL" = answerable from prior context.
@@ -61,6 +62,15 @@ _CLASSIFY_SYSTEM: Final[str] = (
     "what was said, requesting a text-only translation or summary of a prior answer, "
     "asking for clarification, or any meta-question that does not need fresh data "
     "and does not require a chart."
+)
+
+# System prompt for inferring the business question from a SQL query (no original
+# question provided — intentionally blind so the inference is unbiased).
+_INTENT_SYSTEM: Final[str] = (
+    "You are a SQL analyst. Given a SQL query, identify the business question it "
+    "is trying to answer. Reply with exactly one plain-English sentence starting "
+    "with 'What' or 'Which' or 'How'. Do not mention SQL, tables, or column names. "
+    "Base your answer solely on what the query measures and filters."
 )
 
 # System prompt for answering conversational/meta questions without hitting Athena.
@@ -263,6 +273,42 @@ class ClaudeClient:
             max_tokens=_MAX_TOKENS_CONVERSATIONAL,
         )
         return self._parse_insight_response(response)
+
+    def infer_question_from_sql(self, sql: str) -> str:
+        """Infer the business question a SQL query is trying to answer.
+
+        Makes a fresh Claude call with ONLY the SQL — the original question is
+        deliberately withheld so the inference is unbiased. The result is used
+        as a sanity check: if the inferred question matches the user's intent,
+        the generated SQL is answering the right thing.
+
+        Args:
+            sql: The validated SQL query that was executed against Athena.
+
+        Returns:
+            One plain-English sentence describing what the SQL is measuring.
+            Returns an empty string on any error so callers can treat it as
+            optional metadata.
+        """
+        try:
+            response = self._call(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            "What business question is this SQL query trying to answer?\n\n"
+                            f"```sql\n{sql}\n```"
+                        ),
+                    }
+                ],
+                system=_INTENT_SYSTEM,
+                tools=None,
+                max_tokens=_MAX_TOKENS_INTENT,
+            )
+            return self._extract_text(response).strip()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("SQL intent inference failed: %s", exc)
+            return ""
 
     # ── Private helpers ────────────────────────────────────────────────────────
 

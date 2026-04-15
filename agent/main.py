@@ -68,11 +68,14 @@ class AskResult:
         response: InsightResponse with insight text, assumptions, cost, flags.
         chart: ChartOutput with PNG bytes, Plotly HTML, and presigned S3 URL.
         sql: The final SQL query executed against Athena.
+        inferred_question: Claude's blind inference of what the SQL is answering.
+            Empty string if the inference call failed or sql is empty.
     """
 
     response: InsightResponse
     chart: ChartOutput
     sql: str
+    inferred_question: str = ""
 
 
 class AgentSession:
@@ -205,7 +208,14 @@ class AgentSession:
 
         self._audit.write(question=question, sql=generated.sql, response=response)
 
-        return AskResult(response=response, chart=chart, sql=generated.sql)
+        inferred_question = self._client.infer_question_from_sql(generated.sql)
+
+        return AskResult(
+            response=response,
+            chart=chart,
+            sql=generated.sql,
+            inferred_question=inferred_question,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +259,7 @@ try:
         html_chart: str | None
         png_b64: str | None  # base64-encoded matplotlib PNG for PDF report generation
         sql: str
+        inferred_question: str  # Claude's blind inference of what the SQL answers
 
     @app.post("/ask", response_model=AskResponse)
     async def ask_endpoint(body: AskRequest) -> AskResponse:
@@ -308,6 +319,7 @@ try:
             html_chart=result.chart.html,
             png_b64=png_b64,
             sql=result.sql,
+            inferred_question=result.inferred_question,
         )
 
     class SendReportRequest(BaseModel):

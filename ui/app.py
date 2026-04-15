@@ -13,6 +13,37 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
+# Injected into every html_chart before rendering. Measures the document's
+# actual scroll height and writes it back to the parent iframe element so
+# Streamlit's fixed-height iframe shrinks to fit the content exactly.
+# Multiple timers cover both synchronous tables and async Plotly renders.
+_IFRAME_RESIZE_SCRIPT: str = """
+<script>
+(function () {
+    function fit() {
+        try {
+            var h = Math.max(
+                document.body.scrollHeight,
+                document.documentElement.scrollHeight
+            ) + 16;
+            if (window.frameElement) {
+                window.frameElement.style.height = h + "px";
+                window.frameElement.height = h;
+            }
+        } catch (e) {}
+    }
+    fit();
+    document.addEventListener("DOMContentLoaded", fit);
+    window.addEventListener("load", fit);
+    if (window.ResizeObserver) {
+        new ResizeObserver(fit).observe(document.body);
+    }
+    setTimeout(fit, 200);
+    setTimeout(fit, 800);
+}());
+</script>
+"""
+
 BACKEND_URL = "http://localhost:8080"
 
 EXAMPLE_QUESTIONS = [
@@ -172,9 +203,15 @@ def _render_turn(turn: dict, form_key: str) -> None:
     for flag in turn.get("validation_flags", []):
         st.warning(f"Data quality notice: {flag}")
 
-    # Chart
+    # Chart — 800px is the maximum allocation; the resize script immediately
+    # shrinks the iframe to the actual rendered content height so there is no
+    # dead space below small tables or tall bar charts.
     if turn.get("html_chart"):
-        components.html(turn["html_chart"], height=460, scrolling=False)
+        components.html(
+            turn["html_chart"] + _IFRAME_RESIZE_SCRIPT,
+            height=800,
+            scrolling=False,
+        )
 
     # Download PDF — available for any turn that has a chart or insight
     try:
@@ -186,8 +223,10 @@ def _render_turn(turn: dict, form_key: str) -> None:
             mime="application/pdf",
             key=f"pdf_{form_key}",
         )
-    except Exception:  # noqa: BLE001
-        pass  # silently skip if PDF generation fails
+    except ImportError:
+        st.caption("PDF unavailable — run `pip install fpdf2` to enable downloads.")
+    except Exception as exc:  # noqa: BLE001
+        st.caption(f"PDF generation failed: {exc}")
 
     # Assumptions
     if turn.get("assumptions"):
@@ -235,6 +274,23 @@ def _render_turn(turn: dict, form_key: str) -> None:
             c1.metric("Athena cost", _format_cost(turn["cost_usd"]))
             c2.metric("Data scanned", _format_bytes(turn["bytes_scanned"]))
             c3.metric("Chart type", turn.get("chart_type", "—").title())
+
+            if turn.get("inferred_question"):
+                st.divider()
+                st.caption("**Query intent check**")
+                st.caption(
+                    "Claude was shown only the SQL (not your question) and asked "
+                    "what it thinks the query is trying to answer:"
+                )
+                inferred = turn["inferred_question"]
+                escaped_inferred = html_lib.escape(inferred)
+                st.markdown(
+                    f'<div style="background:#f8fafc;border-left:3px solid #94a3b8;'
+                    f'padding:10px 14px;border-radius:0 4px 4px 0;font-size:14px;'
+                    f'color:#334155;margin:4px 0;">'
+                    f'<strong>Inferred:</strong> {escaped_inferred}</div>',
+                    unsafe_allow_html=True,
+                )
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -332,6 +388,7 @@ if question:
             "bytes_scanned": data["bytes_scanned"],
             "validation_flags": data.get("validation_flags", []),
             "chart_type": data.get("chart_type", ""),
+            "inferred_question": data.get("inferred_question", ""),
         }
         _render_turn(turn, form_key="current")
         st.session_state.history.append(turn)
