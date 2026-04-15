@@ -33,11 +33,13 @@ import os
 import random
 import sys
 import tempfile
+from collections.abc import Generator
 from dataclasses import dataclass, field
 from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from typing import Any, cast
 
 from agent.audit import AuditLogger
 from agent.charts import ChartGenerator, ChartOutput
@@ -467,7 +469,7 @@ try:
         return {"questions": random.sample(_EXAMPLE_POOL, min(4, len(_EXAMPLE_POOL)))}
 
     @app.post("/ask/stream")
-    def ask_stream(body: AskRequest):  # type: ignore[return]
+    def ask_stream(body: AskRequest) -> Any:
         """Stream the full pipeline response as newline-delimited JSON events.
 
         Each line is a JSON object with a 'type' field:
@@ -482,7 +484,7 @@ try:
 
         if not body.question.strip():
 
-            def _err():
+            def _err() -> Generator[str, None, None]:
                 yield json.dumps({"type": "error", "text": "question must not be empty"}) + "\n"
 
             return SR(_err(), media_type="application/x-ndjson")
@@ -494,7 +496,7 @@ try:
             conversation = _store.get(body.session_id)
         prior_context = conversation.context_summary() if conversation else ""
 
-        def _generate():
+        def _generate() -> Generator[str, None, None]:
             yield json.dumps({"type": "status", "text": "Analyzing your question..."}) + "\n"
 
             question_type = _session._client.classify_question(body.question, prior_context)
@@ -507,7 +509,9 @@ try:
                     yield json.dumps({"type": "error", "text": str(exc)}) + "\n"
                     return
 
-                session_id: str = body.session_id if conversation is not None else _store.create()
+                session_id: str = (
+                    cast(str, body.session_id) if conversation is not None else _store.create()
+                )
                 _store.append_turn(
                     session_id,
                     Turn(
@@ -577,9 +581,7 @@ try:
             else:
                 from agent.insight import InsightGenerator
 
-                result_markdown = InsightGenerator._sample_markdown(  # type: ignore[attr-defined]
-                    query_result
-                )
+                result_markdown = InsightGenerator._sample_markdown(query_result)
 
             result_container: dict[str, str] = {}
             token_iter, result_container = _session._client.stream_insight_tokens(
@@ -617,7 +619,7 @@ try:
             )
             inferred_question = _session._client.infer_question_from_sql(generated.sql)
 
-            session_id = body.session_id if conversation is not None else _store.create()
+            session_id = cast(str, body.session_id) if conversation is not None else _store.create()
             _store.append_turn(
                 session_id,
                 Turn(

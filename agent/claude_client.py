@@ -23,6 +23,7 @@ from typing import Any, Final, cast
 
 import anthropic
 import boto3
+from anthropic.types import MessageParam
 from botocore.exceptions import ClientError
 
 from agent.config import AWSConfig, Config
@@ -307,7 +308,7 @@ class ClaudeClient:
                 model=MODEL,
                 max_tokens=_MAX_TOKENS_INSIGHT,
                 system=INSIGHT_SYSTEM_PROMPT,
-                messages=messages,
+                messages=cast(list[MessageParam], messages),
             ) as stream:
                 for text in stream.text_stream:
                     full_text += text
