@@ -7,57 +7,115 @@ Stakeholders open the ALB DNS address on port 8501 in a browser. All AWS API
 calls happen server-side in the container — the browser never touches AWS.
 """
 
+import html as html_lib
+
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
 BACKEND_URL = "http://localhost:8080"
 
+EXAMPLE_QUESTIONS = [
+    "Which country has the highest total revenue?",
+    "What are the top 10 best-selling products by revenue?",
+    "Which carrier has the fastest average delivery time?",
+    "Show me monthly revenue trends for the last year.",
+]
+
 st.set_page_config(
     page_title="EDP Analytics Agent",
+    page_icon="📊",
     layout="wide",
 )
 
-st.title("EDP Analytics Agent")
-st.caption(
-    "Ask questions about your Gold data in any language. Follow-up questions remember prior context."
+# ── Custom CSS ────────────────────────────────────────────────────────────────
+st.markdown(
+    """
+<style>
+/* Constrain content width for readability */
+.block-container { max-width: 960px; padding-top: 1.5rem; }
+
+/* Insight callout card */
+.insight-card {
+    background: #f0f7ff;
+    border-left: 4px solid #2563EB;
+    padding: 14px 18px;
+    border-radius: 0 6px 6px 0;
+    font-size: 15px;
+    line-height: 1.7;
+    margin: 4px 0 14px 0;
+    color: #1e293b;
+}
+
+/* Slightly larger chat text */
+.stChatMessage p { font-size: 14.5px; line-height: 1.6; }
+
+/* Tighten expander padding */
+.streamlit-expanderContent { padding: 8px 12px !important; }
+
+/* Metric label smaller */
+[data-testid="stMetricLabel"] { font-size: 12px !important; }
+</style>
+""",
+    unsafe_allow_html=True,
 )
 
-# ── Session state initialisation ──────────────────────────────────────────────
+# ── Session state ─────────────────────────────────────────────────────────────
 if "session_id" not in st.session_state:
     st.session_state.session_id = None
 if "history" not in st.session_state:
     st.session_state.history = []
+if "pending_question" not in st.session_state:
+    st.session_state.pending_question = None
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.header("Session")
-    if st.session_state.session_id:
-        st.caption(f"Active session: `{st.session_state.session_id[:8]}...`")
-    else:
-        st.caption("No active session.")
-    if st.button("Start new session", use_container_width=True):
-        st.session_state.session_id = None
-        st.session_state.history = []
-        st.rerun()
 
-# ── Conversation history ──────────────────────────────────────────────────────
-for i, turn in enumerate(st.session_state.history):
-    with st.chat_message("user"):
-        st.write(turn["question"])
-    with st.chat_message("assistant"):
-        st.write(turn["insight"].replace("$", r"\$"))
-        if turn.get("assumptions"):
-            with st.expander("Assumptions"):
-                for assumption in turn["assumptions"]:
-                    st.write(f"- {assumption}")
-        if turn.get("html_chart"):
-            components.html(turn["html_chart"], height=450, scrolling=False)
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _format_bytes(n: int) -> str:
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 ** 2:
+        return f"{n / 1024:.1f} KB"
+    return f"{n / 1024 ** 2:.2f} MB"
+
+
+def _format_cost(usd: float) -> str:
+    if usd == 0:
+        return "—"
+    if usd < 0.001:
+        return f"${usd:.6f}"
+    return f"${usd:.4f}"
+
+
+def _render_turn(turn: dict, form_key: str) -> None:
+    """Render one Q&A turn. Works for both history replay and live response."""
+    is_analytical = bool(turn.get("sql"))
+
+    # Insight card
+    escaped = html_lib.escape(turn["insight"]).replace("\n", "<br>")
+    st.markdown(f'<div class="insight-card">{escaped}</div>', unsafe_allow_html=True)
+
+    # Validation flags — shown inline, not buried
+    for flag in turn.get("validation_flags", []):
+        st.warning(f"Data quality notice: {flag}")
+
+    # Chart
+    if turn.get("html_chart"):
+        components.html(turn["html_chart"], height=460, scrolling=False)
+
+    # Assumptions
+    if turn.get("assumptions"):
+        with st.expander("Assumptions"):
+            for item in turn["assumptions"]:
+                st.caption(f"• {item}")
+
+    # Email + Query details — only for analytical turns that hit Athena
+    if is_analytical:
         with st.expander("Send as email"):
-            with st.form(key=f"email_form_{i}"):
+            with st.form(key=f"email_{form_key}"):
                 to_email = st.text_input("Recipient email address")
-                submitted = st.form_submit_button("Send PDF report")
-            if submitted:
+                send = st.form_submit_button("Send PDF report")
+            if send:
                 if not to_email:
                     st.warning("Enter a recipient email address.")
                 else:
@@ -82,26 +140,76 @@ for i, turn in enumerate(st.session_state.history):
                                 else str(exc)
                             )
                             st.error(f"Failed: {detail}")
-                        except Exception as exc:
+                        except Exception as exc:  # noqa: BLE001
                             st.error(f"Failed: {exc}")
+
         with st.expander("Query details"):
-            if turn.get("sql"):
-                st.code(turn["sql"], language="sql")
-            col1, col2 = st.columns(2)
-            col1.metric("Cost", f"${turn['cost_usd']:.4f}")
-            col2.metric("Bytes scanned", f"{turn['bytes_scanned']:,}")
-            if turn.get("validation_flags"):
-                st.warning("Flags: " + ", ".join(turn["validation_flags"]))
+            st.code(turn["sql"], language="sql")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Athena cost", _format_cost(turn["cost_usd"]))
+            c2.metric("Data scanned", _format_bytes(turn["bytes_scanned"]))
+            c3.metric("Chart type", turn.get("chart_type", "—").title())
+
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.header("Session")
+    if st.session_state.session_id:
+        st.caption(f"ID: `{st.session_state.session_id[:8]}...`")
+        n = len(st.session_state.history)
+        st.caption(f"{n} question{'s' if n != 1 else ''} this session")
+    else:
+        st.caption("No active session.")
+
+    if st.button("Start new session", use_container_width=True):
+        st.session_state.session_id = None
+        st.session_state.history = []
+        st.rerun()
+
+    if st.session_state.history:
+        st.divider()
+        st.caption("**History**")
+        for i, t in enumerate(st.session_state.history, 1):
+            q = t["question"]
+            label = q if len(q) <= 42 else q[:39] + "..."
+            st.caption(f"{i}. {label}")
+
+# ── Page header ───────────────────────────────────────────────────────────────
+st.title("📊 EDP Analytics Agent")
+st.caption(
+    "Ask questions about your Gold data in any language. "
+    "Follow-up questions remember prior context."
+)
+
+# ── Empty state — example questions ──────────────────────────────────────────
+if not st.session_state.history:
+    st.markdown("#### Try asking:")
+    col_a, col_b = st.columns(2)
+    for i, eq in enumerate(EXAMPLE_QUESTIONS):
+        target_col = col_a if i % 2 == 0 else col_b
+        if target_col.button(eq, key=f"ex_{i}", use_container_width=True):
+            st.session_state.pending_question = eq
+            st.rerun()
+
+# ── Conversation history ──────────────────────────────────────────────────────
+for idx, turn in enumerate(st.session_state.history):
+    with st.chat_message("user"):
+        st.write(turn["question"])
+    with st.chat_message("assistant"):
+        _render_turn(turn, form_key=str(idx))
 
 # ── Question input ────────────────────────────────────────────────────────────
-question = st.chat_input("Ask a question about your data...")
+chat_question = st.chat_input("Ask a question about your data...")
+question = chat_question or st.session_state.pending_question
+if st.session_state.pending_question:
+    st.session_state.pending_question = None
 
 if question:
     with st.chat_message("user"):
         st.write(question)
 
     with st.chat_message("assistant"):
-        with st.spinner("Running query..."):
+        with st.spinner("Querying your data..."):
             payload: dict = {"question": question}
             if st.session_state.session_id:
                 payload["session_id"] = st.session_state.session_id
@@ -118,77 +226,28 @@ if question:
                 st.error("Request timed out. The query may be complex — try again.")
                 st.stop()
             except requests.exceptions.HTTPError as exc:
-                detail = exc.response.json().get("detail", str(exc)) if exc.response else str(exc)
+                detail = (
+                    exc.response.json().get("detail", str(exc)) if exc.response else str(exc)
+                )
                 st.error(f"Agent error: {detail}")
                 st.stop()
             except requests.exceptions.RequestException as exc:
                 st.error(f"Could not reach backend: {exc}")
                 st.stop()
 
-        # Reached only if the request succeeded.
         st.session_state.session_id = data["session_id"]
 
-        st.write(data["insight"].replace("$", r"\$"))
-
-        if data.get("assumptions"):
-            with st.expander("Assumptions"):
-                for assumption in data["assumptions"]:
-                    st.write(f"- {assumption}")
-
-        if data.get("html_chart"):
-            components.html(data["html_chart"], height=450, scrolling=False)
-
-        with st.expander("Send as email"):
-            with st.form(key="email_form_current"):
-                to_email = st.text_input("Recipient email address")
-                submitted = st.form_submit_button("Send PDF report")
-            if submitted:
-                if not to_email:
-                    st.warning("Enter a recipient email address.")
-                else:
-                    with st.spinner("Generating PDF and sending..."):
-                        try:
-                            r = requests.post(
-                                f"{BACKEND_URL}/send-report",
-                                json={
-                                    "to_email": to_email,
-                                    "question": question,
-                                    "insight": data["insight"],
-                                    "png_b64": data.get("png_b64"),
-                                },
-                                timeout=30,
-                            )
-                            r.raise_for_status()
-                            st.success(f"Report sent to {to_email}")
-                        except requests.exceptions.HTTPError as exc:
-                            detail = (
-                                exc.response.json().get("detail", str(exc))
-                                if exc.response
-                                else str(exc)
-                            )
-                            st.error(f"Failed: {detail}")
-                        except Exception as exc:
-                            st.error(f"Failed: {exc}")
-
-        with st.expander("Query details"):
-            if data.get("sql"):
-                st.code(data["sql"], language="sql")
-            col1, col2 = st.columns(2)
-            col1.metric("Cost", f"${data['cost_usd']:.4f}")
-            col2.metric("Bytes scanned", f"{data['bytes_scanned']:,}")
-            if data.get("validation_flags"):
-                st.warning("Flags: " + ", ".join(data["validation_flags"]))
-
-        st.session_state.history.append(
-            {
-                "question": question,
-                "insight": data["insight"],
-                "assumptions": data.get("assumptions", []),
-                "html_chart": data.get("html_chart"),
-                "sql": data.get("sql"),
-                "png_b64": data.get("png_b64"),
-                "cost_usd": data["cost_usd"],
-                "bytes_scanned": data["bytes_scanned"],
-                "validation_flags": data.get("validation_flags", []),
-            }
-        )
+        turn = {
+            "question": question,
+            "insight": data["insight"],
+            "assumptions": data.get("assumptions", []),
+            "html_chart": data.get("html_chart"),
+            "sql": data.get("sql", ""),
+            "png_b64": data.get("png_b64"),
+            "cost_usd": data["cost_usd"],
+            "bytes_scanned": data["bytes_scanned"],
+            "validation_flags": data.get("validation_flags", []),
+            "chart_type": data.get("chart_type", ""),
+        }
+        _render_turn(turn, form_key="current")
+        st.session_state.history.append(turn)
