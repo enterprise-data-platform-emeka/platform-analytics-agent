@@ -1,6 +1,6 @@
 """Analytics Agent Streamlit UI.
 
-Calls the FastAPI backend at localhost:8080/ask. Both processes run in the same
+Calls the FastAPI backend at localhost:8080. Both processes run in the same
 ECS Fargate container, started by entrypoint.sh after FastAPI is healthy.
 
 Stakeholders open the ALB DNS address on port 8501 in a browser. All AWS API
@@ -8,50 +8,32 @@ calls happen server-side in the container — the browser never touches AWS.
 """
 
 import html as html_lib
+import json
+import re
 
+import pandas as pd
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-# Injected into every html_chart before rendering. Measures the document's
-# actual scroll height and writes it back to the parent iframe element so
-# Streamlit's fixed-height iframe shrinks to fit the content exactly.
-# Multiple timers cover both synchronous tables and async Plotly renders.
-_IFRAME_RESIZE_SCRIPT: str = """
-<script>
-(function () {
-    function fit() {
-        try {
-            var h = Math.max(
-                document.body.scrollHeight,
-                document.documentElement.scrollHeight
-            ) + 16;
-            if (window.frameElement) {
-                window.frameElement.style.height = h + "px";
-                window.frameElement.height = h;
-            }
-        } catch (e) {}
-    }
-    fit();
-    document.addEventListener("DOMContentLoaded", fit);
-    window.addEventListener("load", fit);
-    if (window.ResizeObserver) {
-        new ResizeObserver(fit).observe(document.body);
-    }
-    setTimeout(fit, 200);
-    setTimeout(fit, 800);
-}());
-</script>
-"""
-
 BACKEND_URL = "http://localhost:8080"
 
-EXAMPLE_QUESTIONS = [
+# Fallback example questions used when /examples endpoint is unreachable.
+_FALLBACK_EXAMPLES = [
     "Which country has the highest total revenue?",
     "What are the top 10 best-selling products by revenue?",
     "Which carrier has the fastest average delivery time?",
     "Show me monthly revenue trends for the last year.",
 ]
+
+# Rephrasing tips shown when SQL generation fails.
+_REPHRASE_TIPS = (
+    "**Tips for rephrasing:**\n"
+    "- Be specific about time periods: *'in 2024'*, *'last 6 months'*\n"
+    "- Ask about one metric at a time: revenue, orders, delivery time\n"
+    "- Use table-level language: *'by country'*, *'per carrier'*, *'by product'*\n"
+    "- Avoid open-ended questions — the Gold tables are pre-aggregated summaries"
+)
 
 st.set_page_config(
     page_title="EDP Analytics Agent",
@@ -63,10 +45,8 @@ st.set_page_config(
 st.markdown(
     """
 <style>
-/* Constrain content width for readability */
 .block-container { max-width: 960px; padding-top: 1.5rem; }
 
-/* Insight callout card */
 .insight-card {
     background: #f0f7ff;
     border-left: 4px solid #2563EB;
@@ -78,13 +58,8 @@ st.markdown(
     color: #1e293b;
 }
 
-/* Slightly larger chat text */
 .stChatMessage p { font-size: 14.5px; line-height: 1.6; }
-
-/* Tighten expander padding */
 .streamlit-expanderContent { padding: 8px 12px !important; }
-
-/* Metric label smaller */
 [data-testid="stMetricLabel"] { font-size: 12px !important; }
 </style>
 """,
@@ -119,49 +94,44 @@ def _format_cost(usd: float) -> str:
     return f"${usd:.4f}"
 
 
-def _latin1_safe(text: str) -> str:
-    """Sanitise text for fpdf2 core fonts (Helvetica = Latin-1 only).
-
-    Replaces the most common non-Latin-1 characters so PDF generation
-    doesn't raise FPDFUnicodeEncodingException. Any remaining unmappable
-    chars are replaced with '?' rather than crashing.
-    """
-    return (
-        text.replace("€", "EUR")
-        .replace("£", "GBP")
-        .replace("•", "-")
-        .replace("\u2013", "-")
-        .replace("\u2014", "-")
-        .replace("\u2018", "'")
-        .replace("\u2019", "'")
-        .replace("\u201c", '"')
-        .replace("\u201d", '"')
-        .encode("latin-1", errors="replace")
-        .decode("latin-1")
-    )
+def _clean_insight_stream(text: str) -> str:
+    """Strip XML tags from partial streaming text for live display."""
+    # Remove complete <chart_title> blocks
+    text = re.sub(r"<chart_title>.*?</chart_title>", "", text, flags=re.DOTALL)
+    # Remove incomplete opening/closing tag at the trailing edge
+    text = re.sub(r"<[^>]*$", "", text)
+    # Remove any remaining complete tags
+    text = re.sub(r"<[^>]+>", "", text)
+    return text.strip()
 
 
 def _build_pdf(turn: dict) -> bytes:
-    """Generate a PDF report from a turn dict (question, insight, assumptions, chart PNG).
-
-    Returns raw PDF bytes. Uses fpdf2 — same library as the email endpoint.
-    """
+    """Generate a PDF report from a turn dict. Returns raw PDF bytes."""
     from fpdf import FPDF
 
     pdf = FPDF()
+    pdf.set_margins(15, 15, 15)
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
+    W = pdf.epw  # effective page width, accounts for both margins
+
+    try:
+        pdf.add_font("DejaVu", fname="DejaVuSans.ttf")
+        pdf.add_font("DejaVu", style="B", fname="DejaVuSans-Bold.ttf")
+        font_name = "DejaVu"
+    except Exception:
+        font_name = "Helvetica"
 
     # Title
-    pdf.set_font("Helvetica", "B", 18)
-    pdf.cell(0, 12, "EDP Analytics Report", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font(font_name, "B", 18)
+    pdf.cell(W, 12, "EDP Analytics Report", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
 
     # Question
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, "Question", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "", 11)
-    pdf.multi_cell(0, 7, _latin1_safe(turn["question"]))
+    pdf.set_font(font_name, "B", 12)
+    pdf.cell(W, 8, "Question", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font(font_name, "", 11)
+    pdf.multi_cell(W, 7, turn["question"])
     pdf.ln(6)
 
     # Chart image
@@ -170,23 +140,23 @@ def _build_pdf(turn: dict) -> bytes:
         import io
 
         png_bytes = base64.b64decode(turn["png_b64"])
-        pdf.image(io.BytesIO(png_bytes), x=10, w=190)
+        pdf.image(io.BytesIO(png_bytes), x=15, w=W)
         pdf.ln(6)
 
     # Summary
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, "Summary", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "", 11)
-    pdf.multi_cell(0, 7, _latin1_safe(turn["insight"]))
+    pdf.set_font(font_name, "B", 12)
+    pdf.cell(W, 8, "Summary", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font(font_name, "", 11)
+    pdf.multi_cell(W, 7, turn["insight"])
 
     # Assumptions
     if turn.get("assumptions"):
         pdf.ln(6)
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 8, "Assumptions", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font("Helvetica", "", 10)
+        pdf.set_font(font_name, "B", 12)
+        pdf.cell(W, 8, "Assumptions", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font(font_name, "", 10)
         for item in turn["assumptions"]:
-            pdf.multi_cell(0, 6, f"- {_latin1_safe(item)}")
+            pdf.multi_cell(W, 6, f"- {item}")
 
     return bytes(pdf.output())
 
@@ -199,21 +169,27 @@ def _render_turn(turn: dict, form_key: str) -> None:
     escaped = html_lib.escape(turn["insight"]).replace("\n", "<br>")
     st.markdown(f'<div class="insight-card">{escaped}</div>', unsafe_allow_html=True)
 
-    # Validation flags — shown inline, not buried
+    # Validation flags
     for flag in turn.get("validation_flags", []):
         st.warning(f"Data quality notice: {flag}")
 
-    # Chart — 800px is the maximum allocation; the resize script immediately
-    # shrinks the iframe to the actual rendered content height so there is no
-    # dead space below small tables or tall bar charts.
+    # Chart with chart/table toggle
     if turn.get("html_chart"):
-        components.html(
-            turn["html_chart"] + _IFRAME_RESIZE_SCRIPT,
-            height=800,
-            scrolling=False,
-        )
+        chart_h = turn.get("chart_height", 400)
+        has_raw = bool(turn.get("columns") and turn.get("rows"))
 
-    # Download PDF — available for any turn that has a chart or insight
+        if has_raw:
+            view_key = f"view_{form_key}"
+            view = st.radio("View as", ["Chart", "Table"], horizontal=True, key=view_key)
+            if view == "Table":
+                df = pd.DataFrame(turn["rows"])
+                st.dataframe(df, use_container_width=True)
+            else:
+                components.html(turn["html_chart"], height=chart_h, scrolling=False)
+        else:
+            components.html(turn["html_chart"], height=chart_h, scrolling=False)
+
+    # Download PDF
     try:
         pdf_bytes = _build_pdf(turn)
         st.download_button(
@@ -234,7 +210,7 @@ def _render_turn(turn: dict, form_key: str) -> None:
             for item in turn["assumptions"]:
                 st.caption(f"• {item}")
 
-    # Email + Query details — only for analytical turns that hit Athena
+    # Email + Query details — only for analytical turns
     if is_analytical:
         with st.expander("Send as email"):
             with st.form(key=f"email_{form_key}"):
@@ -275,22 +251,44 @@ def _render_turn(turn: dict, form_key: str) -> None:
             c2.metric("Data scanned", _format_bytes(turn["bytes_scanned"]))
             c3.metric("Chart type", turn.get("chart_type", "—").title())
 
+            # Lazy query intent check — only revealed on demand so the extra
+            # Claude call doesn't block page render.
             if turn.get("inferred_question"):
                 st.divider()
-                st.caption("**Query intent check**")
-                st.caption(
-                    "Claude was shown only the SQL (not your question) and asked "
-                    "what it thinks the query is trying to answer:"
-                )
-                inferred = turn["inferred_question"]
-                escaped_inferred = html_lib.escape(inferred)
-                st.markdown(
-                    f'<div style="background:#f8fafc;border-left:3px solid #94a3b8;'
-                    f"padding:10px 14px;border-radius:0 4px 4px 0;font-size:14px;"
-                    f'color:#334155;margin:4px 0;">'
-                    f"<strong>Inferred:</strong> {escaped_inferred}</div>",
-                    unsafe_allow_html=True,
-                )
+                intent_shown_key = f"intent_shown_{form_key}"
+                if not st.session_state.get(intent_shown_key):
+                    if st.button("Show query intent check", key=f"intent_btn_{form_key}"):
+                        st.session_state[intent_shown_key] = True
+                        st.rerun()
+                if st.session_state.get(intent_shown_key):
+                    st.caption("**Query intent check**")
+                    st.caption(
+                        "Claude was shown only the SQL (not your question) and asked "
+                        "what it thinks the query is trying to answer:"
+                    )
+                    inferred = turn["inferred_question"]
+                    escaped_inferred = html_lib.escape(inferred)
+                    st.markdown(
+                        f'<div style="background:#f8fafc;border-left:3px solid #94a3b8;'
+                        f"padding:10px 14px;border-radius:0 4px 4px 0;font-size:14px;"
+                        f'color:#334155;margin:4px 0;">'
+                        f"<strong>Inferred:</strong> {escaped_inferred}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_examples() -> list[str]:
+    """Fetch example questions from the backend. Falls back to hardcoded list."""
+    try:
+        r = requests.get(f"{BACKEND_URL}/examples", timeout=5)
+        r.raise_for_status()
+        questions = r.json().get("questions", [])
+        if questions:
+            return questions
+    except Exception:  # noqa: BLE001
+        pass
+    return _FALLBACK_EXAMPLES
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -310,11 +308,61 @@ with st.sidebar:
 
     if st.session_state.history:
         st.divider()
+        # Export conversation as JSON
+        export_data = [
+            {
+                "question": t["question"],
+                "insight": t["insight"],
+                "sql": t.get("sql", ""),
+                "assumptions": t.get("assumptions", []),
+            }
+            for t in st.session_state.history
+        ]
+        st.download_button(
+            "Export conversation (JSON)",
+            data=json.dumps(export_data, indent=2, ensure_ascii=False),
+            file_name="edp_conversation.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+
+        st.divider()
         st.caption("**History**")
         for i, t in enumerate(st.session_state.history, 1):
             q = t["question"]
             label = q if len(q) <= 42 else q[:39] + "..."
             st.caption(f"{i}. {label}")
+
+    # Import conversation
+    st.divider()
+    uploaded = st.file_uploader("Import conversation (JSON)", type="json", key="import_file")
+    if uploaded is not None:
+        try:
+            imported: list[dict] = json.loads(uploaded.read())
+            st.session_state.history = [
+                {
+                    "question": t["question"],
+                    "insight": t["insight"],
+                    "sql": t.get("sql", ""),
+                    "assumptions": t.get("assumptions", []),
+                    "html_chart": None,
+                    "png_b64": None,
+                    "cost_usd": 0.0,
+                    "bytes_scanned": 0,
+                    "validation_flags": [],
+                    "chart_type": "",
+                    "inferred_question": "",
+                    "columns": [],
+                    "rows": [],
+                    "chart_height": 0,
+                }
+                for t in imported
+            ]
+            st.session_state.session_id = None
+            st.success(f"Restored {len(imported)} turns.")
+            st.rerun()
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Import failed: {exc}")
 
 # ── Page header ───────────────────────────────────────────────────────────────
 st.title("📊 EDP Analytics Agent")
@@ -326,8 +374,9 @@ st.caption(
 # ── Empty state — example questions ──────────────────────────────────────────
 if not st.session_state.history:
     st.markdown("#### Try asking:")
+    example_questions = _load_examples()
     col_a, col_b = st.columns(2)
-    for i, eq in enumerate(EXAMPLE_QUESTIONS):
+    for i, eq in enumerate(example_questions):
         target_col = col_a if i % 2 == 0 else col_b
         if target_col.button(eq, key=f"ex_{i}", use_container_width=True):
             st.session_state.pending_question = eq
@@ -351,44 +400,92 @@ if question:
         st.write(question)
 
     with st.chat_message("assistant"):
-        with st.spinner("Querying your data..."):
-            payload: dict = {"question": question}
-            if st.session_state.session_id:
-                payload["session_id"] = st.session_state.session_id
+        _status = st.empty()
+        _insight_stream = st.empty()
 
-            try:
-                resp = requests.post(
-                    f"{BACKEND_URL}/ask",
-                    json=payload,
-                    timeout=120,
-                )
+        payload: dict = {"question": question}
+        if st.session_state.session_id:
+            payload["session_id"] = st.session_state.session_id
+
+        turn_data: dict | None = None
+        streamed_insight = ""
+
+        try:
+            with requests.post(
+                f"{BACKEND_URL}/ask/stream",
+                json=payload,
+                stream=True,
+                timeout=120,
+            ) as resp:
                 resp.raise_for_status()
-                data = resp.json()
-            except requests.exceptions.Timeout:
-                st.error("Request timed out. The query may be complex — try again.")
-                st.stop()
-            except requests.exceptions.HTTPError as exc:
-                detail = exc.response.json().get("detail", str(exc)) if exc.response else str(exc)
-                st.error(f"Agent error: {detail}")
-                st.stop()
-            except requests.exceptions.RequestException as exc:
-                st.error(f"Could not reach backend: {exc}")
-                st.stop()
+                for raw_line in resp.iter_lines():
+                    if not raw_line:
+                        continue
+                    try:
+                        event = json.loads(raw_line)
+                    except Exception:  # noqa: BLE001
+                        continue
 
-        st.session_state.session_id = data["session_id"]
+                    etype = event.get("type")
+                    if etype == "status":
+                        _status.caption(f"_{event['text']}_")
+                    elif etype == "token":
+                        streamed_insight += event["text"]
+                        cleaned = _clean_insight_stream(streamed_insight)
+                        if cleaned:
+                            _insight_stream.markdown(
+                                f'<div class="insight-card">'
+                                f"{html_lib.escape(cleaned).replace(chr(10), '<br>')}"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
+                    elif etype == "error":
+                        _status.empty()
+                        _insight_stream.empty()
+                        st.error(f"Could not answer: {event['text']}")
+                        with st.expander("Tips for rephrasing your question"):
+                            st.markdown(_REPHRASE_TIPS)
+                        st.stop()
+                    elif etype == "done":
+                        turn_data = event["data"]
+                        _status.empty()
+                        _insight_stream.empty()
 
-        turn = {
-            "question": question,
-            "insight": data["insight"],
-            "assumptions": data.get("assumptions", []),
-            "html_chart": data.get("html_chart"),
-            "sql": data.get("sql", ""),
-            "png_b64": data.get("png_b64"),
-            "cost_usd": data["cost_usd"],
-            "bytes_scanned": data["bytes_scanned"],
-            "validation_flags": data.get("validation_flags", []),
-            "chart_type": data.get("chart_type", ""),
-            "inferred_question": data.get("inferred_question", ""),
-        }
-        _render_turn(turn, form_key="current")
-        st.session_state.history.append(turn)
+        except requests.exceptions.Timeout:
+            _status.empty()
+            _insight_stream.empty()
+            st.error("Request timed out. The query may be complex — try again.")
+            st.stop()
+        except requests.exceptions.HTTPError as exc:
+            _status.empty()
+            _insight_stream.empty()
+            detail = exc.response.json().get("detail", str(exc)) if exc.response else str(exc)
+            st.error(f"Agent error: {detail}")
+            st.stop()
+        except requests.exceptions.RequestException as exc:
+            _status.empty()
+            _insight_stream.empty()
+            st.error(f"Could not reach backend: {exc}")
+            st.stop()
+
+        if turn_data:
+            st.session_state.session_id = turn_data["session_id"]
+
+            turn = {
+                "question": question,
+                "insight": turn_data["insight"],
+                "assumptions": turn_data.get("assumptions", []),
+                "html_chart": turn_data.get("html_chart"),
+                "sql": turn_data.get("sql", ""),
+                "png_b64": turn_data.get("png_b64"),
+                "cost_usd": turn_data.get("cost_usd", 0.0),
+                "bytes_scanned": turn_data.get("bytes_scanned", 0),
+                "validation_flags": turn_data.get("validation_flags", []),
+                "chart_type": turn_data.get("chart_type", ""),
+                "inferred_question": turn_data.get("inferred_question", ""),
+                "columns": turn_data.get("columns", []),
+                "rows": turn_data.get("rows", []),
+                "chart_height": turn_data.get("chart_height", 400),
+            }
+            _render_turn(turn, form_key="current")
+            st.session_state.history.append(turn)

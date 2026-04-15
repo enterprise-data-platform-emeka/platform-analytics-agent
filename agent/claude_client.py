@@ -18,6 +18,7 @@ internally expand to multiple HTTP requests when tool use is involved.
 import logging
 import re
 import time
+from collections.abc import Iterator
 from typing import Any, Final, cast
 
 import anthropic
@@ -274,6 +275,49 @@ class ClaudeClient:
         )
         return self._parse_insight_response(response)
 
+    def stream_insight_tokens(
+        self,
+        question: str,
+        sql: str,
+        result_markdown: str,
+    ) -> tuple[Iterator[str], dict[str, str]]:
+        """Stream insight tokens from Claude, parsing the result on completion.
+
+        Drives the same insight Claude call as generate_insight(), but using
+        the streaming Messages API so callers can yield tokens progressively.
+
+        Args:
+            question: The original plain-English question.
+            sql: The validated SQL that was executed.
+            result_markdown: The query result as a markdown table.
+
+        Returns:
+            A (token_iterator, result_container) tuple. Exhausting the iterator
+            streams text from Claude; result_container is populated with
+            'insight' and 'chart_title' keys once the iterator is exhausted.
+
+        The caller MUST exhaust the iterator before reading result_container.
+        """
+        result: dict[str, str] = {}
+        messages = build_insight_messages(question, sql, result_markdown)
+
+        def _iter() -> Iterator[str]:
+            full_text = ""
+            with self._client.messages.stream(
+                model=MODEL,
+                max_tokens=_MAX_TOKENS_INSIGHT,
+                system=INSIGHT_SYSTEM_PROMPT,
+                messages=messages,
+            ) as stream:
+                for text in stream.text_stream:
+                    full_text += text
+                    yield text
+            insight, chart_title = self._parse_insight_text(full_text.strip())
+            result["insight"] = insight
+            result["chart_title"] = chart_title
+
+        return _iter(), result
+
     def infer_question_from_sql(self, sql: str) -> str:
         """Infer the business question a SQL query is trying to answer.
 
@@ -515,6 +559,31 @@ class ClaudeClient:
         )
         return sql, assumptions
 
+    def _parse_insight_text(self, text: str) -> tuple[str, str]:
+        """Parse (insight, chart_title) from raw text. Shared by streaming and non-streaming.
+
+        Raises:
+            InsightGenerationError: if text is empty or yields no insight.
+        """
+        if not text:
+            raise InsightGenerationError("Claude returned an empty insight response.")
+
+        chart_title = ""
+        title_match = _CHART_TITLE_TAG_RE.search(text)
+        if title_match:
+            chart_title = title_match.group(1).strip()
+
+        insight_match = _INSIGHT_BODY_TAG_RE.search(text)
+        if insight_match:
+            insight = insight_match.group(1).strip()
+        else:
+            insight = _CHART_TITLE_TAG_RE.sub("", text).strip()
+
+        if not insight:
+            raise InsightGenerationError("Claude returned an empty insight response.")
+
+        return insight, chart_title
+
     def _parse_insight_with_title(
         self,
         response: anthropic.types.Message,
@@ -532,25 +601,7 @@ class ClaudeClient:
             InsightGenerationError: if both the tagged and raw insight are empty.
         """
         text = self._extract_text(response).strip()
-        if not text:
-            raise InsightGenerationError("Claude returned an empty insight response.")
-
-        chart_title = ""
-        title_match = _CHART_TITLE_TAG_RE.search(text)
-        if title_match:
-            chart_title = title_match.group(1).strip()
-
-        insight_match = _INSIGHT_BODY_TAG_RE.search(text)
-        if insight_match:
-            insight = insight_match.group(1).strip()
-        else:
-            # Fallback: strip the chart_title tag if present and use the remainder.
-            insight = _CHART_TITLE_TAG_RE.sub("", text).strip()
-
-        if not insight:
-            raise InsightGenerationError("Claude returned an empty insight response.")
-
-        return insight, chart_title
+        return self._parse_insight_text(text)
 
     def _parse_insight_response(
         self,

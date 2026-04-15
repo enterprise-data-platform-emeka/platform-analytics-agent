@@ -27,11 +27,13 @@ follow-up questions.
 """
 
 import base64
+import json
 import logging
 import os
+import random
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
@@ -70,12 +72,16 @@ class AskResult:
         sql: The final SQL query executed against Athena.
         inferred_question: Claude's blind inference of what the SQL is answering.
             Empty string if the inference call failed or sql is empty.
+        columns: Ordered column names from the Athena result set.
+        rows: Raw query result rows (capped at 100) for client-side table toggle.
     """
 
     response: InsightResponse
     chart: ChartOutput
     sql: str
     inferred_question: str = ""
+    columns: list[str] = field(default_factory=list)
+    rows: list[dict[str, str]] = field(default_factory=list)
 
 
 class AgentSession:
@@ -215,6 +221,8 @@ class AgentSession:
             chart=chart,
             sql=generated.sql,
             inferred_question=inferred_question,
+            columns=query_result.columns,
+            rows=query_result.rows[:100],
         )
 
 
@@ -260,6 +268,9 @@ try:
         png_b64: str | None  # base64-encoded matplotlib PNG for PDF report generation
         sql: str
         inferred_question: str  # Claude's blind inference of what the SQL answers
+        chart_height: int  # Plotly iframe height in pixels
+        columns: list[str]  # result column names for client-side table toggle
+        rows: list[dict[str, str]]  # raw result rows (capped at 100)
 
     @app.post("/ask", response_model=AskResponse)
     async def ask_endpoint(body: AskRequest) -> AskResponse:
@@ -320,6 +331,9 @@ try:
             png_b64=png_b64,
             sql=result.sql,
             inferred_question=result.inferred_question,
+            chart_height=result.chart.chart_height,
+            columns=result.columns,
+            rows=result.rows,
         )
 
     class SendReportRequest(BaseModel):
@@ -350,19 +364,28 @@ try:
             from fpdf import FPDF
 
             pdf = FPDF()
+            pdf.set_margins(15, 15, 15)
             pdf.set_auto_page_break(auto=True, margin=15)
             pdf.add_page()
+            W = pdf.epw  # effective page width respecting margins
+
+            try:
+                pdf.add_font("DejaVu", fname="DejaVuSans.ttf")
+                pdf.add_font("DejaVu", style="B", fname="DejaVuSans-Bold.ttf")
+                font_name = "DejaVu"
+            except Exception:
+                font_name = "Helvetica"
 
             # Title
-            pdf.set_font("Helvetica", "B", 18)
-            pdf.cell(0, 12, "EDP Analytics Report", ln=True)
+            pdf.set_font(font_name, "B", 18)
+            pdf.cell(W, 12, "EDP Analytics Report", new_x="LMARGIN", new_y="NEXT")
             pdf.ln(4)
 
             # Question
-            pdf.set_font("Helvetica", "B", 12)
-            pdf.cell(0, 8, "Question", ln=True)
-            pdf.set_font("Helvetica", "", 11)
-            pdf.multi_cell(0, 7, body.question)
+            pdf.set_font(font_name, "B", 12)
+            pdf.cell(W, 8, "Question", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font(font_name, "", 11)
+            pdf.multi_cell(W, 7, body.question)
             pdf.ln(6)
 
             # Chart image
@@ -371,15 +394,15 @@ try:
                 with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                     tmp.write(png_bytes)
                     tmp_path = tmp.name
-                pdf.image(tmp_path, x=10, w=190)
+                pdf.image(tmp_path, x=15, w=W)
                 os.unlink(tmp_path)
                 pdf.ln(6)
 
             # Summary
-            pdf.set_font("Helvetica", "B", 12)
-            pdf.cell(0, 8, "Summary", ln=True)
-            pdf.set_font("Helvetica", "", 11)
-            pdf.multi_cell(0, 7, body.insight)
+            pdf.set_font(font_name, "B", 12)
+            pdf.cell(W, 8, "Summary", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font(font_name, "", 11)
+            pdf.multi_cell(W, 7, body.insight)
 
             pdf_bytes = bytes(pdf.output())
         except Exception as exc:
@@ -418,6 +441,223 @@ try:
 
         logger.info("Report sent to %s for question: %s", body.to_email, body.question[:60])
         return {"status": "sent"}
+
+    # Pool of example questions covering all Gold tables. The /examples endpoint
+    # returns a random 4 so the UI refreshes on each page load.
+    _EXAMPLE_POOL: list[str] = [
+        "Which country has the highest total revenue?",
+        "What are the top 10 best-selling products by revenue?",
+        "Which carrier has the fastest average delivery time?",
+        "Show me monthly revenue trends for the last year.",
+        "Which payment method has the highest success rate?",
+        "Who are the top 5 customers by lifetime value?",
+        "What is the average order value by country?",
+        "Which brand has the highest average revenue per unit?",
+        "How many unique customers placed orders each month?",
+        "What percentage of shipments were delivered successfully by each carrier?",
+        "Which payment method processes the most failed transactions?",
+        "Compare delivery speed across all carriers.",
+        "What are the top 5 countries by number of orders?",
+        "Which product category generates the most revenue per unit?",
+    ]
+
+    @app.get("/examples")
+    def get_examples() -> dict[str, list[str]]:
+        """Return a random selection of 4 example questions from the pool."""
+        return {"questions": random.sample(_EXAMPLE_POOL, min(4, len(_EXAMPLE_POOL)))}
+
+    @app.post("/ask/stream")
+    def ask_stream(body: AskRequest):  # type: ignore[return]
+        """Stream the full pipeline response as newline-delimited JSON events.
+
+        Each line is a JSON object with a 'type' field:
+          {"type": "status", "text": "..."}   — pipeline progress update
+          {"type": "token",  "text": "..."}   — insight text token (streamable)
+          {"type": "error",  "text": "..."}   — fatal error, stream ends
+          {"type": "done",   "data": {...}}   — full AskResponse payload
+
+        Pass session_id from a prior response to enable multi-turn follow-ups.
+        """
+        from fastapi.responses import StreamingResponse as SR
+
+        if not body.question.strip():
+
+            def _err():
+                yield json.dumps({"type": "error", "text": "question must not be empty"}) + "\n"
+
+            return SR(_err(), media_type="application/x-ndjson")
+
+        assert _session is not None
+
+        conversation: Conversation | None = None
+        if body.session_id:
+            conversation = _store.get(body.session_id)
+        prior_context = conversation.context_summary() if conversation else ""
+
+        def _generate():
+            yield json.dumps({"type": "status", "text": "Analyzing your question..."}) + "\n"
+
+            question_type = _session._client.classify_question(body.question, prior_context)
+
+            if question_type == "conversational":
+                yield json.dumps({"type": "status", "text": "Answering from context..."}) + "\n"
+                try:
+                    insight = _session._client.answer_conversational(body.question, prior_context)
+                except AgentError as exc:
+                    yield json.dumps({"type": "error", "text": str(exc)}) + "\n"
+                    return
+
+                session_id: str = body.session_id if conversation is not None else _store.create()
+                _store.append_turn(
+                    session_id,
+                    Turn(
+                        question=body.question,
+                        sql="",
+                        insight=insight,
+                        assumptions=[],
+                    ),
+                )
+                yield (
+                    json.dumps(
+                        {
+                            "type": "done",
+                            "data": {
+                                "insight": insight,
+                                "assumptions": [],
+                                "validation_flags": [],
+                                "execution_id": "",
+                                "bytes_scanned": 0,
+                                "cost_usd": 0.0,
+                                "session_id": session_id,
+                                "chart_type": "",
+                                "presigned_url": None,
+                                "html_chart": None,
+                                "png_b64": None,
+                                "sql": "",
+                                "inferred_question": "",
+                                "chart_height": 0,
+                                "columns": [],
+                                "rows": [],
+                            },
+                        }
+                    )
+                    + "\n"
+                )
+                return
+
+            # Analytical path
+            system_prompt = _session._system_prompt
+            if prior_context:
+                system_prompt = f"{system_prompt}\n\n{prior_context}"
+
+            yield json.dumps({"type": "status", "text": "Generating SQL query..."}) + "\n"
+            try:
+                generated = _session._generator.generate(
+                    question=body.question,
+                    system_prompt=system_prompt,
+                )
+            except SQLGenerationError as exc:
+                logger.error("SQL generation failed: %s", exc)
+                yield json.dumps({"type": "error", "text": str(exc)}) + "\n"
+                return
+
+            yield json.dumps({"type": "status", "text": "Querying your data warehouse..."}) + "\n"
+            try:
+                query_result = _session._executor.execute(generated.sql)
+            except AgentError as exc:
+                logger.error("Athena execution failed: %s", exc)
+                yield json.dumps({"type": "error", "text": str(exc)}) + "\n"
+                return
+
+            validation_report = validate(query_result)
+
+            yield json.dumps({"type": "status", "text": "Generating insight..."}) + "\n"
+            if validation_report.zero_rows:
+                result_markdown = "(no rows returned)"
+            else:
+                from agent.insight import InsightGenerator
+
+                result_markdown = InsightGenerator._sample_markdown(  # type: ignore[attr-defined]
+                    query_result
+                )
+
+            result_container: dict[str, str] = {}
+            token_iter, result_container = _session._client.stream_insight_tokens(
+                question=body.question,
+                sql=generated.sql,
+                result_markdown=result_markdown,
+            )
+            for token in token_iter:
+                yield json.dumps({"type": "token", "text": token}) + "\n"
+
+            insight = result_container.get("insight", "")
+            chart_title = result_container.get("chart_title", "")
+
+            from agent.insight import InsightResponse
+
+            response = InsightResponse(
+                insight=insight,
+                chart_title=chart_title,
+                assumptions=generated.assumptions,
+                validation_flags=validation_report.flags,
+                execution_id=query_result.execution_id,
+                bytes_scanned=query_result.bytes_scanned,
+                cost_usd=query_result.cost_usd,
+            )
+
+            chart = _session._chart_generator.generate(
+                result=query_result,
+                question=body.question,
+                title=chart_title,
+            )
+            _session._audit.write(
+                question=body.question,
+                sql=generated.sql,
+                response=response,
+            )
+            inferred_question = _session._client.infer_question_from_sql(generated.sql)
+
+            session_id = body.session_id if conversation is not None else _store.create()
+            _store.append_turn(
+                session_id,
+                Turn(
+                    question=body.question,
+                    sql=generated.sql,
+                    insight=insight,
+                    assumptions=generated.assumptions,
+                ),
+            )
+
+            png_b64 = base64.b64encode(chart.png_bytes).decode() if chart.png_bytes else None
+
+            yield (
+                json.dumps(
+                    {
+                        "type": "done",
+                        "data": {
+                            "insight": insight,
+                            "assumptions": generated.assumptions,
+                            "validation_flags": validation_report.flags,
+                            "execution_id": query_result.execution_id,
+                            "bytes_scanned": query_result.bytes_scanned,
+                            "cost_usd": query_result.cost_usd,
+                            "session_id": session_id,
+                            "chart_type": chart.chart_type,
+                            "presigned_url": chart.presigned_url,
+                            "html_chart": chart.html,
+                            "png_b64": png_b64,
+                            "sql": generated.sql,
+                            "inferred_question": inferred_question,
+                            "chart_height": chart.chart_height,
+                            "columns": query_result.columns,
+                            "rows": query_result.rows[:100],
+                        },
+                    }
+                )
+                + "\n"
+            )
+
+        return SR(_generate(), media_type="application/x-ndjson")
 
     @app.get("/health")
     async def health() -> dict[str, str]:

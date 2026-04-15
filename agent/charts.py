@@ -93,6 +93,9 @@ class ChartOutput:
             None if the S3 upload failed or was skipped.
         chart_type: The auto-detected chart type: "bar", "line", "table",
             or "none" (zero rows).
+        chart_height: Pixel height the Plotly chart occupies, including
+            title and axis padding. Used by the UI to size the iframe exactly,
+            eliminating the dead whitespace below small charts.
         error: Human-readable error message if generation failed. None on
             success.
     """
@@ -101,6 +104,7 @@ class ChartOutput:
     html: str | None = None
     presigned_url: str | None = None
     chart_type: str = "none"
+    chart_height: int = 0
     error: str | None = None
 
 
@@ -151,7 +155,7 @@ class ChartGenerator:
         )
 
         try:
-            png_bytes, html = self._render(result, title, chart_type)
+            png_bytes, html, chart_height = self._render(result, title, chart_type)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Chart rendering failed for execution_id=%s: %s",
@@ -168,6 +172,7 @@ class ChartGenerator:
             html=html,
             presigned_url=presigned_url,
             chart_type=chart_type,
+            chart_height=chart_height,
         )
 
     # ── Chart type detection ───────────────────────────────────────────────────
@@ -243,15 +248,15 @@ class ChartGenerator:
         result: QueryResult,
         title: str,
         chart_type: str,
-    ) -> tuple[bytes, str]:
-        """Dispatch to the correct renderer and return (png_bytes, html)."""
+    ) -> tuple[bytes, str, int]:
+        """Dispatch to the correct renderer and return (png_bytes, html, height)."""
         if chart_type == "line":
             return self._render_line(result, title)
         if chart_type == "bar":
             return self._render_bar(result, title)
         return self._render_table(result, title)
 
-    def _render_bar(self, result: QueryResult, title: str) -> tuple[bytes, str]:
+    def _render_bar(self, result: QueryResult, title: str) -> tuple[bytes, str, int]:
         """Render a horizontal bar chart sorted descending by the metric column."""
         import matplotlib
 
@@ -284,10 +289,12 @@ class ChartGenerator:
         png_bytes = _fig_to_png(fig)
         plt.close(fig)
 
-        html = _plotly_bar(labels, values, x_col, y_col, title)
-        return png_bytes, html
+        plotly_height = max(300, len(labels) * 30)
+        html = _plotly_bar(labels, values, x_col, y_col, title, height=plotly_height)
+        # Add padding for title, axis labels, and iframe border.
+        return png_bytes, html, plotly_height + 80
 
-    def _render_line(self, result: QueryResult, title: str) -> tuple[bytes, str]:
+    def _render_line(self, result: QueryResult, title: str) -> tuple[bytes, str, int]:
         """Render a line chart: time axis vs first numeric column."""
         import matplotlib
 
@@ -328,9 +335,9 @@ class ChartGenerator:
         plt.close(fig)
 
         html = _plotly_line(x_labels, y_values, x_title, y_col, title)
-        return png_bytes, html
+        return png_bytes, html, 480
 
-    def _render_table(self, result: QueryResult, title: str) -> tuple[bytes, str]:
+    def _render_table(self, result: QueryResult, title: str) -> tuple[bytes, str, int]:
         """Render a plain text table as a matplotlib figure (fallback)."""
         import matplotlib
 
@@ -364,7 +371,8 @@ class ChartGenerator:
         plt.close(fig)
 
         html = _plotly_table(col_labels, cell_data, title)
-        return png_bytes, html
+        table_height = max(200, len(cell_data) * 35) + 100
+        return png_bytes, html, table_height
 
     # ── S3 upload and presigned URL ────────────────────────────────────────────
 
@@ -428,6 +436,7 @@ def _plotly_bar(
     x_col: str,
     y_col: str,
     title: str = "",
+    height: int = 300,
 ) -> str:
     """Return a Plotly horizontal bar chart as an HTML fragment."""
     import plotly.graph_objects as go
@@ -446,7 +455,7 @@ def _plotly_bar(
         yaxis_title=x_col.replace("_", " ").title(),
         yaxis_autorange="reversed",
         margin={"l": 150, "r": 20, "t": 50 if title else 20, "b": 40},
-        height=max(300, len(labels) * 30),
+        height=height,
     )
     return str(fig.to_html(full_html=False, include_plotlyjs="cdn"))
 
