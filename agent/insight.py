@@ -43,6 +43,7 @@ class InsightResponse:
 
     insight: str
     assumptions: list[str]
+    chart_title: str = ""
     validation_flags: list[str] = field(default_factory=list)
     execution_id: str = ""
     bytes_scanned: int = 0
@@ -125,14 +126,14 @@ class InsightGenerator:
                 response. Propagates from ClaudeClient.generate_insight().
         """
         if validation_report.zero_rows:
-            insight = self._client.generate_insight(
+            insight, chart_title = self._client.generate_insight(
                 question=question,
                 sql=sql,
                 result_markdown="(no rows returned)",
             )
         else:
             result_markdown = self._sample_markdown(query_result)
-            insight = self._client.generate_insight(
+            insight, chart_title = self._client.generate_insight(
                 question=question,
                 sql=sql,
                 result_markdown=result_markdown,
@@ -145,6 +146,7 @@ class InsightGenerator:
 
         return InsightResponse(
             insight=insight,
+            chart_title=chart_title,
             assumptions=assumptions,
             validation_flags=validation_report.flags,
             execution_id=query_result.execution_id,

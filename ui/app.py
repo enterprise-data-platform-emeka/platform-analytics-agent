@@ -88,6 +88,28 @@ def _format_cost(usd: float) -> str:
     return f"${usd:.4f}"
 
 
+def _latin1_safe(text: str) -> str:
+    """Sanitise text for fpdf2 core fonts (Helvetica = Latin-1 only).
+
+    Replaces the most common non-Latin-1 characters so PDF generation
+    doesn't raise FPDFUnicodeEncodingException. Any remaining unmappable
+    chars are replaced with '?' rather than crashing.
+    """
+    return (
+        text.replace("€", "EUR")
+        .replace("£", "GBP")
+        .replace("•", "-")
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+        .replace("\u2018", "'")
+        .replace("\u2019", "'")
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .encode("latin-1", errors="replace")
+        .decode("latin-1")
+    )
+
+
 def _build_pdf(turn: dict) -> bytes:
     """Generate a PDF report from a turn dict (question, insight, assumptions, chart PNG).
 
@@ -112,7 +134,7 @@ def _build_pdf(turn: dict) -> bytes:
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 8, "Question", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 11)
-    pdf.multi_cell(0, 7, turn["question"])
+    pdf.multi_cell(0, 7, _latin1_safe(turn["question"]))
     pdf.ln(6)
 
     # Chart image
@@ -131,7 +153,7 @@ def _build_pdf(turn: dict) -> bytes:
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 8, "Summary", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 11)
-    pdf.multi_cell(0, 7, turn["insight"])
+    pdf.multi_cell(0, 7, _latin1_safe(turn["insight"]))
 
     # Assumptions
     if turn.get("assumptions"):
@@ -140,7 +162,7 @@ def _build_pdf(turn: dict) -> bytes:
         pdf.cell(0, 8, "Assumptions", new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("Helvetica", "", 10)
         for item in turn["assumptions"]:
-            pdf.multi_cell(0, 6, f"• {item}")
+            pdf.multi_cell(0, 6, f"- {_latin1_safe(item)}")
 
     return bytes(pdf.output())
 

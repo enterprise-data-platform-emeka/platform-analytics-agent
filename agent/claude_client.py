@@ -42,9 +42,10 @@ logger = logging.getLogger(__name__)
 MODEL: Final[str] = "claude-sonnet-4-6"
 
 # Tokens for each call type. SQL responses include the query + assumptions list.
-# Insight responses are 2-3 sentences. Classify returns one word.
+# Insight responses are 2-3 sentences plus a short chart title tag.
+# Classify returns one word.
 _MAX_TOKENS_SQL: Final[int] = 1024
-_MAX_TOKENS_INSIGHT: Final[int] = 512
+_MAX_TOKENS_INSIGHT: Final[int] = 600
 _MAX_TOKENS_CLASSIFY: Final[int] = 5
 _MAX_TOKENS_CONVERSATIONAL: Final[int] = 512
 
@@ -88,6 +89,14 @@ _MAX_TOOL_ROUNDS: Final[int] = 2
 _SQL_TAG_RE: Final[re.Pattern[str]] = re.compile(r"<sql>(.*?)</sql>", re.DOTALL | re.IGNORECASE)
 _ASSUMPTIONS_TAG_RE: Final[re.Pattern[str]] = re.compile(
     r"<assumptions>(.*?)</assumptions>", re.DOTALL | re.IGNORECASE
+)
+
+# Regexes to extract <chart_title> and <insight> blocks from insight responses.
+_CHART_TITLE_TAG_RE: Final[re.Pattern[str]] = re.compile(
+    r"<chart_title>(.*?)</chart_title>", re.DOTALL | re.IGNORECASE
+)
+_INSIGHT_BODY_TAG_RE: Final[re.Pattern[str]] = re.compile(
+    r"<insight>(.*?)</insight>", re.DOTALL | re.IGNORECASE
 )
 
 
@@ -171,8 +180,8 @@ class ClaudeClient:
         question: str,
         sql: str,
         result_markdown: str,
-    ) -> str:
-        """Generate a 2-3 sentence plain-English insight from query results.
+    ) -> tuple[str, str]:
+        """Generate a plain-English insight and a short chart title from query results.
 
         Args:
             question: The original plain-English question from the user.
@@ -180,7 +189,8 @@ class ClaudeClient:
             result_markdown: The query result formatted as a markdown table.
 
         Returns:
-            A 2-3 sentence insight string.
+            Tuple of (insight_text, chart_title). Both are in the same language
+            as the question. chart_title is a short 5-8 word description.
 
         Raises:
             InsightGenerationError: if Claude's response is empty or malformed,
@@ -193,7 +203,7 @@ class ClaudeClient:
             tools=None,
             max_tokens=_MAX_TOKENS_INSIGHT,
         )
-        return self._parse_insight_response(response)
+        return self._parse_insight_with_title(response)
 
     def classify_question(self, question: str, prior_context: str) -> str:
         """Return 'analytical' or 'conversational' for the given question.
@@ -459,11 +469,48 @@ class ClaudeClient:
         )
         return sql, assumptions
 
+    def _parse_insight_with_title(
+        self,
+        response: anthropic.types.Message,
+    ) -> tuple[str, str]:
+        """Extract insight text and chart title from a tagged Claude response.
+
+        Expects the response to contain <chart_title>...</chart_title> and
+        <insight>...</insight> tags. Falls back gracefully when tags are absent
+        so existing calls do not break if the model omits them.
+
+        Returns:
+            Tuple of (insight_text, chart_title).
+
+        Raises:
+            InsightGenerationError: if both the tagged and raw insight are empty.
+        """
+        text = self._extract_text(response).strip()
+        if not text:
+            raise InsightGenerationError("Claude returned an empty insight response.")
+
+        chart_title = ""
+        title_match = _CHART_TITLE_TAG_RE.search(text)
+        if title_match:
+            chart_title = title_match.group(1).strip()
+
+        insight_match = _INSIGHT_BODY_TAG_RE.search(text)
+        if insight_match:
+            insight = insight_match.group(1).strip()
+        else:
+            # Fallback: strip the chart_title tag if present and use the remainder.
+            insight = _CHART_TITLE_TAG_RE.sub("", text).strip()
+
+        if not insight:
+            raise InsightGenerationError("Claude returned an empty insight response.")
+
+        return insight, chart_title
+
     def _parse_insight_response(
         self,
         response: anthropic.types.Message,
     ) -> str:
-        """Extract the plain-English insight from Claude's response.
+        """Extract plain text from Claude's response (used for conversational answers).
 
         Raises:
             InsightGenerationError: if the response is empty.

@@ -40,9 +40,12 @@ def _flagged_report() -> ValidationReport:
     )
 
 
-def _mock_client(insight_text: str = "Germany leads with £432k revenue.") -> MagicMock:
+def _mock_client(
+    insight_text: str = "Germany leads with £432k revenue.",
+    chart_title: str = "Revenue by Country",
+) -> MagicMock:
     client = MagicMock()
-    client.generate_insight.return_value = insight_text
+    client.generate_insight.return_value = (insight_text, chart_title)
     return client
 
 

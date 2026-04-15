@@ -197,7 +197,11 @@ class AgentSession:
             validation_report=validation_report,
         )
 
-        chart = self._chart_generator.generate(result=query_result, question=question)
+        chart = self._chart_generator.generate(
+            result=query_result,
+            question=question,
+            title=response.chart_title,
+        )
 
         self._audit.write(question=question, sql=generated.sql, response=response)
 

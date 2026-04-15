@@ -119,7 +119,7 @@ class ChartGenerator:
         self._config = config
         self._s3 = boto3.client("s3", region_name=config.region)
 
-    def generate(self, result: QueryResult, question: str) -> ChartOutput:
+    def generate(self, result: QueryResult, question: str, title: str = "") -> ChartOutput:
         """Generate a PNG and HTML chart for a query result.
 
         Non-fatal: catches all exceptions, logs at WARNING, and returns a
@@ -128,7 +128,10 @@ class ChartGenerator:
 
         Args:
             result: The QueryResult from AthenaExecutor.execute().
-            question: Original plain-English question, used as chart title.
+            question: Original plain-English question (used only for logging).
+            title: Short chart title from the insight generator, in the same
+                language as the question. Displayed above the chart. If empty,
+                no title is shown.
 
         Returns:
             ChartOutput with png_bytes, html, presigned_url, and chart_type.
@@ -148,7 +151,7 @@ class ChartGenerator:
         )
 
         try:
-            png_bytes, html = self._render(result, question, chart_type)
+            png_bytes, html = self._render(result, title, chart_type)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Chart rendering failed for execution_id=%s: %s",
@@ -234,17 +237,17 @@ class ChartGenerator:
     def _render(
         self,
         result: QueryResult,
-        question: str,
+        title: str,
         chart_type: str,
     ) -> tuple[bytes, str]:
         """Dispatch to the correct renderer and return (png_bytes, html)."""
         if chart_type == "line":
-            return self._render_line(result, question)
+            return self._render_line(result, title)
         if chart_type == "bar":
-            return self._render_bar(result, question)
-        return self._render_table(result, question)
+            return self._render_bar(result, title)
+        return self._render_table(result, title)
 
-    def _render_bar(self, result: QueryResult, question: str) -> tuple[bytes, str]:
+    def _render_bar(self, result: QueryResult, title: str) -> tuple[bytes, str]:
         """Render a horizontal bar chart sorted descending by the metric column."""
         import matplotlib
 
@@ -265,23 +268,22 @@ class ChartGenerator:
             values = [v for v, _ in sorted_pairs]
             labels = [lbl for _, lbl in sorted_pairs]
 
-        chart_title = question if len(question) <= 80 else question[:77] + "..."
-
         fig, ax = plt.subplots(figsize=(10, max(4, len(labels) * 0.6)))
         bars = ax.barh(labels, values, color=_BRAND_COLOUR)
         ax.bar_label(bars, fmt="%.0f", padding=4, fontsize=9)
         ax.set_xlabel(y_col.replace("_", " ").title())
-        ax.set_title(chart_title, fontsize=11, pad=12)
         ax.invert_yaxis()
+        if title:
+            ax.set_title(title, fontsize=11, pad=12)
         fig.tight_layout()
 
         png_bytes = _fig_to_png(fig)
         plt.close(fig)
 
-        html = _plotly_bar(labels, values, x_col, y_col, chart_title)
+        html = _plotly_bar(labels, values, x_col, y_col, title)
         return png_bytes, html
 
-    def _render_line(self, result: QueryResult, question: str) -> tuple[bytes, str]:
+    def _render_line(self, result: QueryResult, title: str) -> tuple[bytes, str]:
         """Render a line chart: time axis vs first numeric column."""
         import matplotlib
 
@@ -309,23 +311,22 @@ class ChartGenerator:
         y_col = non_time_numeric[0]
         y_values = [float(row.get(y_col, 0) or 0) for row in result.rows]
 
-        chart_title = question if len(question) <= 80 else question[:77] + "..."
-
         fig, ax = plt.subplots(figsize=(12, 5))
         ax.plot(x_labels, y_values, marker="o", color=_BRAND_COLOUR, linewidth=2)
         ax.set_xlabel(x_title)
         ax.set_ylabel(y_col.replace("_", " ").title())
-        ax.set_title(chart_title, fontsize=11, pad=12)
         ax.tick_params(axis="x", rotation=45)
+        if title:
+            ax.set_title(title, fontsize=11, pad=12)
         fig.tight_layout()
 
         png_bytes = _fig_to_png(fig)
         plt.close(fig)
 
-        html = _plotly_line(x_labels, y_values, x_title, y_col, chart_title)
+        html = _plotly_line(x_labels, y_values, x_title, y_col, title)
         return png_bytes, html
 
-    def _render_table(self, result: QueryResult, question: str) -> tuple[bytes, str]:
+    def _render_table(self, result: QueryResult, title: str) -> tuple[bytes, str]:
         """Render a plain text table as a matplotlib figure (fallback)."""
         import matplotlib
 
@@ -351,14 +352,14 @@ class ChartGenerator:
         table.auto_set_font_size(False)
         table.set_fontsize(9)
         table.auto_set_column_width(col=list(range(len(col_labels))))
-        chart_title = question if len(question) <= 80 else question[:77] + "..."
-        ax.set_title(chart_title, fontsize=11, pad=12)
+        if title:
+            ax.set_title(title, fontsize=11, pad=12)
         fig.tight_layout()
 
         png_bytes = _fig_to_png(fig)
         plt.close(fig)
 
-        html = _plotly_table(col_labels, cell_data, chart_title)
+        html = _plotly_table(col_labels, cell_data, title)
         return png_bytes, html
 
     # ── S3 upload and presigned URL ────────────────────────────────────────────
@@ -422,7 +423,7 @@ def _plotly_bar(
     values: list[float],
     x_col: str,
     y_col: str,
-    title: str,
+    title: str = "",
 ) -> str:
     """Return a Plotly horizontal bar chart as an HTML fragment."""
     import plotly.graph_objects as go
@@ -436,11 +437,11 @@ def _plotly_bar(
         )
     )
     fig.update_layout(
-        title=title,
+        title=title or None,
         xaxis_title=y_col.replace("_", " ").title(),
         yaxis_title=x_col.replace("_", " ").title(),
         yaxis_autorange="reversed",
-        margin={"l": 150, "r": 20, "t": 50, "b": 40},
+        margin={"l": 150, "r": 20, "t": 50 if title else 20, "b": 40},
         height=max(300, len(labels) * 30),
     )
     return str(fig.to_html(full_html=False, include_plotlyjs="cdn"))
@@ -451,7 +452,7 @@ def _plotly_line(
     y_values: list[float],
     x_title: str,
     y_col: str,
-    title: str,
+    title: str = "",
 ) -> str:
     """Return a Plotly line chart as an HTML fragment."""
     import plotly.graph_objects as go
@@ -465,10 +466,10 @@ def _plotly_line(
         )
     )
     fig.update_layout(
-        title=title,
+        title=title or None,
         xaxis_title=x_title,
         yaxis_title=y_col.replace("_", " ").title(),
-        margin={"l": 60, "r": 20, "t": 50, "b": 60},
+        margin={"l": 60, "r": 20, "t": 50 if title else 20, "b": 60},
         height=400,
     )
     return str(fig.to_html(full_html=False, include_plotlyjs="cdn"))
@@ -477,7 +478,7 @@ def _plotly_line(
 def _plotly_table(
     col_labels: list[str],
     cell_data: list[list[str]],
-    title: str,
+    title: str = "",
 ) -> str:
     """Return a Plotly table as an HTML fragment."""
     import plotly.graph_objects as go
@@ -491,5 +492,8 @@ def _plotly_table(
             cells={"values": columns_of_values},
         )
     )
-    fig.update_layout(title=title, margin={"l": 20, "r": 20, "t": 50, "b": 20})
+    fig.update_layout(
+        title=title or None,
+        margin={"l": 20, "r": 20, "t": 50 if title else 20, "b": 20},
+    )
     return str(fig.to_html(full_html=False, include_plotlyjs="cdn"))
