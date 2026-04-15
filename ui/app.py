@@ -20,7 +20,7 @@ st.set_page_config(
 
 st.title("EDP Analytics Agent")
 st.caption(
-    "Ask plain-English questions about Gold data. Follow-up questions remember prior context."
+    "Ask questions about your Gold data in any language. Follow-up questions remember prior context."
 )
 
 # ── Session state initialisation ──────────────────────────────────────────────

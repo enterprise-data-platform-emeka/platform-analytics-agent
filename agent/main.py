@@ -150,6 +150,18 @@ class AgentSession:
         """
         logger.info("ask() called: %r (prior_context=%d chars)", question[:120], len(prior_context))
 
+        # Classify before hitting the SQL pipeline. Conversational questions
+        # (meta, translation, clarification) are answered directly from prior
+        # context without generating SQL or querying Athena.
+        question_type = self._client.classify_question(question, prior_context)
+        if question_type == "conversational":
+            insight = self._client.answer_conversational(question, prior_context)
+            return AskResult(
+                response=InsightResponse(insight=insight, assumptions=[]),
+                chart=ChartOutput(),
+                sql="",
+            )
+
         system_prompt = self._system_prompt
         if prior_context:
             system_prompt = f"{system_prompt}\n\n{prior_context}"

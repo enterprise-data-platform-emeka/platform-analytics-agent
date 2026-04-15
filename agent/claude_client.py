@@ -42,9 +42,29 @@ logger = logging.getLogger(__name__)
 MODEL: Final[str] = "claude-sonnet-4-6"
 
 # Tokens for each call type. SQL responses include the query + assumptions list.
-# Insight responses are 2-3 sentences.
+# Insight responses are 2-3 sentences. Classify returns one word.
 _MAX_TOKENS_SQL: Final[int] = 1024
 _MAX_TOKENS_INSIGHT: Final[int] = 512
+_MAX_TOKENS_CLASSIFY: Final[int] = 5
+_MAX_TOKENS_CONVERSATIONAL: Final[int] = 512
+
+# System prompt for the binary question classifier.
+# "ANALYTICAL" = needs a new Athena query. "CONVERSATIONAL" = answerable from prior context.
+_CLASSIFY_SYSTEM: Final[str] = (
+    "Classify the user message. Reply with exactly one word.\n"
+    "ANALYTICAL — requires querying a database for new or updated data.\n"
+    "CONVERSATIONAL — can be answered from prior conversation context: asking what "
+    "was said, requesting a translation or reformatting of a prior answer, asking "
+    "for clarification, or any meta-question that does not need fresh data."
+)
+
+# System prompt for answering conversational/meta questions without hitting Athena.
+_CONVERSATIONAL_SYSTEM: Final[str] = (
+    "You are a data analytics assistant. Answer the user's question using only the "
+    "prior conversation context provided. Do not invent or estimate data values. "
+    "If the context does not contain enough information to answer, say so clearly. "
+    "Be concise: 2-3 sentences."
+)
 
 # Transient errors worth retrying. Permanent errors (auth, bad request,
 # permission denied) are not retried — they indicate a configuration problem.
@@ -168,6 +188,65 @@ class ClaudeClient:
             system=INSIGHT_SYSTEM_PROMPT,
             tools=None,
             max_tokens=_MAX_TOKENS_INSIGHT,
+        )
+        return self._parse_insight_response(response)
+
+    def classify_question(self, question: str, prior_context: str) -> str:
+        """Return 'analytical' or 'conversational' for the given question.
+
+        Uses a lightweight single-call Claude classifier. Works in any language.
+        Defaults to 'analytical' on any error so the existing pipeline handles it.
+
+        Args:
+            question: The raw user question.
+            prior_context: Summary of prior Q&A turns from the session.
+
+        Returns:
+            'conversational' if the question can be answered from prior context
+            alone. 'analytical' if it needs a new Athena query.
+        """
+        content = question
+        if prior_context:
+            content = f"Prior context:\n{prior_context}\n\nUser message: {question}"
+        try:
+            response = self._call(
+                messages=[{"role": "user", "content": content}],
+                system=_CLASSIFY_SYSTEM,
+                tools=None,
+                max_tokens=_MAX_TOKENS_CLASSIFY,
+            )
+            text = self._extract_text(response).strip().upper()
+            if "CONVERSATIONAL" in text:
+                logger.info("Question classified as CONVERSATIONAL.")
+                return "conversational"
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Question classification failed (%s) — defaulting to analytical.", exc)
+        return "analytical"
+
+    def answer_conversational(self, question: str, prior_context: str) -> str:
+        """Answer a conversational/meta question from prior conversation context.
+
+        Does not query Athena. Uses Claude with the prior context summary to
+        answer questions like "what did you say last?" or "give me that in German".
+
+        Args:
+            question: The raw user question.
+            prior_context: Summary of prior Q&A turns from the session.
+
+        Returns:
+            A short plain-English answer (2-3 sentences).
+
+        Raises:
+            InsightGenerationError: if Claude returns an empty response.
+        """
+        content = question
+        if prior_context:
+            content = f"Prior conversation context:\n{prior_context}\n\nUser question: {question}"
+        response = self._call(
+            messages=[{"role": "user", "content": content}],
+            system=_CONVERSATIONAL_SYSTEM,
+            tools=None,
+            max_tokens=_MAX_TOKENS_CONVERSATIONAL,
         )
         return self._parse_insight_response(response)
 

@@ -265,18 +265,20 @@ class ChartGenerator:
             values = [v for v, _ in sorted_pairs]
             labels = [lbl for _, lbl in sorted_pairs]
 
+        chart_title = f"{x_col.replace('_', ' ').title()} by {y_col.replace('_', ' ').title()}"
+
         fig, ax = plt.subplots(figsize=(10, max(4, len(labels) * 0.6)))
         bars = ax.barh(labels, values, color=_BRAND_COLOUR)
         ax.bar_label(bars, fmt="%.0f", padding=4, fontsize=9)
         ax.set_xlabel(y_col.replace("_", " ").title())
-        ax.set_title(question, fontsize=11, pad=12)
+        ax.set_title(chart_title, fontsize=11, pad=12)
         ax.invert_yaxis()
         fig.tight_layout()
 
         png_bytes = _fig_to_png(fig)
         plt.close(fig)
 
-        html = _plotly_bar(labels, values, x_col, y_col, question)
+        html = _plotly_bar(labels, values, x_col, y_col, chart_title)
         return png_bytes, html
 
     def _render_line(self, result: QueryResult, question: str) -> tuple[bytes, str]:
@@ -307,18 +309,20 @@ class ChartGenerator:
         y_col = non_time_numeric[0]
         y_values = [float(row.get(y_col, 0) or 0) for row in result.rows]
 
+        chart_title = f"{y_col.replace('_', ' ').title()} over {x_title}"
+
         fig, ax = plt.subplots(figsize=(12, 5))
         ax.plot(x_labels, y_values, marker="o", color=_BRAND_COLOUR, linewidth=2)
         ax.set_xlabel(x_title)
         ax.set_ylabel(y_col.replace("_", " ").title())
-        ax.set_title(question, fontsize=11, pad=12)
+        ax.set_title(chart_title, fontsize=11, pad=12)
         ax.tick_params(axis="x", rotation=45)
         fig.tight_layout()
 
         png_bytes = _fig_to_png(fig)
         plt.close(fig)
 
-        html = _plotly_line(x_labels, y_values, x_title, y_col, question)
+        html = _plotly_line(x_labels, y_values, x_title, y_col, chart_title)
         return png_bytes, html
 
     def _render_table(self, result: QueryResult, question: str) -> tuple[bytes, str]:
@@ -347,13 +351,14 @@ class ChartGenerator:
         table.auto_set_font_size(False)
         table.set_fontsize(9)
         table.auto_set_column_width(col=list(range(len(col_labels))))
-        ax.set_title(question, fontsize=11, pad=12)
+        chart_title = " | ".join(col.replace("_", " ").title() for col in col_labels[:4])
+        ax.set_title(chart_title, fontsize=11, pad=12)
         fig.tight_layout()
 
         png_bytes = _fig_to_png(fig)
         plt.close(fig)
 
-        html = _plotly_table(col_labels, cell_data, question)
+        html = _plotly_table(col_labels, cell_data, chart_title)
         return png_bytes, html
 
     # ── S3 upload and presigned URL ────────────────────────────────────────────
