@@ -388,11 +388,13 @@ def _render_card(turn: dict, turn_number: int, form_key: str) -> None:
     ts = turn.get("timestamp", "")
     # #1: st.container(border=True) replaces st.chat_message. Clean bordered card,
     # no chat bubble, no avatar — looks like a data product not a chatbot.
+    # Pre-build the timestamp span to avoid backslash-in-f-string (Python 3.11).
+    ts_span = f'<span class="turn-time">{ts}</span>' if ts else ""
     with st.container(border=True):
         st.markdown(
             f'<div class="turn-meta">'
             f'<span class="turn-label">Question {turn_number}</span>'
-            f'{"<span class=\\"turn-time\\">" + ts + "</span>" if ts else ""}'
+            f"{ts_span}"
             f"</div>"
             f'<div class="turn-question">{html_lib.escape(turn["question"])}</div>',
             unsafe_allow_html=True,
