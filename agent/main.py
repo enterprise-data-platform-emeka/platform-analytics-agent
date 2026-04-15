@@ -113,6 +113,7 @@ class AgentSession:
             max_rows=self._config.agent.max_rows,
         )
 
+        self._client = client
         self._generator = SQLGenerator(client=client, validator=validator)
         self._executor = AthenaExecutor(
             config=self._config.aws,
