@@ -281,7 +281,7 @@ try:
             session_id,
             Turn(
                 question=body.question,
-                sql=result.response.execution_id,  # execution_id is the traceability key
+                sql=result.sql,
                 insight=result.response.insight,
                 assumptions=result.response.assumptions,
             ),

@@ -88,6 +88,63 @@ def _format_cost(usd: float) -> str:
     return f"${usd:.4f}"
 
 
+def _build_pdf(turn: dict) -> bytes:
+    """Generate a PDF report from a turn dict (question, insight, assumptions, chart PNG).
+
+    Returns raw PDF bytes. Uses fpdf2 — same library as the email endpoint.
+    The PNG is written to a temp file because fpdf2 requires a file path for images.
+    """
+    import os
+    import tempfile
+
+    from fpdf import FPDF
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    # Title
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.cell(0, 12, "EDP Analytics Report", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+
+    # Question
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "Question", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 11)
+    pdf.multi_cell(0, 7, turn["question"])
+    pdf.ln(6)
+
+    # Chart image
+    if turn.get("png_b64"):
+        import base64
+
+        png_bytes = base64.b64decode(turn["png_b64"])
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp.write(png_bytes)
+            tmp_path = tmp.name
+        pdf.image(tmp_path, x=10, w=190)
+        os.unlink(tmp_path)
+        pdf.ln(6)
+
+    # Summary
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "Summary", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 11)
+    pdf.multi_cell(0, 7, turn["insight"])
+
+    # Assumptions
+    if turn.get("assumptions"):
+        pdf.ln(6)
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 8, "Assumptions", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 10)
+        for item in turn["assumptions"]:
+            pdf.multi_cell(0, 6, f"• {item}")
+
+    return bytes(pdf.output())
+
+
 def _render_turn(turn: dict, form_key: str) -> None:
     """Render one Q&A turn. Works for both history replay and live response."""
     is_analytical = bool(turn.get("sql"))
@@ -103,6 +160,19 @@ def _render_turn(turn: dict, form_key: str) -> None:
     # Chart
     if turn.get("html_chart"):
         components.html(turn["html_chart"], height=460, scrolling=False)
+
+    # Download PDF — available for any turn that has a chart or insight
+    try:
+        pdf_bytes = _build_pdf(turn)
+        st.download_button(
+            label="Download report (PDF)",
+            data=pdf_bytes,
+            file_name="edp_report.pdf",
+            mime="application/pdf",
+            key=f"pdf_{form_key}",
+        )
+    except Exception:  # noqa: BLE001
+        pass  # silently skip if PDF generation fails
 
     # Assumptions
     if turn.get("assumptions"):

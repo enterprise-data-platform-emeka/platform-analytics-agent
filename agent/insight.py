@@ -125,7 +125,11 @@ class InsightGenerator:
                 response. Propagates from ClaudeClient.generate_insight().
         """
         if validation_report.zero_rows:
-            insight = self._zero_rows_insight(question)
+            insight = self._client.generate_insight(
+                question=question,
+                sql=sql,
+                result_markdown="(no rows returned)",
+            )
         else:
             result_markdown = self._sample_markdown(query_result)
             insight = self._client.generate_insight(
@@ -149,21 +153,6 @@ class InsightGenerator:
         )
 
     # ── Private helpers ────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _zero_rows_insight(question: str) -> str:
-        """Return a canned zero-rows insight without calling Claude.
-
-        Avoids wasting an API call and avoids Claude fabricating numbers
-        when there is no data to reason about.
-        """
-        return (
-            f"The query for '{question}' returned no results. "
-            "This is a valid outcome — the Gold table contains no rows that "
-            "match the requested filters. The pipeline may not have processed "
-            "data for the requested period yet, or the filter criteria may be "
-            "too narrow."
-        )
 
     @staticmethod
     def _sample_markdown(result: QueryResult) -> str:

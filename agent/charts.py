@@ -265,7 +265,7 @@ class ChartGenerator:
             values = [v for v, _ in sorted_pairs]
             labels = [lbl for _, lbl in sorted_pairs]
 
-        chart_title = f"{x_col.replace('_', ' ').title()} by {y_col.replace('_', ' ').title()}"
+        chart_title = question if len(question) <= 80 else question[:77] + "..."
 
         fig, ax = plt.subplots(figsize=(10, max(4, len(labels) * 0.6)))
         bars = ax.barh(labels, values, color=_BRAND_COLOUR)
@@ -309,7 +309,7 @@ class ChartGenerator:
         y_col = non_time_numeric[0]
         y_values = [float(row.get(y_col, 0) or 0) for row in result.rows]
 
-        chart_title = f"{y_col.replace('_', ' ').title()} over {x_title}"
+        chart_title = question if len(question) <= 80 else question[:77] + "..."
 
         fig, ax = plt.subplots(figsize=(12, 5))
         ax.plot(x_labels, y_values, marker="o", color=_BRAND_COLOUR, linewidth=2)
@@ -351,7 +351,7 @@ class ChartGenerator:
         table.auto_set_font_size(False)
         table.set_fontsize(9)
         table.auto_set_column_width(col=list(range(len(col_labels))))
-        chart_title = " | ".join(col.replace("_", " ").title() for col in col_labels[:4])
+        chart_title = question if len(question) <= 80 else question[:77] + "..."
         ax.set_title(chart_title, fontsize=11, pad=12)
         fig.tight_layout()
 

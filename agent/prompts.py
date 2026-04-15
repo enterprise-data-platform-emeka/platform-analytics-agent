@@ -376,6 +376,10 @@ Do not explain the SQL. Do not mention table names or column names. \
 Do not use words like 'leverage', 'utilize', or 'robust'. \
 Write as if talking to a non-technical business stakeholder. \
 Always respond in the same language the question was asked in.
+
+If the results section says "(no rows returned)", explain that the query returned \
+no data matching the criteria, and suggest the filter or time period may be too narrow. \
+Still respond in the same language as the question.
 """
 
 
