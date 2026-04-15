@@ -227,8 +227,12 @@ def _cached_build_pdf(
         pdf.cell(W, 8, "Query Metadata", new_x="LMARGIN", new_y="NEXT")
         pdf.set_font(font_name, "", 10)
         pdf.cell(W, 6, f"Athena cost: {_format_cost(cost_usd)}", new_x="LMARGIN", new_y="NEXT")
-        pdf.cell(W, 6, f"Data scanned: {_format_bytes(bytes_scanned)}", new_x="LMARGIN", new_y="NEXT")
-        pdf.cell(W, 6, f"Chart type: {(chart_type or 'none').title()}", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(
+            W, 6, f"Data scanned: {_format_bytes(bytes_scanned)}", new_x="LMARGIN", new_y="NEXT"
+        )
+        pdf.cell(
+            W, 6, f"Chart type: {(chart_type or 'none').title()}", new_x="LMARGIN", new_y="NEXT"
+        )
 
     # Query intent check
     if inferred_question:
