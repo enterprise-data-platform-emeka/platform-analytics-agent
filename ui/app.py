@@ -625,22 +625,29 @@ def _cached_build_pdf(
         "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-    ] + _glob.glob("/usr/share/fonts/**/*[Nn]oto*CJK*[Rr]egular*", recursive=True)
+    ] + _glob.glob("/usr/share/fonts/**/*[Nn]oto*[Cc][Jj][Kk]*", recursive=True)
     _DEJAVU_DIR = "/usr/share/fonts/truetype/dejavu"
 
     font_name = "Helvetica"
     if lang in ("zh", "ja", "ko"):
         for cjk_path in _NOTO_CJK_PATHS:
-            if os.path.exists(cjk_path):
-                try:
+            if not os.path.exists(cjk_path):
+                continue
+            # TTC (TrueType Collection) files require font_index to select a face.
+            # OTF/TTF files are single-face and must NOT receive font_index — fpdf2
+            # raises an error if font_index is passed to a non-collection file.
+            is_collection = cjk_path.lower().endswith(".ttc")
+            try:
+                if is_collection:
                     pdf.add_font("NotoSansCJK", fname=cjk_path, font_index=0)
-                    # Register bold using the same file — no true bold variant needed
-                    # for CJK: fpdf2 will use the Regular weight without error.
                     pdf.add_font("NotoSansCJK", style="B", fname=cjk_path, font_index=0)
-                    font_name = "NotoSansCJK"
-                    break
-                except Exception:
-                    continue
+                else:
+                    pdf.add_font("NotoSansCJK", fname=cjk_path)
+                    pdf.add_font("NotoSansCJK", style="B", fname=cjk_path)
+                font_name = "NotoSansCJK"
+                break
+            except Exception:
+                continue
 
     if font_name == "Helvetica":
         try:
@@ -662,83 +669,101 @@ def _cached_build_pdf(
     pdf.multi_cell(W, 7, question)
     pdf.ln(6)
 
-    # ── Chart image ─────────────────────────────────────────────────────────
-    if png_b64:
-        png_bytes = _b64.b64decode(png_b64)
-        pdf.image(io.BytesIO(png_bytes), x=15, w=W)
-        pdf.ln(6)
-
     # ── Summary — left-border accent matches the insight-card UI style ──────
+    # Matches UI order: insight appears directly below the question, before chart.
     pdf.set_font(font_name, "B", 12)
     pdf.cell(W, 8, _t("Summary", lang), new_x="LMARGIN", new_y="NEXT")
     pdf.set_font(font_name, "", 11)
-    # Clean markdown formatting that fpdf2 renders as literal characters.
-    # Bold (**text**) and italic (*text*) markers cause adjacent words to
-    # concatenate visually because fpdf2 doesn't interpret markdown syntax.
+    # Strip markdown formatting: fpdf2 renders **bold** and *italic* markers
+    # as literal characters, concatenating adjacent words visually.
     pdf_insight = re.sub(r"\*{1,3}([^*\n]+)\*{1,3}", r"\1", insight)
     pdf_insight = pdf_insight.replace("\r\n", "\n").replace("\r", "\n")
     y_before = pdf.get_y()
     pdf.set_x(pdf.l_margin + 6)
     pdf.multi_cell(W - 6, 7, pdf_insight)
     y_after = pdf.get_y()
-    # Draw the blue left-accent bar (3 px wide, full height of the text block).
+    # Draw the blue left-accent bar (3 pt wide) matching the UI insight-card style.
     pdf.set_fill_color(37, 99, 235)  # #2563EB
     pdf.rect(pdf.l_margin, y_before, 3, y_after - y_before, style="F")
-    pdf.ln(4)
+    pdf.ln(6)
+
+    # ── Chart image ─────────────────────────────────────────────────────────
+    if png_b64:
+        png_bytes = _b64.b64decode(png_b64)
+        pdf.image(io.BytesIO(png_bytes), x=15, w=W)
+        pdf.ln(6)
+
+    # ── SQL Query ────────────────────────────────────────────────────────────
+    if sql:
+        pdf.set_font(font_name, "B", 12)
+        pdf.cell(W, 8, _t("SQL Query", lang), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Courier", "", 9)
+        pdf.multi_cell(W, 5, sql)
+        pdf.ln(4)
+
+    # ── Query metadata — 3-column layout matching the UI metric widgets ──────
+    if sql:
+        pdf.set_font(font_name, "B", 12)
+        pdf.cell(W, 8, _t("Query Metadata", lang), new_x="LMARGIN", new_y="NEXT")
+        col_w = W / 3
+        labels = [
+            _t("Athena cost", lang),
+            _t("Data scanned", lang),
+            _t("Chart type", lang),
+        ]
+        values = [
+            _format_cost(cost_usd),
+            _format_bytes(bytes_scanned),
+            (chart_type or "none").title(),
+        ]
+        # Label row (small caps style — uppercase, smaller font)
+        pdf.set_font(font_name, "", 8)
+        for lbl in labels:
+            pdf.cell(col_w, 5, lbl.upper(), align="L")
+        pdf.ln(5)
+        # Value row (larger, bold)
+        pdf.set_font(font_name, "B", 13)
+        for val in values:
+            pdf.cell(col_w, 8, val, align="L")
+        pdf.ln(10)
 
     # ── Assumptions ─────────────────────────────────────────────────────────
     if assumptions:
-        pdf.ln(2)
         pdf.set_font(font_name, "B", 12)
         pdf.cell(W, 8, _t("Assumptions", lang), new_x="LMARGIN", new_y="NEXT")
         pdf.set_font(font_name, "", 10)
         for item in assumptions:
             pdf.set_x(pdf.l_margin)
-            pdf.multi_cell(W, 6, f"- {item}")
+            pdf.multi_cell(W, 6, f"\u2022 {item}")
+        pdf.ln(4)
 
-    # ── SQL Query ────────────────────────────────────────────────────────────
-    if sql:
-        pdf.ln(6)
-        pdf.set_font(font_name, "B", 12)
-        pdf.cell(W, 8, _t("SQL Query", lang), new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font("Courier", "", 9)
-        pdf.multi_cell(W, 5, sql)
-
-    # ── Query metadata ───────────────────────────────────────────────────────
-    if sql:
-        pdf.ln(6)
-        pdf.set_font(font_name, "B", 12)
-        pdf.cell(W, 8, _t("Query Metadata", lang), new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font(font_name, "", 10)
-        pdf.cell(
-            W,
-            6,
-            f"{_t('Athena cost:', lang)} {_format_cost(cost_usd)}",
-            new_x="LMARGIN",
-            new_y="NEXT",
-        )
-        pdf.cell(
-            W,
-            6,
-            f"{_t('Data scanned:', lang)} {_format_bytes(bytes_scanned)}",
-            new_x="LMARGIN",
-            new_y="NEXT",
-        )
-        pdf.cell(
-            W,
-            6,
-            f"{_t('Chart type:', lang)} {(chart_type or 'none').title()}",
-            new_x="LMARGIN",
-            new_y="NEXT",
-        )
-
-    # ── Query intent check ───────────────────────────────────────────────────
+    # ── Query intent check — caption + styled "Inferred:" block ─────────────
+    # Matches the UI layout: bold section label, caption explaining the method,
+    # then a grey left-bar box containing "Inferred: <text>".
     if inferred_question:
-        pdf.ln(6)
         pdf.set_font(font_name, "B", 12)
-        pdf.cell(W, 8, _t("Query Intent Check", lang), new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(W, 8, _t("Query intent check", lang), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font(font_name, "", 9)
+        caption = _t(
+            "Claude was shown only the SQL (not your question) and asked "
+            "what it thinks the query is trying to answer:",
+            lang,
+        )
+        pdf.set_text_color(100, 116, 139)  # #64748b slate-500
+        pdf.multi_cell(W, 5, caption)
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(3)
+        # Grey left-accent box matching the UI inferred block style.
+        inferred_label = _t("Inferred:", lang)
+        inferred_text = f"{inferred_label} {inferred_question}"
         pdf.set_font(font_name, "", 10)
-        pdf.multi_cell(W, 6, inferred_question)
+        y_i = pdf.get_y()
+        pdf.set_x(pdf.l_margin + 6)
+        pdf.set_fill_color(248, 250, 252)  # #f8fafc slate-50
+        pdf.multi_cell(W - 6, 6, inferred_text, fill=True)
+        y_i2 = pdf.get_y()
+        pdf.set_fill_color(148, 163, 184)  # #94a3b8 slate-400 (grey bar)
+        pdf.rect(pdf.l_margin, y_i, 3, y_i2 - y_i, style="F")
 
     return bytes(pdf.output())
 

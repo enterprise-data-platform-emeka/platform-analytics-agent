@@ -66,6 +66,33 @@ _CLASSIFY_SYSTEM: Final[str] = (
     "and does not require a chart."
 )
 
+def _detect_language_name(text: str) -> str:
+    """Return a human-readable language name from the dominant Unicode script.
+
+    Used to tell Claude which language to reply in for the SQL intent check,
+    so the inferred question always matches the user's question language.
+    """
+    for ch in text:
+        cp = ord(ch)
+        if 0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF:
+            return "Chinese"
+        if 0x3040 <= cp <= 0x30FF:
+            return "Japanese"
+        if 0xAC00 <= cp <= 0xD7AF or 0x1100 <= cp <= 0x11FF:
+            return "Korean"
+        if 0x0600 <= cp <= 0x06FF:
+            return "Arabic"
+        if 0x0400 <= cp <= 0x04FF:
+            return "Russian"
+        if 0x0370 <= cp <= 0x03FF:
+            return "Greek"
+        if 0x0590 <= cp <= 0x05FF:
+            return "Hebrew"
+        if 0x0E00 <= cp <= 0x0E7F:
+            return "Thai"
+    return "English"
+
+
 # System prompt for inferring the business question from a SQL query.
 # The original question is withheld structurally so the inference is unbiased,
 # but a language hint is passed in the user message so Claude replies in the
@@ -340,8 +367,7 @@ class ClaudeClient:
         """
         try:
             lang_hint = (
-                f"\nThe original question was asked in this language — "
-                f"reply in the same language: {question[:120]}"
+                f"\nReply in {_detect_language_name(question)}."
                 if question
                 else ""
             )
