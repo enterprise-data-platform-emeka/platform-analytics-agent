@@ -315,9 +315,7 @@ class AgentSession:
 
         self._audit.write(question=question, sql=generated.sql, response=response)
 
-        inferred_question = self._client.infer_question_from_sql(
-            generated.sql, question=question
-        )
+        inferred_question = self._client.infer_question_from_sql(generated.sql, question=question)
 
         return AskResult(
             response=response,
@@ -557,12 +555,22 @@ try:
 
         def _generate() -> Generator[str, None, None]:
             lang = _detect_language(body.question)
-            yield json.dumps({"type": "status", "text": _status_msg("Analyzing your question...", lang)}) + "\n"
+            yield (
+                json.dumps(
+                    {"type": "status", "text": _status_msg("Analyzing your question...", lang)}
+                )
+                + "\n"
+            )
 
             question_type = _session._client.classify_question(body.question, prior_context)
 
             if question_type == "conversational":
-                yield json.dumps({"type": "status", "text": _status_msg("Answering from context...", lang)}) + "\n"
+                yield (
+                    json.dumps(
+                        {"type": "status", "text": _status_msg("Answering from context...", lang)}
+                    )
+                    + "\n"
+                )
                 try:
                     insight = _session._client.answer_conversational(body.question, prior_context)
                 except AgentError as exc:
@@ -614,7 +622,10 @@ try:
             if prior_context:
                 system_prompt = f"{system_prompt}\n\n{prior_context}"
 
-            yield json.dumps({"type": "status", "text": _status_msg("Generating SQL query...", lang)}) + "\n"
+            yield (
+                json.dumps({"type": "status", "text": _status_msg("Generating SQL query...", lang)})
+                + "\n"
+            )
             try:
                 generated = _session._generator.generate(
                     question=body.question,
@@ -625,7 +636,12 @@ try:
                 yield json.dumps({"type": "error", "text": str(exc)}) + "\n"
                 return
 
-            yield json.dumps({"type": "status", "text": _status_msg("Querying your data warehouse...", lang)}) + "\n"
+            yield (
+                json.dumps(
+                    {"type": "status", "text": _status_msg("Querying your data warehouse...", lang)}
+                )
+                + "\n"
+            )
             try:
                 query_result = _session._executor.execute(generated.sql)
             except AgentError as exc:
@@ -635,7 +651,10 @@ try:
 
             validation_report = validate(query_result)
 
-            yield json.dumps({"type": "status", "text": _status_msg("Generating insight...", lang)}) + "\n"
+            yield (
+                json.dumps({"type": "status", "text": _status_msg("Generating insight...", lang)})
+                + "\n"
+            )
             if validation_report.zero_rows:
                 result_markdown = "(no rows returned)"
             else:

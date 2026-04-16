@@ -394,9 +394,9 @@ _UI_TRANSLATIONS: dict[str, dict[str, str]] = {
         "Query intent check": "בדיקת כוונת השאילתה",
         "Inferred:": "מסקנה:",
         "Download PDF": "הורד PDF",
-        "Send as email": "שלח בדוא\"ל",
-        "Close email": "סגור דוא\"ל",
-        "Recipient email address": "כתובת דוא\"ל הנמען",
+        "Send as email": 'שלח בדוא"ל',
+        "Close email": 'סגור דוא"ל',
+        "Recipient email address": 'כתובת דוא"ל הנמען',
         "Send PDF report": "שלח דוח PDF",
         "Sending...": "שולח...",
         "Athena cost": "עלות Athena",
@@ -701,19 +701,25 @@ def _cached_build_pdf(
         pdf.cell(W, 8, _t("Query Metadata", lang), new_x="LMARGIN", new_y="NEXT")
         pdf.set_font(font_name, "", 10)
         pdf.cell(
-            W, 6,
+            W,
+            6,
             f"{_t('Athena cost:', lang)} {_format_cost(cost_usd)}",
-            new_x="LMARGIN", new_y="NEXT",
+            new_x="LMARGIN",
+            new_y="NEXT",
         )
         pdf.cell(
-            W, 6,
+            W,
+            6,
             f"{_t('Data scanned:', lang)} {_format_bytes(bytes_scanned)}",
-            new_x="LMARGIN", new_y="NEXT",
+            new_x="LMARGIN",
+            new_y="NEXT",
         )
         pdf.cell(
-            W, 6,
+            W,
+            6,
             f"{_t('Chart type:', lang)} {(chart_type or 'none').title()}",
-            new_x="LMARGIN", new_y="NEXT",
+            new_x="LMARGIN",
+            new_y="NEXT",
         )
 
     # ── Query intent check ───────────────────────────────────────────────────
@@ -855,11 +861,13 @@ def _render_turn(turn: dict, form_key: str) -> None:
             if turn.get("inferred_question"):
                 st.divider()
                 st.caption(f"**{_t('Query intent check', lang)}**")
-                st.caption(_t(
-                    "Claude was shown only the SQL (not your question) and asked "
-                    "what it thinks the query is trying to answer:",
-                    lang,
-                ))
+                st.caption(
+                    _t(
+                        "Claude was shown only the SQL (not your question) and asked "
+                        "what it thinks the query is trying to answer:",
+                        lang,
+                    )
+                )
                 escaped_inferred = html_lib.escape(turn["inferred_question"])
                 inferred_label = _t("Inferred:", lang)
                 st.markdown(
@@ -1005,11 +1013,13 @@ with st.sidebar:
 # ── Page header ───────────────────────────────────────────────────────────────
 hl = _session_language()
 st.title("📊 EDP Analytics Agent")
-st.caption(_t(
-    "Ask questions about your Gold data in any language. "
-    "Follow-up questions remember prior context.",
-    hl,
-))
+st.caption(
+    _t(
+        "Ask questions about your Gold data in any language. "
+        "Follow-up questions remember prior context.",
+        hl,
+    )
+)
 
 # ── Empty state — example questions ──────────────────────────────────────────
 if not st.session_state.history:
