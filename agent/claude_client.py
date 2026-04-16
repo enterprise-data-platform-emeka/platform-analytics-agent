@@ -66,13 +66,15 @@ _CLASSIFY_SYSTEM: Final[str] = (
     "and does not require a chart."
 )
 
-# System prompt for inferring the business question from a SQL query (no original
-# question provided — intentionally blind so the inference is unbiased).
+# System prompt for inferring the business question from a SQL query.
+# The original question is withheld structurally so the inference is unbiased,
+# but a language hint is passed in the user message so Claude replies in the
+# same language the user asked in.
 _INTENT_SYSTEM: Final[str] = (
     "You are a SQL analyst. Given a SQL query, identify the business question it "
-    "is trying to answer. Reply with exactly one plain-English sentence starting "
-    "with 'What' or 'Which' or 'How'. Do not mention SQL, tables, or column names. "
-    "Base your answer solely on what the query measures and filters."
+    "is trying to answer. Reply with exactly one sentence. Do not mention SQL, tables, "
+    "or column names. Base your answer solely on what the query measures and filters. "
+    "Reply in the same language as the original question was asked in."
 )
 
 # System prompt for answering conversational/meta questions without hitting Athena.
@@ -319,29 +321,37 @@ class ClaudeClient:
 
         return _iter(), result
 
-    def infer_question_from_sql(self, sql: str) -> str:
+    def infer_question_from_sql(self, sql: str, question: str = "") -> str:
         """Infer the business question a SQL query is trying to answer.
 
         Makes a fresh Claude call with ONLY the SQL — the original question is
-        deliberately withheld so the inference is unbiased. The result is used
-        as a sanity check: if the inferred question matches the user's intent,
-        the generated SQL is answering the right thing.
+        structurally withheld so the inference is unbiased. A language hint is
+        included so Claude responds in the same language the user asked in.
 
         Args:
             sql: The validated SQL query that was executed against Athena.
+            question: The original user question, used only as a language
+                reference. If empty, Claude defaults to English.
 
         Returns:
-            One plain-English sentence describing what the SQL is measuring.
-            Returns an empty string on any error so callers can treat it as
-            optional metadata.
+            One sentence describing what the SQL is measuring, in the same
+            language as the original question. Returns an empty string on any
+            error so callers can treat it as optional metadata.
         """
         try:
+            lang_hint = (
+                f"\nThe original question was asked in this language — "
+                f"reply in the same language: {question[:120]}"
+                if question
+                else ""
+            )
             response = self._call(
                 messages=[
                     {
                         "role": "user",
                         "content": (
-                            "What business question is this SQL query trying to answer?\n\n"
+                            "What business question is this SQL query trying to answer?"
+                            f"{lang_hint}\n\n"
                             f"```sql\n{sql}\n```"
                         ),
                     }

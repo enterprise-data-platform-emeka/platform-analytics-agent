@@ -63,6 +63,106 @@ from agent.validator import SQLValidator
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Language detection — localised status messages
+# ---------------------------------------------------------------------------
+
+
+def _detect_language(text: str) -> str:
+    """Detect the dominant script from Unicode block ranges.
+
+    Returns a language code ('zh', 'ja', 'ko', 'ar', 'ru', 'el', 'he', 'th')
+    or 'en' when only Latin/ASCII characters are found.
+    """
+    counts: dict[str, int] = {}
+    for ch in text:
+        cp = ord(ch)
+        if 0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF:
+            counts["zh"] = counts.get("zh", 0) + 1
+        elif 0x3040 <= cp <= 0x309F or 0x30A0 <= cp <= 0x30FF:
+            counts["ja"] = counts.get("ja", 0) + 1
+        elif 0xAC00 <= cp <= 0xD7AF or 0x1100 <= cp <= 0x11FF:
+            counts["ko"] = counts.get("ko", 0) + 1
+        elif 0x0600 <= cp <= 0x06FF:
+            counts["ar"] = counts.get("ar", 0) + 1
+        elif 0x0400 <= cp <= 0x04FF:
+            counts["ru"] = counts.get("ru", 0) + 1
+        elif 0x0370 <= cp <= 0x03FF:
+            counts["el"] = counts.get("el", 0) + 1
+        elif 0x0590 <= cp <= 0x05FF:
+            counts["he"] = counts.get("he", 0) + 1
+        elif 0x0E00 <= cp <= 0x0E7F:
+            counts["th"] = counts.get("th", 0) + 1
+    if not counts:
+        return "en"
+    return max(counts, key=lambda k: counts[k])
+
+
+_STATUS_MESSAGES: dict[str, dict[str, str]] = {
+    "zh": {
+        "Analyzing your question...": "正在分析您的问题...",
+        "Answering from context...": "正在根据上下文作答...",
+        "Generating SQL query...": "正在生成 SQL 查询...",
+        "Querying your data warehouse...": "正在查询数据仓库...",
+        "Generating insight...": "正在生成洞察...",
+    },
+    "ja": {
+        "Analyzing your question...": "質問を分析中...",
+        "Answering from context...": "コンテキストから回答中...",
+        "Generating SQL query...": "SQL クエリを生成中...",
+        "Querying your data warehouse...": "データウェアハウスを照会中...",
+        "Generating insight...": "インサイトを生成中...",
+    },
+    "ko": {
+        "Analyzing your question...": "질문을 분석하는 중...",
+        "Answering from context...": "컨텍스트에서 답변 중...",
+        "Generating SQL query...": "SQL 쿼리 생성 중...",
+        "Querying your data warehouse...": "데이터 웨어하우스 조회 중...",
+        "Generating insight...": "인사이트 생성 중...",
+    },
+    "ar": {
+        "Analyzing your question...": "جارٍ تحليل سؤالك...",
+        "Answering from context...": "جارٍ الإجابة من السياق...",
+        "Generating SQL query...": "جارٍ إنشاء استعلام SQL...",
+        "Querying your data warehouse...": "جارٍ الاستعلام عن مستودع البيانات...",
+        "Generating insight...": "جارٍ إنشاء التحليل...",
+    },
+    "ru": {
+        "Analyzing your question...": "Анализ вопроса...",
+        "Answering from context...": "Ответ из контекста...",
+        "Generating SQL query...": "Генерация SQL запроса...",
+        "Querying your data warehouse...": "Запрос к хранилищу данных...",
+        "Generating insight...": "Генерация аналитики...",
+    },
+    "el": {
+        "Analyzing your question...": "Ανάλυση ερώτησης...",
+        "Answering from context...": "Απάντηση από το πλαίσιο...",
+        "Generating SQL query...": "Δημιουργία ερωτήματος SQL...",
+        "Querying your data warehouse...": "Ερώτηση αποθήκης δεδομένων...",
+        "Generating insight...": "Δημιουργία ανάλυσης...",
+    },
+    "he": {
+        "Analyzing your question...": "מנתח את השאלה שלך...",
+        "Answering from context...": "עונה מהקשר...",
+        "Generating SQL query...": "מייצר שאילתת SQL...",
+        "Querying your data warehouse...": "שואל את מחסן הנתונים...",
+        "Generating insight...": "מייצר תובנה...",
+    },
+    "th": {
+        "Analyzing your question...": "กำลังวิเคราะห์คำถาม...",
+        "Answering from context...": "กำลังตอบจากบริบท...",
+        "Generating SQL query...": "กำลังสร้าง SQL query...",
+        "Querying your data warehouse...": "กำลังสอบถามคลังข้อมูล...",
+        "Generating insight...": "กำลังสร้างข้อมูลเชิงลึก...",
+    },
+}
+
+
+def _status_msg(text: str, lang: str) -> str:
+    """Return the status message in the detected language, with English fallback."""
+    return _STATUS_MESSAGES.get(lang, {}).get(text, text)
+
+
 @dataclass
 class AskResult:
     """The combined output of one question-answer pipeline run.
@@ -215,7 +315,9 @@ class AgentSession:
 
         self._audit.write(question=question, sql=generated.sql, response=response)
 
-        inferred_question = self._client.infer_question_from_sql(generated.sql)
+        inferred_question = self._client.infer_question_from_sql(
+            generated.sql, question=question
+        )
 
         return AskResult(
             response=response,
@@ -454,12 +556,13 @@ try:
         prior_context = conversation.context_summary() if conversation else ""
 
         def _generate() -> Generator[str, None, None]:
-            yield json.dumps({"type": "status", "text": "Analyzing your question..."}) + "\n"
+            lang = _detect_language(body.question)
+            yield json.dumps({"type": "status", "text": _status_msg("Analyzing your question...", lang)}) + "\n"
 
             question_type = _session._client.classify_question(body.question, prior_context)
 
             if question_type == "conversational":
-                yield json.dumps({"type": "status", "text": "Answering from context..."}) + "\n"
+                yield json.dumps({"type": "status", "text": _status_msg("Answering from context...", lang)}) + "\n"
                 try:
                     insight = _session._client.answer_conversational(body.question, prior_context)
                 except AgentError as exc:
@@ -511,7 +614,7 @@ try:
             if prior_context:
                 system_prompt = f"{system_prompt}\n\n{prior_context}"
 
-            yield json.dumps({"type": "status", "text": "Generating SQL query..."}) + "\n"
+            yield json.dumps({"type": "status", "text": _status_msg("Generating SQL query...", lang)}) + "\n"
             try:
                 generated = _session._generator.generate(
                     question=body.question,
@@ -522,7 +625,7 @@ try:
                 yield json.dumps({"type": "error", "text": str(exc)}) + "\n"
                 return
 
-            yield json.dumps({"type": "status", "text": "Querying your data warehouse..."}) + "\n"
+            yield json.dumps({"type": "status", "text": _status_msg("Querying your data warehouse...", lang)}) + "\n"
             try:
                 query_result = _session._executor.execute(generated.sql)
             except AgentError as exc:
@@ -532,7 +635,7 @@ try:
 
             validation_report = validate(query_result)
 
-            yield json.dumps({"type": "status", "text": "Generating insight..."}) + "\n"
+            yield json.dumps({"type": "status", "text": _status_msg("Generating insight...", lang)}) + "\n"
             if validation_report.zero_rows:
                 result_markdown = "(no rows returned)"
             else:
@@ -574,7 +677,9 @@ try:
                 sql=generated.sql,
                 response=response,
             )
-            inferred_question = _session._client.infer_question_from_sql(generated.sql)
+            inferred_question = _session._client.infer_question_from_sql(
+                generated.sql, question=body.question
+            )
 
             session_id = cast(str, body.session_id) if conversation is not None else _store.create()
             _store.append_turn(

@@ -25,8 +25,9 @@ COPY agent/ ./agent/
 COPY ui/ ./ui/
 COPY entrypoint.sh .
 
-# Install DejaVu fonts (required for Unicode PDF export) and set permissions.
-RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core \
+# Install DejaVu fonts (Latin/Cyrillic PDF export) and Noto CJK fonts (Chinese/Japanese/Korean
+# PDF export). Both are needed so fpdf2 can render any script without dropping characters.
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/* \
     && chmod +x entrypoint.sh && chown -R agent:agent /app
 
