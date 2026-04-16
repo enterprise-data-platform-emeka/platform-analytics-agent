@@ -66,6 +66,7 @@ _CLASSIFY_SYSTEM: Final[str] = (
     "and does not require a chart."
 )
 
+
 def _detect_language_name(text: str) -> str:
     """Return a human-readable language name from the dominant Unicode script.
 
@@ -366,11 +367,7 @@ class ClaudeClient:
             error so callers can treat it as optional metadata.
         """
         try:
-            lang_hint = (
-                f"\nReply in {_detect_language_name(question)}."
-                if question
-                else ""
-            )
+            lang_hint = f"\nReply in {_detect_language_name(question)}." if question else ""
             response = self._call(
                 messages=[
                     {

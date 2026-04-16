@@ -80,9 +80,7 @@ class TestForbiddenKeywords:
 
     def test_forbidden_keyword_inside_cte_raises(self) -> None:
         # UPDATE inside a CTE must still be caught.
-        sql = (
-            "WITH bad AS (UPDATE monthly_revenue_trend SET total_revenue = 0) " "SELECT * FROM bad"
-        )
+        sql = "WITH bad AS (UPDATE monthly_revenue_trend SET total_revenue = 0) SELECT * FROM bad"
         with pytest.raises(SQLValidationError):
             _validator().validate(sql)
 

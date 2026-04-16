@@ -325,7 +325,8 @@ class ChartGenerator:
         # year=2024). Columns like "monthly_revenue" match "month" in their name but contain
         # large float metric values — these must stay on the y-axis, not become x-axis labels.
         x_dim_cols = [
-            tc for tc in time_cols
+            tc
+            for tc in time_cols
             if all(
                 ChartGenerator._is_integer_like(str(row.get(tc, "")))
                 for row in result.rows
