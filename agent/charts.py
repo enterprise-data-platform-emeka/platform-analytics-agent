@@ -223,6 +223,20 @@ class ChartGenerator:
         return numeric
 
     @staticmethod
+    def _is_integer_like(value: str) -> bool:
+        """Return True if value is a whole number (e.g. 1, 12, 2024).
+
+        Used to distinguish time dimension columns (month=1..12, year=2024)
+        from metric columns whose names happen to contain a time hint
+        (e.g. monthly_revenue=133528.69).
+        """
+        try:
+            f = float(value)
+            return f == int(f)
+        except (ValueError, TypeError):
+            return False
+
+    @staticmethod
     def _best_metric_column(numeric_cols: list[str]) -> str:
         """Pick the most likely metric column from a list of numeric columns.
 
@@ -307,17 +321,32 @@ class ChartGenerator:
         ]
         non_time_numeric = [c for c in numeric_cols if c not in time_cols]
 
-        # Build x-axis labels from time columns, joined if there are two
+        # Filter time_cols to only true time dimensions (integer-like values, e.g. month=1..12,
+        # year=2024). Columns like "monthly_revenue" match "month" in their name but contain
+        # large float metric values — these must stay on the y-axis, not become x-axis labels.
+        x_dim_cols = [
+            tc for tc in time_cols
+            if all(
+                ChartGenerator._is_integer_like(str(row.get(tc, "")))
+                for row in result.rows
+                if row.get(tc, "")
+            )
+        ]
+        if not x_dim_cols:
+            # Fallback: use first time_col as-is (avoids blank x-axis on unusual queries).
+            x_dim_cols = time_cols[:1]
+
+        # Build x-axis labels from time dimension columns, joined if there are two
         # (e.g. order_year + order_month -> "2025-01").
-        if len(time_cols) >= 2:
+        if len(x_dim_cols) >= 2:
             x_labels = [
-                "-".join(str(row.get(tc, "")).zfill(2) for tc in time_cols[:2])
+                "-".join(str(row.get(tc, "")).zfill(2) for tc in x_dim_cols[:2])
                 for row in result.rows
             ]
-            x_title = " / ".join(tc.replace("_", " ").title() for tc in time_cols[:2])
+            x_title = " / ".join(tc.replace("_", " ").title() for tc in x_dim_cols[:2])
         else:
-            x_labels = [str(row.get(time_cols[0], "")) for row in result.rows]
-            x_title = time_cols[0].replace("_", " ").title()
+            x_labels = [str(row.get(x_dim_cols[0], "")) for row in result.rows]
+            x_title = x_dim_cols[0].replace("_", " ").title()
 
         y_col = non_time_numeric[0]
         y_values = [float(row.get(y_col, 0) or 0) for row in result.rows]

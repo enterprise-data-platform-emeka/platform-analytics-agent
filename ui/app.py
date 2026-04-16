@@ -8,6 +8,7 @@ calls happen server-side in the container — the browser never touches AWS.
 """
 
 import base64 as _b64
+import glob as _glob
 import html as html_lib
 import json
 import os
@@ -616,11 +617,15 @@ def _cached_build_pdf(
     # CJK scripts need Noto CJK (installed via fonts-noto-cjk in the Dockerfile).
     # All other scripts use DejaVu (installed via fonts-dejavu-core).
     # Helvetica is the built-in fallback if neither font file is found.
+    #
+    # The exact install path varies across Debian versions, so we try known
+    # paths first, then fall back to a glob search across all font directories.
     _NOTO_CJK_PATHS = [
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-    ]
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    ] + _glob.glob("/usr/share/fonts/**/*[Nn]oto*CJK*[Rr]egular*", recursive=True)
     _DEJAVU_DIR = "/usr/share/fonts/truetype/dejavu"
 
     font_name = "Helvetica"
@@ -667,9 +672,14 @@ def _cached_build_pdf(
     pdf.set_font(font_name, "B", 12)
     pdf.cell(W, 8, _t("Summary", lang), new_x="LMARGIN", new_y="NEXT")
     pdf.set_font(font_name, "", 11)
+    # Clean markdown formatting that fpdf2 renders as literal characters.
+    # Bold (**text**) and italic (*text*) markers cause adjacent words to
+    # concatenate visually because fpdf2 doesn't interpret markdown syntax.
+    pdf_insight = re.sub(r"\*{1,3}([^*\n]+)\*{1,3}", r"\1", insight)
+    pdf_insight = pdf_insight.replace("\r\n", "\n").replace("\r", "\n")
     y_before = pdf.get_y()
     pdf.set_x(pdf.l_margin + 6)
-    pdf.multi_cell(W - 6, 7, insight)
+    pdf.multi_cell(W - 6, 7, pdf_insight)
     y_after = pdf.get_y()
     # Draw the blue left-accent bar (3 px wide, full height of the text block).
     pdf.set_fill_color(37, 99, 235)  # #2563EB
