@@ -70,8 +70,11 @@ _CLASSIFY_SYSTEM: Final[str] = (
 def _detect_language_name(text: str) -> str:
     """Return a human-readable language name from the dominant Unicode script.
 
-    Used to tell Claude which language to reply in for the SQL intent check,
-    so the inferred question always matches the user's question language.
+    Returns an explicit name for non-Latin scripts (Chinese, Arabic, etc.).
+    Returns an empty string for Latin-script languages (Italian, French,
+    Spanish, English, etc.) because they share the same Unicode range and
+    cannot be distinguished by code-point inspection alone. Callers should
+    pass a question snippet to Claude for Latin-script language detection.
     """
     for ch in text:
         cp = ord(ch)
@@ -91,7 +94,7 @@ def _detect_language_name(text: str) -> str:
             return "Hebrew"
         if 0x0E00 <= cp <= 0x0E7F:
             return "Thai"
-    return "English"
+    return ""  # Latin/ASCII — caller passes question snippet for language detection
 
 
 # System prompt for inferring the business question from a SQL query.
@@ -367,7 +370,24 @@ class ClaudeClient:
             error so callers can treat it as optional metadata.
         """
         try:
-            lang_hint = f"\nReply in {_detect_language_name(question)}." if question else ""
+            detected = _detect_language_name(question) if question else ""
+            if detected:
+                # Non-Latin script (Chinese, Arabic, etc.): name is unambiguous.
+                lang_hint = f"\nReply in {detected}."
+            elif question:
+                # Latin-script language (Italian, French, Spanish, English, etc.):
+                # Unicode ranges can't distinguish them, so let Claude detect from a
+                # short snippet. The snippet is ONLY a language reference — Claude is
+                # explicitly told not to use it as a hint about the SQL's meaning.
+                snippet = question[:60].replace("'", "\\'")
+                lang_hint = (
+                    f"\nLanguage instruction: detect the language of the following "
+                    f"phrase and reply in that same language (use it only for "
+                    f"language detection, not as a hint about the SQL content): "
+                    f"'{snippet}'"
+                )
+            else:
+                lang_hint = ""
             response = self._call(
                 messages=[
                     {

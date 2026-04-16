@@ -610,8 +610,7 @@ def _cached_build_pdf(
     pdf = FPDF()
     pdf.set_margins(15, 15, 15)
     pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.add_page()
-    W = pdf.epw
+    # Pages are added explicitly in each section below. W is set after page 1.
 
     # ── Font selection ──────────────────────────────────────────────────────
     # CJK scripts need Noto CJK (installed via fonts-noto-cjk in the Dockerfile).
@@ -636,15 +635,28 @@ def _cached_build_pdf(
             # TTC (TrueType Collection) files require font_index to select a face.
             # OTF/TTF files are single-face and must NOT receive font_index — fpdf2
             # raises an error if font_index is passed to a non-collection file.
+            #
+            # IMPORTANT: bold is registered in a separate inner try-except so that
+            # a bold-registration failure does NOT prevent the regular face from
+            # being used. Without this, the outer except catches the bold error and
+            # continues to the next path, leaving font_name as "Helvetica" even
+            # though the regular face loaded fine — causing all CJK text to be dropped.
             is_collection = cjk_path.lower().endswith(".ttc")
             try:
                 if is_collection:
                     pdf.add_font("NotoSansCJK", fname=cjk_path, font_index=0)
-                    pdf.add_font("NotoSansCJK", style="B", fname=cjk_path, font_index=0)
                 else:
                     pdf.add_font("NotoSansCJK", fname=cjk_path)
-                    pdf.add_font("NotoSansCJK", style="B", fname=cjk_path)
                 font_name = "NotoSansCJK"
+                # Try to register the bold face. Failure is non-fatal: fpdf2 will
+                # silently use the regular face wherever bold is requested.
+                try:
+                    if is_collection:
+                        pdf.add_font("NotoSansCJK", style="B", fname=cjk_path, font_index=0)
+                    else:
+                        pdf.add_font("NotoSansCJK", style="B", fname=cjk_path)
+                except Exception:
+                    pass
                 break
             except Exception:
                 continue
@@ -657,53 +669,94 @@ def _cached_build_pdf(
         except Exception:
             font_name = "Helvetica"
 
-    # ── Title ───────────────────────────────────────────────────────────────
-    pdf.set_font(font_name, "B", 18)
-    pdf.cell(W, 12, _t("EDP Analytics Report", lang), new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(4)
+    # ════════════════════════════════════════════════════════════════════════
+    # PAGE 1 — Title · Question · Summary · Chart
+    # ════════════════════════════════════════════════════════════════════════
+    pdf.add_page()
+    W = pdf.epw
 
-    # ── Question ────────────────────────────────────────────────────────────
-    pdf.set_font(font_name, "B", 12)
+    # Title
+    pdf.set_font(font_name, "B", 20)
+    pdf.cell(W, 12, _t("EDP Analytics Report", lang), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(6)
+
+    # Question
+    pdf.set_font(font_name, "B", 13)
     pdf.cell(W, 8, _t("Question", lang), new_x="LMARGIN", new_y="NEXT")
     pdf.set_font(font_name, "", 11)
     pdf.multi_cell(W, 7, question)
-    pdf.ln(6)
+    pdf.ln(8)
 
-    # ── Summary — left-border accent matches the insight-card UI style ──────
-    # Matches UI order: insight appears directly below the question, before chart.
-    pdf.set_font(font_name, "B", 12)
-    pdf.cell(W, 8, _t("Summary", lang), new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font(font_name, "", 11)
-    # Strip markdown formatting: fpdf2 renders **bold** and *italic* markers
-    # as literal characters, concatenating adjacent words visually.
+    # Summary — blue left-accent bar matching the UI insight-card style.
+    # Strip markdown: fpdf2 renders **bold** as literal asterisks.
     pdf_insight = re.sub(r"\*{1,3}([^*\n]+)\*{1,3}", r"\1", insight)
     pdf_insight = pdf_insight.replace("\r\n", "\n").replace("\r", "\n")
+    pdf.set_font(font_name, "B", 13)
+    pdf.cell(W, 8, _t("Summary", lang), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font(font_name, "", 11)
     y_before = pdf.get_y()
     pdf.set_x(pdf.l_margin + 6)
     pdf.multi_cell(W - 6, 7, pdf_insight)
     y_after = pdf.get_y()
-    # Draw the blue left-accent bar (3 pt wide) matching the UI insight-card style.
-    pdf.set_fill_color(37, 99, 235)  # #2563EB
+    pdf.set_fill_color(37, 99, 235)  # #2563EB blue
     pdf.rect(pdf.l_margin, y_before, 3, y_after - y_before, style="F")
-    pdf.ln(6)
+    pdf.ln(8)
 
-    # ── Chart image ─────────────────────────────────────────────────────────
+    # Chart image
     if png_b64:
         png_bytes = _b64.b64decode(png_b64)
         pdf.image(io.BytesIO(png_bytes), x=15, w=W)
-        pdf.ln(6)
 
-    # ── SQL Query ────────────────────────────────────────────────────────────
-    if sql:
-        pdf.set_font(font_name, "B", 12)
-        pdf.cell(W, 8, _t("SQL Query", lang), new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font("Courier", "", 9)
-        pdf.multi_cell(W, 5, sql)
+    # ════════════════════════════════════════════════════════════════════════
+    # PAGE 2 — Assumptions (only if present)
+    # ════════════════════════════════════════════════════════════════════════
+    if assumptions:
+        pdf.add_page()
+        pdf.set_font(font_name, "B", 13)
+        pdf.cell(W, 8, _t("Assumptions", lang), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(4)
+        pdf.set_font(font_name, "", 10)
+        for item in assumptions:
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(W, 6, f"\u2022 {item}")
+            pdf.ln(2)
 
-    # ── Query metadata — 3-column layout matching the UI metric widgets ──────
+    # ════════════════════════════════════════════════════════════════════════
+    # PAGE 3 — SQL Query · Query Metadata · Query Intent Check (last page)
+    # ════════════════════════════════════════════════════════════════════════
     if sql:
-        pdf.set_font(font_name, "B", 12)
+        pdf.add_page()
+
+        # ── SQL Query — editor-style code block ──────────────────────────
+        pdf.set_font(font_name, "B", 13)
+        pdf.cell(W, 8, _t("SQL Query", lang), new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(2)
+
+        # Header bar: dark slate strip with filename label
+        bar_h = 9
+        bar_y = pdf.get_y()
+        pdf.set_fill_color(30, 41, 59)  # #1e293b slate-800
+        pdf.rect(pdf.l_margin, bar_y, W, bar_h, style="F")
+        pdf.set_xy(pdf.l_margin + 5, bar_y)
+        pdf.set_text_color(148, 163, 184)  # #94a3b8 slate-400
+        pdf.set_font("Courier", "", 8)
+        pdf.cell(W - 5, bar_h, "query.sql", new_x="LMARGIN", new_y="NEXT")
+
+        # Code body: near-black background, light grey text, monospace
+        pdf.set_fill_color(15, 23, 42)  # #0f172a slate-950
+        pdf.set_text_color(212, 212, 212)
+        pdf.set_font("Courier", "", 9)
+        sql_padded = "\n".join("  " + line for line in sql.split("\n"))
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(W, 5, sql_padded, fill=True)
+
+        # Reset colours after dark block
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_fill_color(255, 255, 255)
+        pdf.ln(10)
+
+        # ── Query Metadata — 3-column layout matching the UI metric widgets ─
+        pdf.set_font(font_name, "B", 13)
         pdf.cell(W, 8, _t("Query Metadata", lang), new_x="LMARGIN", new_y="NEXT")
         col_w = W / 3
         labels = [
@@ -716,54 +769,41 @@ def _cached_build_pdf(
             _format_bytes(bytes_scanned),
             (chart_type or "none").title(),
         ]
-        # Label row (small caps style — uppercase, smaller font)
+        # Label row — small uppercase caption style
         pdf.set_font(font_name, "", 8)
         for lbl in labels:
             pdf.cell(col_w, 5, lbl.upper(), align="L")
         pdf.ln(5)
-        # Value row (larger, bold)
+        # Value row — large bold numbers
         pdf.set_font(font_name, "B", 13)
         for val in values:
             pdf.cell(col_w, 8, val, align="L")
-        pdf.ln(10)
+        pdf.ln(12)
 
-    # ── Assumptions ─────────────────────────────────────────────────────────
-    if assumptions:
-        pdf.set_font(font_name, "B", 12)
-        pdf.cell(W, 8, _t("Assumptions", lang), new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font(font_name, "", 10)
-        for item in assumptions:
-            pdf.set_x(pdf.l_margin)
-            pdf.multi_cell(W, 6, f"\u2022 {item}")
-        pdf.ln(4)
-
-    # ── Query intent check — caption + styled "Inferred:" block ─────────────
-    # Matches the UI layout: bold section label, caption explaining the method,
-    # then a grey left-bar box containing "Inferred: <text>".
-    if inferred_question:
-        pdf.set_font(font_name, "B", 12)
-        pdf.cell(W, 8, _t("Query intent check", lang), new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font(font_name, "", 9)
-        caption = _t(
-            "Claude was shown only the SQL (not your question) and asked "
-            "what it thinks the query is trying to answer:",
-            lang,
-        )
-        pdf.set_text_color(100, 116, 139)  # #64748b slate-500
-        pdf.multi_cell(W, 5, caption)
-        pdf.set_text_color(0, 0, 0)
-        pdf.ln(3)
-        # Grey left-accent box matching the UI inferred block style.
-        inferred_label = _t("Inferred:", lang)
-        inferred_text = f"{inferred_label} {inferred_question}"
-        pdf.set_font(font_name, "", 10)
-        y_i = pdf.get_y()
-        pdf.set_x(pdf.l_margin + 6)
-        pdf.set_fill_color(248, 250, 252)  # #f8fafc slate-50
-        pdf.multi_cell(W - 6, 6, inferred_text, fill=True)
-        y_i2 = pdf.get_y()
-        pdf.set_fill_color(148, 163, 184)  # #94a3b8 slate-400 (grey bar)
-        pdf.rect(pdf.l_margin, y_i, 3, y_i2 - y_i, style="F")
+        # ── Query Intent Check — caption + grey left-accent inferred block ──
+        if inferred_question:
+            pdf.set_font(font_name, "B", 13)
+            pdf.cell(W, 8, _t("Query intent check", lang), new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font(font_name, "", 9)
+            caption = _t(
+                "Claude was shown only the SQL (not your question) and asked "
+                "what it thinks the query is trying to answer:",
+                lang,
+            )
+            pdf.set_text_color(100, 116, 139)  # #64748b slate-500
+            pdf.multi_cell(W, 5, caption)
+            pdf.set_text_color(0, 0, 0)
+            pdf.ln(3)
+            inferred_label = _t("Inferred:", lang)
+            inferred_text = f"{inferred_label} {inferred_question}"
+            pdf.set_font(font_name, "", 10)
+            y_i = pdf.get_y()
+            pdf.set_x(pdf.l_margin + 6)
+            pdf.set_fill_color(248, 250, 252)  # #f8fafc slate-50
+            pdf.multi_cell(W - 6, 6, inferred_text, fill=True)
+            y_i2 = pdf.get_y()
+            pdf.set_fill_color(148, 163, 184)  # #94a3b8 slate-400
+            pdf.rect(pdf.l_margin, y_i, 3, y_i2 - y_i, style="F")
 
     return bytes(pdf.output())
 
