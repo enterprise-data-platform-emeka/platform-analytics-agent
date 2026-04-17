@@ -1148,7 +1148,7 @@ def _render_turn(turn: dict, form_key: str) -> None:
                         icon="⚠️",
                     )
                 else:
-                    st.success(_t("Intent matches your question.", lang), icon="✓")
+                    st.success(_t("Intent matches your question.", lang), icon="✅")
     elif turn.get("assumptions"):
         with st.expander(_t("Details", lang)):
             st.caption(f"**{_t('Assumptions', lang)}**")
