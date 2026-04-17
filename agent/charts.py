@@ -345,9 +345,7 @@ class ChartGenerator:
         if "first_name" in result.columns and "last_name" in result.columns:
             x_col = "customer"
             labels: list[str] = [
-                _display_label(
-                    f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
-                )
+                _display_label(f"{row.get('first_name', '')} {row.get('last_name', '')}".strip())
                 for row in result.rows
             ]
         else:
