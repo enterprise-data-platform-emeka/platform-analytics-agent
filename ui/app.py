@@ -554,8 +554,8 @@ html, body, [class*="css"] {
 
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] {
-    background: #0f172a !important;
-    border-right: 1px solid #1e293b !important;
+    background: #1A5276 !important;
+    border-right: 1px solid #154360 !important;
 }
 [data-testid="stSidebar"] h1,
 [data-testid="stSidebar"] h2,
@@ -565,26 +565,31 @@ html, body, [class*="css"] {
 [data-testid="stSidebar"] label,
 [data-testid="stSidebar"] .stCaption,
 [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
-    color: #cbd5e1 !important;
+    color: #EBF5FB !important;
 }
 [data-testid="stSidebar"] .stButton > button {
-    background: #1e293b !important;
-    border: 1px solid #334155 !important;
-    color: #e2e8f0 !important;
+    background: rgba(255,255,255,0.12) !important;
+    border: 1px solid rgba(255,255,255,0.25) !important;
+    color: #ffffff !important;
     border-radius: 6px !important;
     font-size: 13px !important;
     transition: background 0.15s;
 }
 [data-testid="stSidebar"] .stButton > button:hover {
-    background: #263548 !important;
-    border-color: #475569 !important;
+    background: rgba(255,255,255,0.22) !important;
+    border-color: rgba(255,255,255,0.4) !important;
 }
 [data-testid="stSidebar"] hr {
-    border-color: #1e293b !important;
+    border-color: rgba(255,255,255,0.15) !important;
 }
 [data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] {
-    background: #1e293b !important;
-    border-color: #334155 !important;
+    background: rgba(255,255,255,0.08) !important;
+    border-color: rgba(255,255,255,0.2) !important;
+}
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] > button {
+    background: rgba(255,255,255,0.15) !important;
+    border: 1px solid rgba(255,255,255,0.3) !important;
+    color: #ffffff !important;
 }
 
 /* ── Q&A cards (bordered containers) ────────────────────────────────────── */
@@ -630,8 +635,8 @@ html, body, [class*="css"] {
 
 /* ── Insight card ────────────────────────────────────────────────────────── */
 .insight-card {
-    background: #f0f7ff;
-    border-left: 4px solid #2563EB;
+    background: #EBF5FB;
+    border-left: 4px solid #1A5276;
     padding: 14px 18px;
     border-radius: 0 6px 6px 0;
     font-size: 15px;
@@ -829,7 +834,9 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
     tiles: list[tuple[str, str, str]] = []
 
     if cat_cols and numeric_cols:
-        metric_col = numeric_cols[0]
+        # Use the LAST numeric column as the primary metric — queries order with
+        # the derived/computed metric last (e.g. revenue_per_unit after total_revenue).
+        metric_col = numeric_cols[-1]
         cat_col = cat_cols[0]
         metric_label = metric_col.replace("_", " ").title()
         top_cat = str(rows[0].get(cat_col, ""))
@@ -842,12 +849,14 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
         else:
             cat_plural = cat_label + "s"
         tiles.append(("Total Entries", str(len(rows)), cat_plural))
+        # Third tile: sum of the primary metric across all rows (meaningful aggregate)
         try:
             total = sum(float(str(r.get(metric_col, 0) or 0).replace(",", "")) for r in rows)
             tiles.append((f"Total {metric_label}", _fmt(str(total)), "All Entries"))
         except (ValueError, TypeError):
             pass
     elif numeric_cols:
+        # No categorical column — show top 3 numeric values from row 0
         for col in numeric_cols[:3]:
             val = _fmt(str(rows[0].get(col, "")))
             label = col.replace("_", " ").title()
@@ -1163,7 +1172,7 @@ def _cached_build_pdf(
     pdf.set_x(pdf.l_margin + 6)
     pdf.multi_cell(W - 6, 7, pdf_insight, align="L")
     y_after = pdf.get_y()
-    pdf.set_fill_color(37, 99, 235)  # #2563EB blue
+    pdf.set_fill_color(26, 82, 118)  # #1A5276 EDP navy
     pdf.rect(pdf.l_margin, y_before, 3, y_after - y_before, style="F")
     pdf.set_fill_color(255, 255, 255)
 
@@ -1189,7 +1198,7 @@ def _cached_build_pdf(
             pdf.multi_cell(W - 6, 7, f"\u2022 {clean}", align="L")
             pdf.ln(1)
         y_after_a = pdf.get_y()
-        pdf.set_fill_color(37, 99, 235)
+        pdf.set_fill_color(26, 82, 118)  # #1A5276 EDP navy
         pdf.rect(pdf.l_margin, y_before_a, 3, y_after_a - y_before_a, style="F")
         pdf.set_fill_color(255, 255, 255)
 
@@ -1454,6 +1463,33 @@ with st.sidebar:
             mime="application/json",
             use_container_width=True,
         )
+
+        # Engineer log download — fetches all session CSV rows from S3.
+        # Only shown when there is a live session_id (at least one analytical query ran).
+        if st.session_state.session_id:
+            if st.button(_t("Download Session Log (CSV)", sl), use_container_width=True):
+                try:
+                    r = requests.get(
+                        f"{BACKEND_URL}/engineer-log",
+                        params={"session_id": st.session_state.session_id},
+                        timeout=15,
+                    )
+                    r.raise_for_status()
+                    payload = r.json()
+                    csv_text = payload.get("csv", "")
+                    if csv_text:
+                        st.download_button(
+                            label=f"Save log ({payload.get('row_count', 0)} rows)",
+                            data=csv_text.encode("utf-8"),
+                            file_name=f"edp_engineer_log_{st.session_state.session_id[:8]}.csv",
+                            mime="text/csv",
+                            use_container_width=True,
+                            key="eng_log_save",
+                        )
+                    else:
+                        st.caption("No log entries yet for this session.")
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Could not fetch log: {exc}")
 
         st.divider()
         st.caption(f"**{_t('History', sl)}**")

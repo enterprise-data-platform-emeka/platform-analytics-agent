@@ -980,6 +980,64 @@ try:
 
         return SR(_generate(), media_type="application/x-ndjson")
 
+    @app.get("/engineer-log")
+    async def engineer_log(session_id: str) -> dict[str, Any]:
+        """Return all engineer log rows for a session as a CSV string.
+
+        Reads every per-request CSV file under
+        metadata/engineer-log/date=*/session={session_id}/*.csv
+        from the Bronze bucket, concatenates the rows (header once), and
+        returns the result so the UI can offer a one-click download.
+
+        Returns {"csv": "<csv text>", "row_count": n} on success.
+        Returns {"csv": "", "row_count": 0} if no log exists yet.
+        """
+        if not session_id or not session_id.strip():
+            raise HTTPException(status_code=400, detail="session_id is required")
+        try:
+            import boto3
+            from botocore.exceptions import ClientError
+
+            s3 = boto3.client("s3", region_name=_session._config.aws.region)
+            prefix = f"{_ENGINEER_LOG_PREFIX}/"
+            paginator = s3.get_paginator("list_objects_v2")
+            session_suffix = f"/session={session_id}/"
+            keys: list[str] = []
+            for page in paginator.paginate(
+                Bucket=_session._config.aws.bronze_bucket, Prefix=prefix
+            ):
+                for obj in page.get("Contents", []):
+                    key = obj["Key"]
+                    if session_suffix in key and key.endswith(".csv"):
+                        keys.append(key)
+
+            if not keys:
+                return {"csv": "", "row_count": 0}
+
+            keys.sort()
+            rows_out: list[str] = []
+            header_written = False
+            for key in keys:
+                try:
+                    obj = s3.get_object(Bucket=_session._config.aws.bronze_bucket, Key=key)
+                    text = obj["Body"].read().decode("utf-8")
+                    lines = text.splitlines()
+                    if not lines:
+                        continue
+                    if not header_written:
+                        rows_out.append(lines[0])  # header
+                        header_written = True
+                    if len(lines) > 1:
+                        rows_out.extend(lines[1:])
+                except ClientError:
+                    pass
+
+            csv_text = "\n".join(rows_out)
+            return {"csv": csv_text, "row_count": len(rows_out) - (1 if header_written else 0)}
+        except Exception as exc:  # noqa: BLE001
+            logger.error("engineer-log fetch failed: %s", exc)
+            raise HTTPException(status_code=500, detail="Could not retrieve engineer log") from exc
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         """Liveness check for the ALB target group health check."""
