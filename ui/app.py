@@ -600,8 +600,6 @@ def _cached_build_pdf(
     bytes_scanned: int,
     chart_type: str,
     inferred_question: str,
-    columns_json: str = "[]",
-    rows_json: str = "[]",
 ) -> bytes:
     """Build a complete PDF report. Called via _build_pdf(turn)."""
     import datetime
@@ -611,8 +609,6 @@ def _cached_build_pdf(
 
     lang = _detect_language(question)
     assumptions: list[str] = json.loads(assumptions_json) if assumptions_json else []
-    columns: list[str] = json.loads(columns_json) if columns_json else []
-    rows: list[dict] = json.loads(rows_json) if rows_json else []
 
     # ── FPDF subclass with page-number footer ───────────────────────────────
     # footer() is called automatically by fpdf2 at the end of each page.
@@ -731,48 +727,10 @@ def _cached_build_pdf(
         pdf.image(io.BytesIO(png_bytes), x=15, w=W)
 
     # ════════════════════════════════════════════════════════════════════════
-    # PAGE 2 — Results Table · Assumptions · SQL Query · Query Metadata · Query Intent Check
+    # PAGE 2 — Assumptions · SQL Query · Query Metadata · Query Intent Check
     # ════════════════════════════════════════════════════════════════════════
-    if assumptions or sql or (columns and rows):
+    if assumptions or sql:
         pdf.add_page()
-
-        # ── Results table ─────────────────────────────────────────────────────
-        if columns and rows:
-            pdf.set_font(font_name, "B", 13)
-            pdf.cell(W, 8, "Results", new_x="LMARGIN", new_y="NEXT")
-            pdf.ln(2)
-
-            display_rows = rows[:20]
-            col_w = W / max(len(columns), 1)
-
-            # Header row — blue background, white text
-            pdf.set_fill_color(37, 99, 235)  # #2563EB
-            pdf.set_text_color(255, 255, 255)
-            pdf.set_font(font_name, "B", 8)
-            for col in columns:
-                pdf.cell(col_w, 7, col.replace("_", " ").title(), border=1, fill=True, align="C")
-            pdf.ln()
-
-            # Data rows — alternating light-blue / white
-            pdf.set_text_color(0, 0, 0)
-            pdf.set_font(font_name, "", 8)
-            for i, row in enumerate(display_rows):
-                if i % 2 == 0:
-                    pdf.set_fill_color(239, 246, 255)  # #eff6ff blue-50
-                else:
-                    pdf.set_fill_color(255, 255, 255)
-                for col in columns:
-                    pdf.cell(col_w, 6, str(row.get(col, "")), border=1, fill=True)
-                pdf.ln()
-
-            pdf.set_fill_color(255, 255, 255)
-            pdf.set_text_color(0, 0, 0)
-            if len(rows) > 20:
-                pdf.set_font(font_name, "", 8)
-                pdf.set_text_color(100, 116, 139)
-                pdf.cell(W, 5, f"Showing 20 of {len(rows)} rows.", align="L")
-                pdf.set_text_color(0, 0, 0)
-            pdf.ln(10)
 
         # ── Assumptions — blue left-accent bar matching Summary style ────────
         if assumptions:
@@ -890,8 +848,6 @@ def _build_pdf(turn: dict) -> bytes:
         bytes_scanned=turn.get("bytes_scanned", 0),
         chart_type=turn.get("chart_type", ""),
         inferred_question=turn.get("inferred_question", ""),
-        columns_json=json.dumps(turn.get("columns", [])),
-        rows_json=json.dumps(turn.get("rows", [])),
     )
 
 

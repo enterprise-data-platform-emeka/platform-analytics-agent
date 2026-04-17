@@ -237,8 +237,12 @@ class ChartGenerator:
 
         Rules (in order):
           1. If any column name contains a time hint (year/month/date/week/quarter)
-             AND at least one other column is numeric -> line
+             AND at least one other column is numeric
+             AND there are no non-time categorical columns -> line
+             (time is the primary grouping dimension, e.g. monthly revenue trend)
           2. If at least one column is categorical and one is numeric -> bar
+             (categorical grouping beats time when both exist, e.g. customers with
+             first_order_date metadata columns should still render as a bar chart)
           3. Fallback -> table
         """
         numeric_cols = ChartGenerator._numeric_columns(result)
@@ -249,11 +253,13 @@ class ChartGenerator:
             col for col in result.columns if any(hint in col.lower() for hint in _TIME_HINTS)
         ]
         non_time_numeric = [c for c in numeric_cols if c not in time_cols]
+        categorical_cols = [c for c in result.columns if c not in numeric_cols]
+        non_time_categorical = [c for c in categorical_cols if c not in time_cols]
 
-        if time_cols and non_time_numeric:
+        # Only use line when time is the sole grouping dimension (no other string cols).
+        if time_cols and non_time_numeric and not non_time_categorical:
             return "line"
 
-        categorical_cols = [c for c in result.columns if c not in numeric_cols]
         if categorical_cols:
             return "bar"
 
@@ -333,10 +339,20 @@ class ChartGenerator:
 
         numeric_cols = self._numeric_columns(result)
         categorical_cols = [c for c in result.columns if c not in numeric_cols]
-        x_col = categorical_cols[0]
         y_col = self._best_metric_column(numeric_cols)
 
-        labels: list[str] = [_display_label(str(row.get(x_col, ""))) for row in result.rows]
+        # Combine first_name + last_name into a readable full-name label when both exist.
+        if "first_name" in result.columns and "last_name" in result.columns:
+            x_col = "customer"
+            labels: list[str] = [
+                _display_label(
+                    f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
+                )
+                for row in result.rows
+            ]
+        else:
+            x_col = categorical_cols[0]
+            labels = [_display_label(str(row.get(x_col, ""))) for row in result.rows]
         values: list[float] = [float(row.get(y_col, 0) or 0) for row in result.rows]
 
         # Sort descending so the largest bar is at the top.

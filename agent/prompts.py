@@ -385,6 +385,7 @@ Your 2-3 sentence insight that directly answers the question. \
 Start with the key finding. Include the most relevant number or comparison. \
 Do not explain the SQL. Do not mention table names or column names. \
 Do not use words like 'leverage', 'utilize', or 'robust'. \
+Do not use em dashes (—); use commas, colons, or parentheses instead. \
 Write as if talking to a non-technical business stakeholder.
 </insight>
 
