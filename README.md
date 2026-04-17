@@ -124,7 +124,7 @@ The UI has several features beyond a simple text box:
 - **Numbered Q&A cards.** Each question-answer pair is rendered as a numbered card with a border, not a chat bubble. The card shows the question, the streaming insight, the chart (or table), and a collapsible "Query details" section with SQL, assumptions, scan cost, and a query intent check.
 - **Query intent check.** After Athena runs the SQL, a second Claude call reads only the SQL (not the original question) and infers what business question it answers. This gives an unbiased cross-check: if the inferred intent doesn't match what the user asked, the assumptions list makes the divergence visible.
 - **Chart/Table tabs.** Every result has two tabs: an interactive Plotly chart and a raw data table. The user can switch between them without re-running the query.
-- **PDF report download.** A "Download PDF" button generates a 2-page PDF report. Page 1 has the question, the plain-English summary, and the chart. Page 2 has the assumptions, the SQL in a dark editor style (syntax highlighting via coloured background, monospace font), query metadata (rows returned, bytes scanned, cost), and the query intent check. The PDF includes blue accent bars, a generation timestamp, and "Page X of Y" page numbers in the footer. CJK (Chinese, Japanese, Korean) scripts use the Noto CJK font installed in the Docker image so characters render correctly.
+- **PDF report download.** A "Download PDF" button generates a 2-page stakeholder report. Page 1 has the question, KPI tiles, the plain-English summary, and the chart. Page 2 has the plain-English methodology (assumptions rewritten without SQL, table names, or technical identifiers), plus a query intent cross-check. The PDF uses the army olive brand palette (`#4B5320`), includes a geometric E logo mark, a generation timestamp, and "Page X of Y" page numbers in the footer. CJK (Chinese, Japanese, Korean) scripts use the Noto CJK font installed in the Docker image so characters render correctly.
 - **Conversation export and import.** A sidebar button downloads the full conversation as a JSON file. A file uploader lets the user restore a previous conversation in a new session, so multi-day analysis workflows don't start from scratch.
 - **Session sidebar.** Shows the session start time and a running count of questions asked in the current session.
 
@@ -870,6 +870,7 @@ S3 (read):
 
 S3 (write — agent outputs only):
   - s3:PutObject on {bronze_bucket}/metadata/agent-audit/*
+  - s3:PutObject on {bronze_bucket}/metadata/engineer-log/*
   - s3:PutObject on {gold_bucket}/charts/*
 
 Glue:
@@ -1036,14 +1037,26 @@ What was built:
 - **Streaming insight display.** The plain-English insight streams token-by-token as Claude generates it, so stakeholders see progress immediately instead of waiting for the full response.
 - **Status badges.** A spinner and coloured status badge show each pipeline step in real time (generating SQL, running query, generating insight).
 - **Chart/Table tabs.** Every result renders both an interactive Plotly chart and a raw data table via `st.tabs`. The user switches between them without re-running the query.
-- **Query intent check.** A second Claude call reads only the generated SQL and infers the business question it answers. This cross-check appears below the assumptions list so users can confirm the SQL matched their intent.
+- **Query intent check.** A third Claude call reads only the generated SQL and infers the business question it answers. This cross-check appears below the assumptions list so users can confirm the SQL matched their intent. A green tick or amber warning badge signals the verdict.
 - **Multilingual interface.** Eight script-based translation dictionaries (Chinese, Japanese, Korean, Arabic, Russian, Greek, Hebrew, Thai) plus Claude-based language detection for Latin-script languages (Italian, French, Spanish, English, and others). All UI labels, headings, placeholders, and buttons translate automatically.
-- **PDF report download.** The "Download PDF" button generates a 2-page report: page 1 has the question, summary, and chart; page 2 has assumptions (with a blue accent bar), SQL in a dark code-editor style, query metadata, and the query intent check. Includes a generation timestamp and "Page X of Y" page numbers. CJK characters render via the Noto CJK font installed in the Docker image.
 - **Conversation export and import.** A sidebar button downloads the conversation as JSON. A file uploader restores it in a later session.
 - **Session sidebar.** Displays session start time and running question count.
 - `entrypoint.sh` starts uvicorn on port 8080 (background) then Streamlit on port 8501 (foreground). Both run in the same ECS Fargate container.
 - The internet-facing ALB has separate listeners: port 80 routes to FastAPI, port 8501 routes to Streamlit.
 - Deployed automatically via the existing CI/deploy pipeline on every push to `main`.
+
+### Phase 14: enterprise hardening and stakeholder PDF — complete
+
+Reliability, auditability, and a professional PDF output for non-technical stakeholders.
+
+What was built:
+
+- **Stakeholder PDF.** A 2-page report generated by fpdf2. Page 1 has KPI tiles (key numbers pulled from the result), the plain-English insight, and the chart. Page 2 has the methodology in plain English (no SQL, no table names, no technical identifiers). Army olive brand palette (`#4B5320`), geometric E logo mark, olive accent bars, CJK font support. The PDF is safe to hand to a non-technical executive.
+- **Engineer audit log.** A 16-column CSV written to `s3://{bronze_bucket}/metadata/engineer-log/date={date}/session={session_id}/{request_id}.csv` for every request. Columns: `session_id`, `request_id`, `timestamp_utc`, `question_asked`, `sql_executed`, `claude_interpretation`, `discrepancy_detail`, `verdict`, `bytes_scanned`, `athena_cost_usd`, `response_time_seconds`, `athena_query_execution_id`, `sql_retry_count`, `row_count_returned`, `chart_type_rendered`, `language`. A "Prepare Session Log" button in the sidebar fetches and merges all session rows from S3 into a single downloadable CSV.
+- **Verdict computation.** The third Claude call now writes a `verdict` field (`Yes`/`No`) and a `discrepancy_detail` sentence to the response, audit log, and engineer log. The UI shows a green tick or amber warning badge in the Details expander.
+- **Circuit breaker.** A 30-second timeout on every Claude API call. Up to 3 attempts with 2s/5s/10s exponential backoff on transient errors (throttling, timeout). Semantic errors (table not found, permission denied) fail immediately with no retry.
+- **Rate limiter.** 10 requests per 60-second sliding window per `session_id`. Excess requests return HTTP 429 with a `retry_after_seconds` field. Implemented with `collections.deque` in-process — no Redis needed.
+- **Request UUID tracing.** Every request gets a `request_id` (UUID v4) at the top of the handler. It flows through the audit log, engineer log, and JSON export.
 
 ---
 
@@ -1060,9 +1073,10 @@ The Gold layer is pre-aggregated. Each table directly answers a specific busines
 | Athena execution on small Gold table | <2s |
 | Result validation (local, pandas) | <0.1s |
 | Claude call 2: insight generation | 3-5s |
+| Claude call 3: verdict (infer question from SQL, compare to original) | 2-3s |
 | Chart generation + S3 upload | 1-2s |
-| Audit log write | 0.2s |
-| **Typical total** | **12-20 seconds** |
+| Audit log + engineer log write | 0.3s |
+| **Typical total** | **15-23 seconds** |
 
 ### Token usage per question
 
@@ -1072,7 +1086,8 @@ The Gold layer is pre-aggregated. Each table directly answers a specific busines
 | User question | ~30 | — |
 | SQL + assumptions | — | ~200 |
 | Insight prompt + question + result sample | ~700 | ~150 |
-| **Total per question** | **~3,230** | **~350** |
+| Verdict (infer question from SQL, compare) | ~250 | ~60 |
+| **Total per question** | **~3,480** | **~410** |
 
 ### Cost per question
 
@@ -1080,21 +1095,21 @@ Claude-sonnet-4-6 pricing: $3.00 per million input tokens, $15.00 per million ou
 
 | Component | Cost |
 |---|---|
-| Claude API (~3,230 input + ~350 output tokens) | ~$0.015 |
+| Claude API (~3,480 input + ~410 output tokens) | ~$0.017 |
 | Athena scan (Gold table, <5 MB) | <$0.001 |
 | S3 operations (audit log, chart upload) | <$0.001 |
-| **Total per question** | **~$0.016** |
+| **Total per question** | **~$0.018** |
 
 ### 50-question demo session
 
 | Component | Per session cost |
 |---|---|
 | ECS Fargate (0.5 vCPU, 1 GB, 3 hours) | ~$0.08 |
-| Claude API (50 questions × ~$0.016) | ~$0.80 |
+| Claude API (50 questions × ~$0.018) | ~$0.90 |
 | Athena (50 queries, <5 MB each) | ~$0.001 |
 | S3 (audit logs, chart PNGs) | ~$0.01 |
 | ALB (3 hours) | ~$0.05 |
-| **Total per session** | **~$0.94** |
+| **Total per session** | **~$1.04** |
 
 Claude API cost dominates. Athena cost on Gold tables is negligible. The pre-aggregated Gold layer cuts both response time and Claude token usage roughly in half compared to querying Silver directly.
 
@@ -1248,7 +1263,7 @@ Integration tests also exist but are not part of the standard CI run. They are m
 
 ## Status
 
-All 13 phases complete. The full agent is deployed to ECS Fargate on AWS dev and end-to-end tested. Non-technical stakeholders open a browser, type a plain-English question in any supported language, and see a streaming plain-English insight, an interactive Plotly chart, numbered Q&A cards, SQL in a code-editor style, assumptions, a query intent cross-check, and scan cost. PDF reports can be downloaded directly from the browser (2-page layout with blue accent bars, editor-style SQL, page numbers, and CJK font support).
+All 14 phases complete. The full agent is deployed to ECS Fargate on AWS dev and end-to-end tested. Non-technical stakeholders open a browser, type a plain-English question in any supported language, and see a streaming plain-English insight, an interactive Plotly chart, numbered Q&A cards, assumptions, a query intent cross-check with verdict badge, and scan cost. PDF reports can be downloaded directly from the browser (2-page stakeholder layout, olive brand, KPI tiles, no SQL or technical identifiers, CJK font support). Engineers can download a session audit CSV from the sidebar.
 
 | Phase | Status |
 |---|---|
@@ -1265,6 +1280,7 @@ All 13 phases complete. The full agent is deployed to ECS Fargate on AWS dev and
 | 11: FastAPI HTTP endpoint and session state (multi-turn follow-ups) | Complete |
 | 12: Deploy pipeline (OIDC, ECR push, ECS rolling deploy, ALB, ECS service) | Complete |
 | 13: Streamlit UI (browser interface, same-container deploy, ALB port 8501) | Complete |
+| 14: Enterprise hardening (engineer log, verdict, rate limiter, circuit breaker, stakeholder PDF) | Complete |
 
 This is the last component of the platform. The full pipeline is: PostgreSQL → DMS CDC → Bronze S3 → Glue PySpark → Silver S3 → dbt/Athena → Gold S3 → Redshift Serverless → this agent.
 
