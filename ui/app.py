@@ -835,7 +835,13 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
         top_cat = str(rows[0].get(cat_col, ""))
         top_val = _fmt(str(rows[0].get(metric_col, "")))
         tiles.append((metric_label, top_val, top_cat))
-        tiles.append(("Total Entries", str(len(rows)), cat_col.replace("_", " ").title() + "s"))
+        # Proper plural for the category sub-label (category → Categories, country → Countries)
+        cat_label = cat_col.replace("_", " ").title()
+        if cat_label.endswith("y"):
+            cat_plural = cat_label[:-1] + "ies"
+        else:
+            cat_plural = cat_label + "s"
+        tiles.append(("Total Entries", str(len(rows)), cat_plural))
         try:
             total = sum(float(str(r.get(metric_col, 0) or 0).replace(",", "")) for r in rows)
             tiles.append((f"Total {metric_label}", _fmt(str(total)), "All Entries"))
@@ -853,16 +859,34 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
 
 
 def _plain_english_assumption(text: str) -> str:
-    """Strip SQL technical artefacts from an assumption string for stakeholder PDFs.
+    """Strip SQL and markdown artefacts from an assumption string for stakeholder PDFs.
 
-    Removes backtick-wrapped identifiers, database prefix patterns, and
-    trailing whitespace so the assumption reads as plain English.
+    Applied in order:
+      1. Strip markdown bold/italic markers (**text** → text, *text* → text)
+      2. Strip backtick wrappers (`name` → name)
+      3. Remove fully-qualified DB prefixes (edp_dev_gold.table → table)
+      4. Remove dbt internal table name prefixes: int_, stg_, fct_, dim_, rpt_
+      5. Replace remaining snake_case identifiers (word_word) with Title Case words
+      6. Normalise whitespace
     """
-    # Strip backtick wrappers but keep the content: `tablename` -> tablename
+    # 1. Strip markdown bold/italic (up to triple asterisk)
+    text = re.sub(r"\*{1,3}([^*\n]+)\*{1,3}", r"\1", text)
+    # 2. Strip backtick wrappers
     text = re.sub(r"`([^`]+)`", r"\1", text)
-    # Remove database prefix patterns (e.g. edp_dev_gold. or edp_dev_silver.)
+    # 3. Remove database prefix patterns (e.g. edp_dev_gold.)
     text = re.sub(r"edp_\w+\.", "", text)
-    # Normalise whitespace
+    # 4. Remove dbt layer prefixes on table names (int_, stg_, fct_, dim_, rpt_)
+    text = re.sub(
+        r"\b(int|stg|fct|dim|rpt)_([a-z][a-z0-9_]*)", lambda m: m.group(2).replace("_", " "), text
+    )
+    # 5. Replace remaining snake_case column/table identifiers with readable words
+    #    Only replace sequences that look like column names (2+ words joined by underscore)
+    text = re.sub(
+        r"\b([a-z][a-z0-9]+)_([a-z][a-z0-9_]+)\b",
+        lambda m: (m.group(1) + " " + m.group(2).replace("_", " ")),
+        text,
+    )
+    # 6. Normalise whitespace
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
