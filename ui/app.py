@@ -505,9 +505,16 @@ html, body, [class*="css"] {
     font-family: "Inter", "Segoe UI", system-ui, sans-serif;
 }
 
+/*
+ * EDP brand palette
+ *   Primary (structural): #4B5320  — army/olive green  (header, sidebar, PDF header)
+ *   Accent  (interactive): #6B7A30  — lighter olive     (card stripe, tabs, buttons)
+ *   Light tint:            #F3F4EC  — warm off-white    (insight bg, card label bg)
+ */
+
 /* ── Branded page header ────────────────────────────────────────────────── */
 .edp-header {
-    background: linear-gradient(135deg, #0D2137 0%, #1A5276 100%);
+    background: linear-gradient(135deg, #3A4118 0%, #4B5320 100%);
     border-radius: 10px;
     padding: 20px 28px;
     margin-bottom: 24px;
@@ -534,15 +541,15 @@ html, body, [class*="css"] {
     letter-spacing: -0.3px;
 }
 .edp-header-text p {
-    color: #94a3b8 !important;
+    color: rgba(255,255,255,0.7) !important;
     font-size: 13px !important;
     margin: 0 !important;
 }
 .edp-header-badge {
     margin-left: auto;
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.15);
-    color: #cbd5e1 !important;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: #ffffff !important;
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
@@ -554,48 +561,45 @@ html, body, [class*="css"] {
 
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] {
-    background: #0D2137 !important;
-    border-right: 1px solid #0a1a2e !important;
+    background: #4B5320 !important;
+    border-right: 1px solid #3A4118 !important;
 }
-[data-testid="stSidebar"] h1,
-[data-testid="stSidebar"] h2,
-[data-testid="stSidebar"] h3,
-[data-testid="stSidebar"] p,
-[data-testid="stSidebar"] span,
-[data-testid="stSidebar"] label,
-[data-testid="stSidebar"] .stCaption,
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
-    color: #EBF5FB !important;
+/* Force ALL text inside the sidebar to white — catches inline styles too */
+[data-testid="stSidebar"] *,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] * {
+    color: #ffffff !important;
 }
 [data-testid="stSidebar"] .stButton > button {
-    background: rgba(255,255,255,0.12) !important;
-    border: 1px solid rgba(255,255,255,0.25) !important;
+    background: rgba(255,255,255,0.15) !important;
+    border: 1px solid rgba(255,255,255,0.3) !important;
     color: #ffffff !important;
     border-radius: 6px !important;
     font-size: 13px !important;
+    font-weight: 600 !important;
     transition: background 0.15s;
 }
 [data-testid="stSidebar"] .stButton > button:hover {
-    background: rgba(255,255,255,0.22) !important;
-    border-color: rgba(255,255,255,0.4) !important;
+    background: rgba(255,255,255,0.25) !important;
+    border-color: rgba(255,255,255,0.5) !important;
 }
 [data-testid="stSidebar"] hr {
-    border-color: rgba(255,255,255,0.15) !important;
+    border-color: rgba(255,255,255,0.2) !important;
 }
 [data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] {
     background: rgba(255,255,255,0.08) !important;
-    border-color: rgba(255,255,255,0.2) !important;
+    border-color: rgba(255,255,255,0.25) !important;
 }
 [data-testid="stSidebar"] [data-testid="stDownloadButton"] > button {
     background: rgba(255,255,255,0.15) !important;
     border: 1px solid rgba(255,255,255,0.3) !important;
     color: #ffffff !important;
+    font-weight: 600 !important;
 }
 
 /* ── Q&A cards (bordered containers) ────────────────────────────────────── */
 [data-testid="stVerticalBlockBorderWrapper"] {
     border: none !important;
-    border-left: 4px solid #1A5276 !important;
+    border-left: 4px solid #4B5320 !important;
     border-radius: 0 8px 8px 0 !important;
     box-shadow: 0 1px 4px rgba(0,0,0,0.07), 0 0 0 1px rgba(0,0,0,0.04) !important;
     background: #ffffff !important;
@@ -613,10 +617,10 @@ html, body, [class*="css"] {
 .turn-label {
     font-size: 10px;
     font-weight: 700;
-    color: #1A5276;
+    color: #4B5320;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    background: #EBF5FB;
+    background: #F3F4EC;
     padding: 2px 8px;
     border-radius: 3px;
 }
@@ -635,8 +639,8 @@ html, body, [class*="css"] {
 
 /* ── Insight card ────────────────────────────────────────────────────────── */
 .insight-card {
-    background: #EBF5FB;
-    border-left: 4px solid #1A5276;
+    background: #F3F4EC;
+    border-left: 4px solid #4B5320;
     padding: 14px 18px;
     border-radius: 0 6px 6px 0;
     font-size: 15px;
@@ -647,9 +651,9 @@ html, body, [class*="css"] {
 
 /* ── Status badge ────────────────────────────────────────────────────────── */
 .status-badge {
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
-    color: #1d4ed8;
+    background: #F3F4EC;
+    border: 1px solid #c3c9a0;
+    color: #4B5320;
     border-radius: 6px;
     padding: 8px 14px;
     font-size: 13px;
@@ -670,8 +674,8 @@ html, body, [class*="css"] {
     transition: color 0.15s !important;
 }
 .stTabs [data-baseweb="tab"][aria-selected="true"] {
-    color: #1A5276 !important;
-    border-bottom: 2px solid #1A5276 !important;
+    color: #4B5320 !important;
+    border-bottom: 2px solid #4B5320 !important;
     background: transparent !important;
 }
 .stTabs [data-baseweb="tab-highlight"] { display: none !important; }
@@ -716,7 +720,7 @@ html, body, [class*="css"] {
 /* ── Download / primary buttons ──────────────────────────────────────────── */
 [data-testid="stDownloadButton"] > button,
 .stButton > button[kind="primary"] {
-    background: #1A5276 !important;
+    background: #4B5320 !important;
     border: none !important;
     color: #ffffff !important;
     font-weight: 600 !important;
@@ -724,7 +728,7 @@ html, body, [class*="css"] {
 }
 [data-testid="stDownloadButton"] > button:hover,
 .stButton > button[kind="primary"]:hover {
-    background: #154360 !important;
+    background: #3A4118 !important;
 }
 
 /* ── Example question buttons ────────────────────────────────────────────── */
@@ -738,9 +742,9 @@ html, body, [class*="css"] {
     transition: border-color 0.15s, background 0.15s !important;
 }
 [data-testid="stMainBlockContainer"] .stButton > button:hover {
-    border-color: #1A5276 !important;
-    background: #EBF5FB !important;
-    color: #1A5276 !important;
+    border-color: #4B5320 !important;
+    background: #F3F4EC !important;
+    color: #4B5320 !important;
 }
 
 /* ── Chat input ──────────────────────────────────────────────────────────── */
@@ -750,8 +754,8 @@ html, body, [class*="css"] {
     transition: border-color 0.15s !important;
 }
 [data-testid="stChatInput"]:focus-within {
-    border-color: #1A5276 !important;
-    box-shadow: 0 0 0 3px rgba(26,82,118,0.12) !important;
+    border-color: #4B5320 !important;
+    box-shadow: 0 0 0 3px rgba(75,83,32,0.12) !important;
 }
 
 /* ── Divider ─────────────────────────────────────────────────────────────── */
@@ -914,7 +918,7 @@ def _draw_e_mark(pdf: Any, x: float, y: float, size: float = 10.0) -> None:
         size: Side length of the square in mm.
     """
     # Deep navy square background
-    pdf.set_fill_color(13, 33, 55)  # #0D2137
+    pdf.set_fill_color(75, 83, 32)  # #4B5320 army olive
     pdf.rect(x, y, size, size, style="F")
 
     # White E bars — proportions derived from the brand SVG (80x80 unit grid)
@@ -1025,7 +1029,7 @@ def _cached_build_pdf(
 
         def header(self) -> None:
             # Full-width navy header strip (25 mm tall, edge-to-edge)
-            self.set_fill_color(13, 33, 55)  # #0D2137 deep navy
+            self.set_fill_color(75, 83, 32)  # #4B5320 army olive
             self.rect(0, 0, self.w, 25, style="F")
 
             # Geometric E mark — 12 mm square, vertically centred in strip
@@ -1109,7 +1113,7 @@ def _cached_build_pdf(
 
     # ── Question ─────────────────────────────────────────────────────────────
     pdf.set_font(font_name, "B", 11)
-    pdf.set_text_color(13, 33, 55)  # #0D2137 deep navy label
+    pdf.set_text_color(75, 83, 32)  # #4B5320 army olive label
     pdf.cell(W, 5, _t("Question", lang).upper(), new_x="LMARGIN", new_y="NEXT")
     pdf.set_draw_color(226, 232, 240)  # slate-200 rule
     pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + W, pdf.get_y())
@@ -1131,12 +1135,12 @@ def _cached_build_pdf(
             pdf.set_fill_color(240, 247, 255)  # #f0f7ff blue-50
             pdf.rect(tx, tile_y, tile_w - 2, tile_h, style="F")
             # Top navy accent stripe (3 mm) — deep navy primary
-            pdf.set_fill_color(13, 33, 55)  # #0D2137
+            pdf.set_fill_color(75, 83, 32)  # #4B5320 army olive
             pdf.rect(tx, tile_y, tile_w - 2, 3, style="F")
             # Metric label (small caps)
             pdf.set_xy(tx + 3, tile_y + 4)
             pdf.set_font(font_name, "", 7)
-            pdf.set_text_color(13, 33, 55)  # #0D2137
+            pdf.set_text_color(75, 83, 32)  # #4B5320 army olive
             pdf.cell(tile_w - 5, 4, metric_lbl.upper(), align="L")
             # Value (large bold)
             pdf.set_xy(tx + 3, tile_y + 9)
@@ -1146,7 +1150,7 @@ def _cached_build_pdf(
             # Sub-label
             pdf.set_xy(tx + 3, tile_y + 16)
             pdf.set_font(font_name, "", 7)
-            pdf.set_text_color(13, 33, 55)  # #0D2137
+            pdf.set_text_color(75, 83, 32)  # #4B5320 army olive
             pdf.cell(tile_w - 5, 4, sub_lbl, align="L")
 
         pdf.set_y(tile_y + tile_h + 6)
@@ -1174,7 +1178,7 @@ def _cached_build_pdf(
     pdf.set_x(pdf.l_margin + 6)
     pdf.multi_cell(W - 6, 7, pdf_insight, align="L")
     y_after = pdf.get_y()
-    pdf.set_fill_color(26, 82, 118)  # #1A5276 EDP navy
+    pdf.set_fill_color(75, 83, 32)  # #4B5320 army olive
     pdf.rect(pdf.l_margin, y_before, 3, y_after - y_before, style="F")
     pdf.set_fill_color(255, 255, 255)
 
@@ -1200,7 +1204,7 @@ def _cached_build_pdf(
             pdf.multi_cell(W - 6, 7, f"\u2022 {clean}", align="L")
             pdf.ln(1)
         y_after_a = pdf.get_y()
-        pdf.set_fill_color(26, 82, 118)  # #1A5276 EDP navy
+        pdf.set_fill_color(75, 83, 32)  # #4B5320 army olive
         pdf.rect(pdf.l_margin, y_before_a, 3, y_after_a - y_before_a, style="F")
         pdf.set_fill_color(255, 255, 255)
 
@@ -1407,13 +1411,13 @@ with st.sidebar:
     st.markdown(
         f"""
 <div style="padding:6px 0 18px 0;">
-  <div style="font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;
+  <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.6);text-transform:uppercase;
               letter-spacing:0.12em;margin-bottom:12px;">Session</div>
-  <div style="font-size:13px;color:#94a3b8;margin-bottom:4px;">
-    Started at <strong style="color:#cbd5e1">{st.session_state.session_start}</strong>
+  <div style="font-size:13px;color:rgba(255,255,255,0.75);margin-bottom:4px;">
+    Started at <strong style="color:#ffffff">{st.session_state.session_start}</strong>
   </div>
-  <div style="font-size:13px;color:#94a3b8;">
-    <strong style="color:#cbd5e1">{n}</strong> question{"s" if n != 1 else ""} answered
+  <div style="font-size:13px;color:rgba(255,255,255,0.75);">
+    <strong style="color:#ffffff">{n}</strong> question{"s" if n != 1 else ""} answered
   </div>
 </div>
 """,

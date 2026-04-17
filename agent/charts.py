@@ -120,7 +120,7 @@ _METRIC_HINTS: frozenset[str] = frozenset(
 )
 
 # EDP brand colour used for matplotlib charts.
-_BRAND_COLOUR = "#0D2137"  # EDP deep navy (primary)
+_BRAND_COLOUR = "#4B5320"  # EDP army olive (primary)
 
 
 def _display_label(value: str) -> str:
