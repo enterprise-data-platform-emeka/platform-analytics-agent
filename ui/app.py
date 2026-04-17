@@ -922,7 +922,6 @@ def _draw_e_mark(pdf: Any, x: float, y: float, size: float = 10.0) -> None:
 def _cached_build_pdf(
     question: str,
     insight: str,
-    sql: str,
     assumptions_json: str,
     png_b64: str,
     columns_json: str,
@@ -932,7 +931,7 @@ def _cached_build_pdf(
 
     Page 1: Header (logo + name + classification) | Question | KPI tiles |
             Chart | Key Finding | Footer.
-    Page 2: Header | Methodology (plain-English assumptions) | SQL Query | Footer.
+    Page 2: Header | Methodology (plain-English assumptions) | Footer.
     """
     import datetime
     import io
@@ -1145,64 +1144,30 @@ def _cached_build_pdf(
     pdf.set_fill_color(255, 255, 255)
 
     # ════════════════════════════════════════════════════════════════════════
-    # PAGE 2 — Methodology (plain-English assumptions) · SQL Query
+    # PAGE 2 — Methodology (plain-English assumptions, no SQL, no tech names)
     # ════════════════════════════════════════════════════════════════════════
-    if assumptions or sql:
+    if assumptions:
         pdf.add_page()
 
         # ── Methodology — plain-English rewrite of assumptions ───────────────
-        if assumptions:
-            pdf.set_font(font_name, "B", 11)
-            pdf.set_text_color(100, 116, 139)
-            pdf.cell(W, 5, "METHODOLOGY", new_x="LMARGIN", new_y="NEXT")
-            pdf.set_draw_color(226, 232, 240)
-            pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + W, pdf.get_y())
-            pdf.ln(4)
-            pdf.set_font(font_name, "", 11)
-            pdf.set_text_color(30, 41, 59)
-            y_before_a = pdf.get_y()
-            for item in assumptions:
-                clean = _plain_english_assumption(item)
-                pdf.set_x(pdf.l_margin + 6)
-                pdf.multi_cell(W - 6, 7, f"\u2022 {clean}", align="L")
-                pdf.ln(1)
-            y_after_a = pdf.get_y()
-            pdf.set_fill_color(37, 99, 235)
-            pdf.rect(pdf.l_margin, y_before_a, 3, y_after_a - y_before_a, style="F")
-            pdf.set_fill_color(255, 255, 255)
-            pdf.ln(10)
-
-        # ── SQL Query — editor-style code block ──────────────────────────────
-        if sql:
-            pdf.set_font(font_name, "B", 11)
-            pdf.set_text_color(100, 116, 139)
-            pdf.cell(W, 5, _t("SQL Query", lang).upper(), new_x="LMARGIN", new_y="NEXT")
-            pdf.set_draw_color(226, 232, 240)
-            pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + W, pdf.get_y())
-            pdf.ln(4)
-
-            bar_h = 9.0
-            bar_y = pdf.get_y()
-            pdf.set_fill_color(30, 41, 59)  # slate-800 header bar
-            pdf.rect(pdf.l_margin, bar_y, W, bar_h, style="F")
-            pdf.set_xy(pdf.l_margin + 5, bar_y)
-            pdf.set_text_color(148, 163, 184)
-            pdf.set_font("Courier", "", 8)
-            pdf.cell(W - 5, bar_h, "query.sql", new_x="LMARGIN", new_y="NEXT")
-
-            pdf.set_fill_color(15, 23, 42)  # slate-950 code body
-            pdf.set_text_color(212, 212, 212)
-            pdf.set_font("Courier", "", 9)
-            sql_padded = "\n".join("  " + line for line in sql.split("\n"))
-            pdf.set_x(pdf.l_margin)
-            pdf.multi_cell(W, 5, sql_padded, fill=True)
-
-            close_y = pdf.get_y()
-            pdf.set_fill_color(30, 41, 59)
-            pdf.rect(pdf.l_margin, close_y, W, 4, style="F")
-            pdf.set_y(close_y + 4)
-            pdf.set_text_color(0, 0, 0)
-            pdf.set_fill_color(255, 255, 255)
+        pdf.set_font(font_name, "B", 11)
+        pdf.set_text_color(100, 116, 139)
+        pdf.cell(W, 5, "METHODOLOGY", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_draw_color(226, 232, 240)
+        pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + W, pdf.get_y())
+        pdf.ln(4)
+        pdf.set_font(font_name, "", 11)
+        pdf.set_text_color(30, 41, 59)
+        y_before_a = pdf.get_y()
+        for item in assumptions:
+            clean = _plain_english_assumption(item)
+            pdf.set_x(pdf.l_margin + 6)
+            pdf.multi_cell(W - 6, 7, f"\u2022 {clean}", align="L")
+            pdf.ln(1)
+        y_after_a = pdf.get_y()
+        pdf.set_fill_color(37, 99, 235)
+        pdf.rect(pdf.l_margin, y_before_a, 3, y_after_a - y_before_a, style="F")
+        pdf.set_fill_color(255, 255, 255)
 
     return bytes(pdf.output())
 
@@ -1212,7 +1177,6 @@ def _build_pdf(turn: dict) -> bytes:
     return _cached_build_pdf(
         question=turn["question"],
         insight=turn["insight"],
-        sql=turn.get("sql", ""),
         assumptions_json=json.dumps(turn.get("assumptions", [])),
         png_b64=turn.get("png_b64") or "",
         columns_json=json.dumps(turn.get("columns", [])),
