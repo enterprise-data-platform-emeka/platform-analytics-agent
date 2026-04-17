@@ -507,7 +507,7 @@ html, body, [class*="css"] {
 
 /* ── Branded page header ────────────────────────────────────────────────── */
 .edp-header {
-    background: linear-gradient(135deg, #0f172a 0%, #1A5276 100%);
+    background: linear-gradient(135deg, #0D2137 0%, #1A5276 100%);
     border-radius: 10px;
     padding: 20px 28px;
     margin-bottom: 24px;
@@ -554,8 +554,8 @@ html, body, [class*="css"] {
 
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] {
-    background: #1A5276 !important;
-    border-right: 1px solid #154360 !important;
+    background: #0D2137 !important;
+    border-right: 1px solid #0a1a2e !important;
 }
 [data-testid="stSidebar"] h1,
 [data-testid="stSidebar"] h2,
@@ -852,7 +852,9 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
         # Third tile: sum of the primary metric across all rows (meaningful aggregate)
         try:
             total = sum(float(str(r.get(metric_col, 0) or 0).replace(",", "")) for r in rows)
-            tiles.append((f"Total {metric_label}", _fmt(str(total)), "All Entries"))
+            # Avoid "Total Total Revenue" — strip leading "Total" from the metric label.
+            base_label = re.sub(r"^Total\s+", "", metric_label, flags=re.IGNORECASE)
+            tiles.append((f"Total {base_label} (All)", _fmt(str(total)), "All Entries"))
         except (ValueError, TypeError):
             pass
     elif numeric_cols:
@@ -911,8 +913,8 @@ def _draw_e_mark(pdf: Any, x: float, y: float, size: float = 10.0) -> None:
         x, y: Top-left corner of the mark in mm.
         size: Side length of the square in mm.
     """
-    # Navy square background
-    pdf.set_fill_color(26, 82, 118)  # #1A5276
+    # Deep navy square background
+    pdf.set_fill_color(13, 33, 55)  # #0D2137
     pdf.rect(x, y, size, size, style="F")
 
     # White E bars — proportions derived from the brand SVG (80x80 unit grid)
@@ -1023,7 +1025,7 @@ def _cached_build_pdf(
 
         def header(self) -> None:
             # Full-width navy header strip (25 mm tall, edge-to-edge)
-            self.set_fill_color(26, 82, 118)  # #1A5276 navy
+            self.set_fill_color(13, 33, 55)  # #0D2137 deep navy
             self.rect(0, 0, self.w, 25, style="F")
 
             # Geometric E mark — 12 mm square, vertically centred in strip
@@ -1107,7 +1109,7 @@ def _cached_build_pdf(
 
     # ── Question ─────────────────────────────────────────────────────────────
     pdf.set_font(font_name, "B", 11)
-    pdf.set_text_color(100, 116, 139)  # slate-500 label
+    pdf.set_text_color(13, 33, 55)  # #0D2137 deep navy label
     pdf.cell(W, 5, _t("Question", lang).upper(), new_x="LMARGIN", new_y="NEXT")
     pdf.set_draw_color(226, 232, 240)  # slate-200 rule
     pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + W, pdf.get_y())
@@ -1128,13 +1130,13 @@ def _cached_build_pdf(
             # Tile background
             pdf.set_fill_color(240, 247, 255)  # #f0f7ff blue-50
             pdf.rect(tx, tile_y, tile_w - 2, tile_h, style="F")
-            # Top navy accent stripe (3 mm)
-            pdf.set_fill_color(26, 82, 118)
+            # Top navy accent stripe (3 mm) — deep navy primary
+            pdf.set_fill_color(13, 33, 55)  # #0D2137
             pdf.rect(tx, tile_y, tile_w - 2, 3, style="F")
             # Metric label (small caps)
             pdf.set_xy(tx + 3, tile_y + 4)
             pdf.set_font(font_name, "", 7)
-            pdf.set_text_color(100, 116, 139)
+            pdf.set_text_color(13, 33, 55)  # #0D2137
             pdf.cell(tile_w - 5, 4, metric_lbl.upper(), align="L")
             # Value (large bold)
             pdf.set_xy(tx + 3, tile_y + 9)
@@ -1144,7 +1146,7 @@ def _cached_build_pdf(
             # Sub-label
             pdf.set_xy(tx + 3, tile_y + 16)
             pdf.set_font(font_name, "", 7)
-            pdf.set_text_color(100, 116, 139)
+            pdf.set_text_color(13, 33, 55)  # #0D2137
             pdf.cell(tile_w - 5, 4, sub_lbl, align="L")
 
         pdf.set_y(tile_y + tile_h + 6)
@@ -1464,32 +1466,50 @@ with st.sidebar:
             use_container_width=True,
         )
 
-        # Engineer log download — fetches all session CSV rows from S3.
-        # Only shown when there is a live session_id (at least one analytical query ran).
+        # Engineer log download (Option A: one CSV file per request on S3).
+        # Two-phase: "Prepare" fetches and caches in session_state so the
+        # st.download_button is always rendered on the same frame as the data.
         if st.session_state.session_id:
-            if st.button(_t("Download Session Log (CSV)", sl), use_container_width=True):
-                try:
-                    r = requests.get(
-                        f"{BACKEND_URL}/engineer-log",
-                        params={"session_id": st.session_state.session_id},
-                        timeout=15,
-                    )
-                    r.raise_for_status()
-                    payload = r.json()
-                    csv_text = payload.get("csv", "")
-                    if csv_text:
-                        st.download_button(
-                            label=f"Save log ({payload.get('row_count', 0)} rows)",
-                            data=csv_text.encode("utf-8"),
-                            file_name=f"edp_engineer_log_{st.session_state.session_id[:8]}.csv",
-                            mime="text/csv",
-                            use_container_width=True,
-                            key="eng_log_save",
+            # Clear cached log when the session changes.
+            if st.session_state.get("_log_sid") != st.session_state.session_id:
+                st.session_state["_log_csv"] = None
+                st.session_state["_log_rows"] = 0
+                st.session_state["_log_sid"] = st.session_state.session_id
+
+            if st.session_state.get("_log_csv") is None:
+                # Phase 1: fetch button
+                if st.button(_t("Prepare Session Log (CSV)", sl), use_container_width=True):
+                    try:
+                        r = requests.get(
+                            f"{BACKEND_URL}/engineer-log",
+                            params={"session_id": st.session_state.session_id},
+                            timeout=15,
                         )
-                    else:
-                        st.caption("No log entries yet for this session.")
-                except Exception as exc:  # noqa: BLE001
-                    st.error(f"Could not fetch log: {exc}")
+                        r.raise_for_status()
+                        payload = r.json()
+                        st.session_state["_log_csv"] = payload.get("csv", "") or ""
+                        st.session_state["_log_rows"] = payload.get("row_count", 0)
+                    except Exception as exc:  # noqa: BLE001
+                        st.error(f"Could not fetch log: {exc}")
+                    st.rerun()
+            else:
+                # Phase 2: save button — always visible after fetch
+                log_label = (
+                    f"{_t('Download Session Log', sl)} ({st.session_state['_log_rows']} rows)"
+                )
+                if st.session_state["_log_csv"]:
+                    st.download_button(
+                        label=log_label,
+                        data=st.session_state["_log_csv"].encode("utf-8"),
+                        file_name=f"edp_engineer_log_{st.session_state.session_id[:8]}.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+                else:
+                    st.caption(_t("No log entries yet for this session.", sl))
+                if st.button(_t("Refresh log", sl), use_container_width=True):
+                    st.session_state["_log_csv"] = None
+                    st.rerun()
 
         st.divider()
         st.caption(f"**{_t('History', sl)}**")
