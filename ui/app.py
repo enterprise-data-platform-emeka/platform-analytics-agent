@@ -16,14 +16,13 @@ import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-_BERLIN = ZoneInfo("Europe/Berlin")
-
 import pandas as pd
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
 BACKEND_URL = "http://localhost:8080"
+_BERLIN = ZoneInfo("Europe/Berlin")
 
 # Fallback example questions used when /examples endpoint is unreachable.
 _FALLBACK_EXAMPLES = [
