@@ -693,7 +693,10 @@ def _cached_build_pdf(
     pdf.set_font(font_name, "B", 20)
     pdf.cell(W, 12, _t("EDP Analytics Report", lang), new_x="LMARGIN", new_y="NEXT")
     import zoneinfo as _zi
-    generated_str = datetime.datetime.now(_zi.ZoneInfo("Europe/Berlin")).strftime("Generated: %d %B %Y, %H:%M %Z")
+
+    generated_str = datetime.datetime.now(_zi.ZoneInfo("Europe/Berlin")).strftime(
+        "Generated: %d %B %Y, %H:%M %Z"
+    )
     pdf.set_font(font_name, "", 8)
     pdf.set_text_color(148, 163, 184)  # #94a3b8 slate-400
     pdf.cell(W, 5, generated_str, new_x="LMARGIN", new_y="NEXT")
@@ -743,7 +746,7 @@ def _cached_build_pdf(
             col_w = W / max(len(columns), 1)
 
             # Header row — blue background, white text
-            pdf.set_fill_color(37, 99, 235)   # #2563EB
+            pdf.set_fill_color(37, 99, 235)  # #2563EB
             pdf.set_text_color(255, 255, 255)
             pdf.set_font(font_name, "B", 8)
             for col in columns:

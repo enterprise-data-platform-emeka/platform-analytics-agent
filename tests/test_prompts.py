@@ -60,12 +60,12 @@ class TestGoldTableCatalog:
 
     def test_each_table_has_table_description(self) -> None:
         for table in ALL_SEVEN_TABLES:
-            assert (
-                "__table__" in GOLD_TABLE_CATALOG[table]
-            ), f"{table} missing '__table__' description"
-            assert GOLD_TABLE_CATALOG[table][
-                "__table__"
-            ], f"{table} '__table__' description is empty"
+            assert "__table__" in GOLD_TABLE_CATALOG[table], (
+                f"{table} missing '__table__' description"
+            )
+            assert GOLD_TABLE_CATALOG[table]["__table__"], (
+                f"{table} '__table__' description is empty"
+            )
 
     def test_each_table_has_column_hints(self) -> None:
         for table in ALL_SEVEN_TABLES:
