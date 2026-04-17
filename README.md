@@ -112,11 +112,21 @@ flowchart TD
 
 The FastAPI backend is the analytical engine. Non-technical stakeholders don't interact with it directly. The user-facing layer is a Streamlit browser app that wraps the backend.
 
-A stakeholder opens a URL in their browser, types a plain-English question in a text box, and clicks submit. Streamlit POSTs the question to the FastAPI `/ask` endpoint. When the response arrives, Streamlit displays everything inline: the plain-English insight, the chart as an inline image (fetched from the presigned S3 URL (Uniform Resource Locator) the agent returns), the SQL in an expandable section, the list of assumptions the agent made, and the scan cost in USD.
+A stakeholder opens a URL in their browser, types a plain-English question in a text box, and clicks submit. Streamlit POSTs the question to the FastAPI `/ask` endpoint. When the response arrives, Streamlit renders everything inline: the plain-English insight (streamed token-by-token as it generates), an interactive Plotly chart with a raw data table tab, the SQL in a "Query details" expander, the assumptions the agent made, and the scan cost in USD.
 
 No command-line access needed. No SQL knowledge needed. No understanding of Athena, Glue, or partition structures required. That's the whole point.
 
-The Streamlit app runs in the same ECS (Elastic Container Service) Fargate container as the FastAPI backend. A startup script (`entrypoint.sh`) launches both together when the container starts: FastAPI on port 8080, Streamlit on port 8501. The AWS load balancer (ALB) has a separate listener for each port, so stakeholders open the Streamlit URL and FastAPI stays reachable for direct API access. For local development, the same startup script runs both with a single `docker-compose up`.
+The Streamlit app runs in the same ECS (Elastic Container Service) Fargate container as the FastAPI backend. A startup script (`entrypoint.sh`) launches both together when the container starts: FastAPI on port 8080, Streamlit on port 8501. The internet-facing ALB (Application Load Balancer) has a separate listener for each port, so stakeholders open `http://<alb-dns>:8501` and FastAPI stays reachable on port 80 for direct API access. For local development, the same startup script runs both with a single `docker-compose up`.
+
+The UI has several features beyond a simple text box:
+
+- **Multilingual interface.** UI labels, section headings, placeholder text, and button labels are translated into eight scripts: Chinese (zh), Japanese (ja), Korean (ko), Arabic (ar), Russian (ru), Greek (el), Hebrew (he), and Thai (th). For Latin-script languages (Italian, French, Spanish, English, and others), Claude detects the language from the question text and replies in that language. The translation dictionaries cover 20+ string keys so the entire page feels native to the user's language, not just the answer.
+- **Numbered Q&A cards.** Each question-answer pair is rendered as a numbered card with a border, not a chat bubble. The card shows the question, the streaming insight, the chart (or table), and a collapsible "Query details" section with SQL, assumptions, scan cost, and a query intent check.
+- **Query intent check.** After Athena runs the SQL, a second Claude call reads only the SQL (not the original question) and infers what business question it answers. This gives an unbiased cross-check: if the inferred intent doesn't match what the user asked, the assumptions list makes the divergence visible.
+- **Chart/Table tabs.** Every result has two tabs: an interactive Plotly chart and a raw data table. The user can switch between them without re-running the query.
+- **PDF report download.** A "Download PDF" button generates a 2-page PDF report. Page 1 has the question, the plain-English summary, and the chart. Page 2 has the assumptions, the SQL in a dark editor style (syntax highlighting via coloured background, monospace font), query metadata (rows returned, bytes scanned, cost), and the query intent check. The PDF includes blue accent bars, a generation timestamp, and "Page X of Y" page numbers in the footer. CJK (Chinese, Japanese, Korean) scripts use the Noto CJK font installed in the Docker image so characters render correctly.
+- **Conversation export and import.** A sidebar button downloads the full conversation as a JSON file. A file uploader lets the user restore a previous conversation in a new session, so multi-day analysis workflows don't start from scratch.
+- **Session sidebar.** Shows the session start time and a running count of questions asked in the current session.
 
 ---
 
@@ -1022,12 +1032,18 @@ A Streamlit browser app (`ui/app.py`) that wraps the FastAPI backend so non-tech
 
 What was built:
 
-- `ui/app.py` — chat-style text input, conversation history, session state for multi-turn follow-ups
-- Result panel: plain-English insight, inline Plotly chart, SQL in a "Query details" expander, assumptions list, scan cost and bytes scanned
-- "Send as email" form: generates a PDF report (question + chart + insight) and sends it via AWS SES
-- Runs in the same ECS Fargate container as FastAPI. `entrypoint.sh` starts uvicorn on port 8080 (background) then Streamlit on port 8501 (foreground)
-- ALB has separate listeners for port 80 (FastAPI) and port 8501 (Streamlit)
-- Deployed automatically via the existing CI/deploy pipeline on every push to main
+- `ui/app.py` — numbered Q&A cards (not chat bubbles), session state for multi-turn follow-ups, bordered card layout
+- **Streaming insight display.** The plain-English insight streams token-by-token as Claude generates it, so stakeholders see progress immediately instead of waiting for the full response.
+- **Status badges.** A spinner and coloured status badge show each pipeline step in real time (generating SQL, running query, generating insight).
+- **Chart/Table tabs.** Every result renders both an interactive Plotly chart and a raw data table via `st.tabs`. The user switches between them without re-running the query.
+- **Query intent check.** A second Claude call reads only the generated SQL and infers the business question it answers. This cross-check appears below the assumptions list so users can confirm the SQL matched their intent.
+- **Multilingual interface.** Eight script-based translation dictionaries (Chinese, Japanese, Korean, Arabic, Russian, Greek, Hebrew, Thai) plus Claude-based language detection for Latin-script languages (Italian, French, Spanish, English, and others). All UI labels, headings, placeholders, and buttons translate automatically.
+- **PDF report download.** The "Download PDF" button generates a 2-page report: page 1 has the question, summary, and chart; page 2 has assumptions (with a blue accent bar), SQL in a dark code-editor style, query metadata, and the query intent check. Includes a generation timestamp and "Page X of Y" page numbers. CJK characters render via the Noto CJK font installed in the Docker image.
+- **Conversation export and import.** A sidebar button downloads the conversation as JSON. A file uploader restores it in a later session.
+- **Session sidebar.** Displays session start time and running question count.
+- `entrypoint.sh` starts uvicorn on port 8080 (background) then Streamlit on port 8501 (foreground). Both run in the same ECS Fargate container.
+- The internet-facing ALB has separate listeners: port 80 routes to FastAPI, port 8501 routes to Streamlit.
+- Deployed automatically via the existing CI/deploy pipeline on every push to `main`.
 
 ---
 
@@ -1119,7 +1135,7 @@ driven by seasonal demand. Volume has been broadly stable through Q1 2025
 at around 1,400 to 1,500 monthly transactions, roughly 12% above the same
 period in 2024.
 
-Chart: [presigned S3 URL — time series line chart]
+Chart: [interactive Plotly line chart rendered inline]
 ```
 
 ---
@@ -1136,6 +1152,7 @@ Chart: [presigned S3 URL — time series line chart]
 | Streamlit | Python library that turns Python code into a browser-accessible web page — the stakeholder UI |
 | matplotlib | Static chart PNG generation |
 | Plotly | Interactive chart HTML generation |
+| fpdf2 | PDF report generation (2-page layout, CJK font support) |
 | ECS Fargate | Serverless container runtime |
 | Amazon Athena | Executes generated SQL against Gold S3 data |
 | AWS Glue Data Catalog | Live physical schema: column names, types, partition keys |
@@ -1231,7 +1248,7 @@ Integration tests also exist but are not part of the standard CI run. They are m
 
 ## Status
 
-All 13 phases complete. The full agent is deployed to ECS Fargate on AWS dev and end-to-end tested: non-technical stakeholders open a browser, type a plain-English question, and see the insight, interactive Plotly chart, SQL, assumptions, and scan cost. PDF reports can be sent by email via AWS SES.
+All 13 phases complete. The full agent is deployed to ECS Fargate on AWS dev and end-to-end tested. Non-technical stakeholders open a browser, type a plain-English question in any supported language, and see a streaming plain-English insight, an interactive Plotly chart, numbered Q&A cards, SQL in a code-editor style, assumptions, a query intent cross-check, and scan cost. PDF reports can be downloaded directly from the browser (2-page layout with blue accent bars, editor-style SQL, page numbers, and CJK font support).
 
 | Phase | Status |
 |---|---|
