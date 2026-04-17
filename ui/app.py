@@ -14,6 +14,9 @@ import json
 import os
 import re
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+_BERLIN = ZoneInfo("Europe/Berlin")
 
 import pandas as pd
 import requests
@@ -555,7 +558,7 @@ if "confirm_clear" not in st.session_state:
     st.session_state.confirm_clear = False
 # #12: Track when this session started for display in sidebar.
 if "session_start" not in st.session_state:
-    st.session_state.session_start = datetime.now().strftime("%H:%M")
+    st.session_state.session_start = datetime.now(_BERLIN).strftime("%H:%M")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -598,6 +601,8 @@ def _cached_build_pdf(
     bytes_scanned: int,
     chart_type: str,
     inferred_question: str,
+    columns_json: str = "[]",
+    rows_json: str = "[]",
 ) -> bytes:
     """Build a complete PDF report. Called via _build_pdf(turn)."""
     import datetime
@@ -607,6 +612,8 @@ def _cached_build_pdf(
 
     lang = _detect_language(question)
     assumptions: list[str] = json.loads(assumptions_json) if assumptions_json else []
+    columns: list[str] = json.loads(columns_json) if columns_json else []
+    rows: list[dict] = json.loads(rows_json) if rows_json else []
 
     # ── FPDF subclass with page-number footer ───────────────────────────────
     # footer() is called automatically by fpdf2 at the end of each page.
@@ -631,13 +638,24 @@ def _cached_build_pdf(
     # All other scripts use DejaVu (installed via fonts-dejavu-core).
     # Helvetica is the built-in fallback if neither font file is found.
     #
-    # The exact install path varies across Debian versions, so we try known
-    # paths first, then fall back to a glob search across all font directories.
+    # The exact install path varies across Debian versions and operating systems,
+    # so we try known paths first, then fall back to a glob search.
+    #
+    # IMPORTANT: fpdf2 2.8.x does NOT support the font_index parameter for TTC
+    # files. Passing font_index=0 raises "unexpected keyword argument 'font_index'"
+    # which the outer except catches silently, causing every TTC path to be skipped
+    # and the font to fall back to Helvetica (no CJK glyphs). Solution: call
+    # add_font() without font_index for all file types — fpdf2 defaults to the
+    # first face in a TTC collection automatically.
     _NOTO_CJK_PATHS = [
+        # Linux: Debian/Ubuntu (installed by fonts-noto-cjk)
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        # macOS: built-in CJK-capable system fonts (local dev)
+        "/System/Library/Fonts/STHeiti Medium.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
     ] + _glob.glob("/usr/share/fonts/**/*[Nn]oto*[Cc][Jj][Kk]*", recursive=True)
     _DEJAVU_DIR = "/usr/share/fonts/truetype/dejavu"
 
@@ -646,29 +664,12 @@ def _cached_build_pdf(
         for cjk_path in _NOTO_CJK_PATHS:
             if not os.path.exists(cjk_path):
                 continue
-            # TTC (TrueType Collection) files require font_index to select a face.
-            # OTF/TTF files are single-face and must NOT receive font_index — fpdf2
-            # raises an error if font_index is passed to a non-collection file.
-            #
-            # IMPORTANT: bold is registered in a separate inner try-except so that
-            # a bold-registration failure does NOT prevent the regular face from
-            # being used. Without this, the outer except catches the bold error and
-            # continues to the next path, leaving font_name as "Helvetica" even
-            # though the regular face loaded fine — causing all CJK text to be dropped.
-            is_collection = cjk_path.lower().endswith(".ttc")
             try:
-                if is_collection:
-                    pdf.add_font("NotoSansCJK", fname=cjk_path, font_index=0)
-                else:
-                    pdf.add_font("NotoSansCJK", fname=cjk_path)
+                pdf.add_font("NotoSansCJK", fname=cjk_path)
                 font_name = "NotoSansCJK"
-                # Try to register the bold face. Failure is non-fatal: fpdf2 will
-                # silently use the regular face wherever bold is requested.
+                # Bold registration is non-fatal: fpdf2 falls back to regular if it fails.
                 try:
-                    if is_collection:
-                        pdf.add_font("NotoSansCJK", style="B", fname=cjk_path, font_index=0)
-                    else:
-                        pdf.add_font("NotoSansCJK", style="B", fname=cjk_path)
+                    pdf.add_font("NotoSansCJK", style="B", fname=cjk_path)
                 except Exception:
                     pass
                 break
@@ -692,7 +693,8 @@ def _cached_build_pdf(
     # Title + generation timestamp
     pdf.set_font(font_name, "B", 20)
     pdf.cell(W, 12, _t("EDP Analytics Report", lang), new_x="LMARGIN", new_y="NEXT")
-    generated_str = datetime.datetime.now().strftime("Generated: %d %B %Y, %H:%M")
+    import zoneinfo as _zi
+    generated_str = datetime.datetime.now(_zi.ZoneInfo("Europe/Berlin")).strftime("Generated: %d %B %Y, %H:%M %Z")
     pdf.set_font(font_name, "", 8)
     pdf.set_text_color(148, 163, 184)  # #94a3b8 slate-400
     pdf.cell(W, 5, generated_str, new_x="LMARGIN", new_y="NEXT")
@@ -727,10 +729,48 @@ def _cached_build_pdf(
         pdf.image(io.BytesIO(png_bytes), x=15, w=W)
 
     # ════════════════════════════════════════════════════════════════════════
-    # PAGE 2 — Assumptions · SQL Query · Query Metadata · Query Intent Check
+    # PAGE 2 — Results Table · Assumptions · SQL Query · Query Metadata · Query Intent Check
     # ════════════════════════════════════════════════════════════════════════
-    if assumptions or sql:
+    if assumptions or sql or (columns and rows):
         pdf.add_page()
+
+        # ── Results table ─────────────────────────────────────────────────────
+        if columns and rows:
+            pdf.set_font(font_name, "B", 13)
+            pdf.cell(W, 8, "Results", new_x="LMARGIN", new_y="NEXT")
+            pdf.ln(2)
+
+            display_rows = rows[:20]
+            col_w = W / max(len(columns), 1)
+
+            # Header row — blue background, white text
+            pdf.set_fill_color(37, 99, 235)   # #2563EB
+            pdf.set_text_color(255, 255, 255)
+            pdf.set_font(font_name, "B", 8)
+            for col in columns:
+                pdf.cell(col_w, 7, col.replace("_", " ").title(), border=1, fill=True, align="C")
+            pdf.ln()
+
+            # Data rows — alternating light-blue / white
+            pdf.set_text_color(0, 0, 0)
+            pdf.set_font(font_name, "", 8)
+            for i, row in enumerate(display_rows):
+                if i % 2 == 0:
+                    pdf.set_fill_color(239, 246, 255)  # #eff6ff blue-50
+                else:
+                    pdf.set_fill_color(255, 255, 255)
+                for col in columns:
+                    pdf.cell(col_w, 6, str(row.get(col, "")), border=1, fill=True)
+                pdf.ln()
+
+            pdf.set_fill_color(255, 255, 255)
+            pdf.set_text_color(0, 0, 0)
+            if len(rows) > 20:
+                pdf.set_font(font_name, "", 8)
+                pdf.set_text_color(100, 116, 139)
+                pdf.cell(W, 5, f"Showing 20 of {len(rows)} rows.", align="L")
+                pdf.set_text_color(0, 0, 0)
+            pdf.ln(10)
 
         # ── Assumptions — blue left-accent bar matching Summary style ────────
         if assumptions:
@@ -848,6 +888,8 @@ def _build_pdf(turn: dict) -> bytes:
         bytes_scanned=turn.get("bytes_scanned", 0),
         chart_type=turn.get("chart_type", ""),
         inferred_question=turn.get("inferred_question", ""),
+        columns_json=json.dumps(turn.get("columns", [])),
+        rows_json=json.dumps(turn.get("rows", [])),
     )
 
 
@@ -1047,7 +1089,7 @@ with st.sidebar:
             st.session_state.session_id = None
             st.session_state.history = []
             st.session_state.confirm_clear = False
-            st.session_state.session_start = datetime.now().strftime("%H:%M")
+            st.session_state.session_start = datetime.now(_BERLIN).strftime("%H:%M")
             st.rerun()
         if col_no.button(_t("Cancel", sl), use_container_width=True):
             st.session_state.confirm_clear = False
@@ -1149,7 +1191,7 @@ if st.session_state.pending_question:
 if question:
     lang = _detect_language(question)
     n = len(st.session_state.history) + 1
-    now_str = datetime.now().strftime("%H:%M")
+    now_str = datetime.now(_BERLIN).strftime("%H:%M")
     question_label = _t("Question", lang)
 
     # #1: Live turn also uses the card container so it matches history cards.

@@ -32,7 +32,9 @@ The caller (main.py / FastAPI endpoint) always receives a ChartOutput, never
 an exception from this module.
 """
 
+import glob as _glob
 import logging
+import os as _os
 from dataclasses import dataclass
 
 import boto3
@@ -42,6 +44,49 @@ from agent.config import AWSConfig
 from agent.executor import QueryResult
 
 logger = logging.getLogger(__name__)
+
+
+def _setup_matplotlib_cjk() -> None:
+    """Register a CJK-capable font with matplotlib so chart titles render in any language.
+
+    fpdf2 and matplotlib have independent font stacks. Without this, a Chinese chart
+    title set via ax.set_title() renders as boxes in the PNG even if the PDF text is fine.
+    Runs once at import time; failures are silent so chart generation never crashes.
+    """
+    try:
+        import matplotlib
+        import matplotlib.font_manager as fm
+
+        candidates = [
+            # Linux: Debian/Ubuntu (installed by fonts-noto-cjk)
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+            # macOS: built-in CJK-capable system fonts (local dev)
+            "/System/Library/Fonts/STHeiti Medium.ttc",
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        ] + _glob.glob("/usr/share/fonts/**/*[Nn]oto*[Cc][Jj][Kk]*", recursive=True)
+
+        for path in candidates:
+            if not _os.path.exists(path):
+                continue
+            try:
+                fm.fontManager.addfont(path)
+                prop = fm.FontProperties(fname=path)
+                cjk_name = prop.get_name()
+                current = list(matplotlib.rcParams.get("font.sans-serif", []))
+                if cjk_name not in current:
+                    matplotlib.rcParams["font.sans-serif"] = [cjk_name] + current
+                    matplotlib.rcParams["font.family"] = "sans-serif"
+                logger.debug("CJK font registered with matplotlib: %s (%s)", cjk_name, path)
+                break
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
+_setup_matplotlib_cjk()
 
 # S3 key prefix for chart PNGs.
 _CHARTS_PREFIX = "charts"
@@ -76,6 +121,15 @@ _METRIC_HINTS: frozenset[str] = frozenset(
 
 # EDP brand colour used for matplotlib charts.
 _BRAND_COLOUR = "#2563EB"  # blue-600
+
+
+def _display_label(value: str) -> str:
+    """Title-case a label only if it is already all-lowercase.
+
+    Preserves mixed-case brand names (UrbanEdge, TechPlus) while capitalising
+    database-stored lowercase values (germany -> Germany, united kingdom -> United Kingdom).
+    """
+    return value.title() if value == value.lower() else value
 
 
 @dataclass
@@ -282,7 +336,7 @@ class ChartGenerator:
         x_col = categorical_cols[0]
         y_col = self._best_metric_column(numeric_cols)
 
-        labels: list[str] = [str(row.get(x_col, "")) for row in result.rows]
+        labels: list[str] = [_display_label(str(row.get(x_col, ""))) for row in result.rows]
         values: list[float] = [float(row.get(y_col, 0) or 0) for row in result.rows]
 
         # Sort descending so the largest bar is at the top.
