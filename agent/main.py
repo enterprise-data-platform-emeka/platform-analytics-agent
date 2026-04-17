@@ -992,22 +992,24 @@ try:
         Returns {"csv": "<csv text>", "row_count": n} on success.
         Returns {"csv": "", "row_count": 0} if no log exists yet.
         """
+        if _session is None:
+            raise HTTPException(status_code=503, detail="Agent not initialised")
         if not session_id or not session_id.strip():
             raise HTTPException(status_code=400, detail="session_id is required")
         try:
             import boto3
             from botocore.exceptions import ClientError
 
-            s3 = boto3.client("s3", region_name=_session._config.aws.region)
+            bucket = _session._config.aws.bronze_bucket
+            region = _session._config.aws.region
+            s3 = boto3.client("s3", region_name=region)
             prefix = f"{_ENGINEER_LOG_PREFIX}/"
             paginator = s3.get_paginator("list_objects_v2")
             session_suffix = f"/session={session_id}/"
             keys: list[str] = []
-            for page in paginator.paginate(
-                Bucket=_session._config.aws.bronze_bucket, Prefix=prefix
-            ):
-                for obj in page.get("Contents", []):
-                    key = obj["Key"]
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                for entry in page.get("Contents", []):
+                    key: str = entry["Key"]
                     if session_suffix in key and key.endswith(".csv"):
                         keys.append(key)
 
@@ -1019,8 +1021,8 @@ try:
             header_written = False
             for key in keys:
                 try:
-                    obj = s3.get_object(Bucket=_session._config.aws.bronze_bucket, Key=key)
-                    text = obj["Body"].read().decode("utf-8")
+                    response = s3.get_object(Bucket=bucket, Key=key)
+                    text: str = response["Body"].read().decode("utf-8")
                     lines = text.splitlines()
                     if not lines:
                         continue
