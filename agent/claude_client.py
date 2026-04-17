@@ -35,7 +35,9 @@ from agent.exceptions import (
 from agent.prompts import (
     GET_SCHEMA_TOOL,
     INSIGHT_SYSTEM_PROMPT,
+    VERDICT_SYSTEM_PROMPT,
     build_insight_messages,
+    build_verdict_messages,
 )
 from agent.schema import SchemaResolver
 
@@ -51,6 +53,12 @@ _MAX_TOKENS_INSIGHT: Final[int] = 600
 _MAX_TOKENS_CLASSIFY: Final[int] = 5
 _MAX_TOKENS_CONVERSATIONAL: Final[int] = 512
 _MAX_TOKENS_INTENT: Final[int] = 150
+_MAX_TOKENS_VERDICT: Final[int] = 60
+
+# Hard timeout per Claude API call. Prevents ECS worker threads from hanging
+# indefinitely when the API is slow. The existing retry logic retries on
+# APITimeoutError, so a timed-out call gets one more attempt before failing.
+_CLAUDE_TIMEOUT_SECONDS: Final[float] = 30.0
 
 # System prompt for the binary question classifier.
 # "ANALYTICAL" = needs a new Athena query. "CONVERSATIONAL" = answerable from prior context.
@@ -408,6 +416,47 @@ class ClaudeClient:
             logger.warning("SQL intent inference failed: %s", exc)
             return ""
 
+    def get_verdict(
+        self,
+        original_question: str,
+        inferred_question: str,
+    ) -> tuple[str, str]:
+        """Compare original question vs SQL interpretation; return (verdict, detail).
+
+        Makes a lightweight Claude call to assess whether the SQL interpretation
+        matches the user's original intent. Used to populate the engineer audit log.
+
+        Args:
+            original_question: The raw user question.
+            inferred_question: Claude's blind inference from the SQL only.
+
+        Returns:
+            Tuple of (verdict, discrepancy_detail).
+            verdict: 'Yes' if a discrepancy exists, 'No' if intents match.
+            discrepancy_detail: One sentence describing the difference, or 'None'.
+
+        Non-fatal: returns ('No', 'None') on any error so the audit log write
+        is never blocked by a failed verdict call.
+        """
+        if not inferred_question:
+            return "No", "None"
+        try:
+            messages = build_verdict_messages(original_question, inferred_question)
+            response = self._call(
+                messages=messages,
+                system=VERDICT_SYSTEM_PROMPT,
+                tools=None,
+                max_tokens=_MAX_TOKENS_VERDICT,
+            )
+            text = self._extract_text(response).strip()
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            verdict = "Yes" if lines and lines[0].lower().startswith("yes") else "No"
+            detail = lines[1] if len(lines) > 1 else "None"
+            return verdict, detail
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Verdict computation failed (non-fatal): %s", exc)
+            return "No", "None"
+
     # ── Private helpers ────────────────────────────────────────────────────────
 
     @staticmethod
@@ -453,6 +502,7 @@ class ClaudeClient:
             "max_tokens": max_tokens,
             "system": system,
             "messages": messages,
+            "timeout": _CLAUDE_TIMEOUT_SECONDS,
         }
         if tools:
             kwargs["tools"] = tools

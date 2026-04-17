@@ -27,18 +27,24 @@ follow-up questions.
 """
 
 import base64
+import csv
+import io
 import json
 import logging
 import os
 import random
 import sys
+import time
+import uuid
+from collections import deque
 from collections.abc import Generator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from agent.audit import AuditLogger
 from agent.charts import ChartGenerator, ChartOutput
@@ -175,6 +181,8 @@ class AskResult:
             Empty string if the inference call failed or sql is empty.
         columns: Ordered column names from the Athena result set.
         rows: Raw query result rows (capped at 100) for client-side table toggle.
+        sql_retry_count: Number of SQL generation retries (0 = first try succeeded).
+        row_count: Total rows returned by Athena before capping.
     """
 
     response: InsightResponse
@@ -183,6 +191,8 @@ class AskResult:
     inferred_question: str = ""
     columns: list[str] = field(default_factory=list)
     rows: list[dict[str, str]] = field(default_factory=list)
+    sql_retry_count: int = 0
+    row_count: int = 0
 
 
 class AgentSession:
@@ -324,7 +334,134 @@ class AgentSession:
             inferred_question=inferred_question,
             columns=query_result.columns,
             rows=query_result.rows[:100],
+            sql_retry_count=max(0, generated.attempts - 1),
+            row_count=len(query_result.rows),
         )
+
+
+# ---------------------------------------------------------------------------
+# Rate limiter — in-memory, per session_id
+# ---------------------------------------------------------------------------
+
+_RATE_LIMIT_MAX: Final[int] = 10  # max requests per window
+_RATE_LIMIT_WINDOW: Final[float] = 60.0  # seconds
+
+_rate_buckets: dict[str, deque[float]] = {}
+
+
+def _check_rate_limit(session_id: str) -> bool:
+    """Return True if the request is allowed, False if the limit is exceeded.
+
+    Slides a 60-second window per session_id. Works correctly for a single
+    container deployment. Not safe across multiple replicas.
+    """
+    now = time.monotonic()
+    if session_id not in _rate_buckets:
+        _rate_buckets[session_id] = deque()
+    bucket = _rate_buckets[session_id]
+    while bucket and now - bucket[0] > _RATE_LIMIT_WINDOW:
+        bucket.popleft()
+    if len(bucket) >= _RATE_LIMIT_MAX:
+        return False
+    bucket.append(now)
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Engineer audit log writer
+# ---------------------------------------------------------------------------
+
+_ENGINEER_LOG_PREFIX = "metadata/engineer-log"
+
+
+def _write_engineer_log(
+    *,
+    aws_config: Any,
+    session_id: str,
+    request_id: str,
+    timestamp_utc: str,
+    question: str,
+    sql: str,
+    inferred_question: str,
+    discrepancy_detail: str,
+    verdict: str,
+    bytes_scanned: int,
+    athena_cost_usd: float,
+    response_time_seconds: float,
+    athena_query_execution_id: str,
+    sql_retry_count: int,
+    row_count_returned: int,
+    chart_type_rendered: str,
+    language: str,
+) -> None:
+    """Write one engineer audit log row to S3 as a single-row CSV.
+
+    Non-fatal: logs ERROR and returns normally on any failure.
+    S3 key pattern:
+        metadata/engineer-log/date=YYYY-MM-DD/session={session_id}/{request_id}.csv
+    """
+    try:
+        import boto3
+
+        date_str = datetime.now(UTC).strftime("%Y-%m-%d")
+        key = f"{_ENGINEER_LOG_PREFIX}/date={date_str}" f"/session={session_id}/{request_id}.csv"
+
+        buf = io.StringIO()
+        fieldnames = [
+            "session_id",
+            "request_id",
+            "timestamp_utc",
+            "question_asked",
+            "sql_executed",
+            "claude_interpretation",
+            "discrepancy_detail",
+            "verdict",
+            "bytes_scanned",
+            "athena_cost_usd",
+            "response_time_seconds",
+            "athena_query_execution_id",
+            "sql_retry_count",
+            "row_count_returned",
+            "chart_type_rendered",
+            "language",
+        ]
+        writer = csv.DictWriter(buf, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerow(
+            {
+                "session_id": session_id,
+                "request_id": request_id,
+                "timestamp_utc": timestamp_utc,
+                "question_asked": question,
+                "sql_executed": sql,
+                "claude_interpretation": inferred_question,
+                "discrepancy_detail": discrepancy_detail,
+                "verdict": verdict,
+                "bytes_scanned": bytes_scanned,
+                "athena_cost_usd": athena_cost_usd,
+                "response_time_seconds": round(response_time_seconds, 3),
+                "athena_query_execution_id": athena_query_execution_id,
+                "sql_retry_count": sql_retry_count,
+                "row_count_returned": row_count_returned,
+                "chart_type_rendered": chart_type_rendered,
+                "language": language,
+            }
+        )
+
+        s3 = boto3.client("s3", region_name=aws_config.region)
+        s3.put_object(
+            Bucket=aws_config.bronze_bucket,
+            Key=key,
+            Body=buf.getvalue().encode("utf-8"),
+            ContentType="text/csv",
+        )
+        logger.info(
+            "Engineer log written: s3://%s/%s",
+            aws_config.bronze_bucket,
+            key,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Engineer log write failed (non-fatal): %s", exc, exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +509,9 @@ try:
         chart_height: int  # Plotly iframe height in pixels
         columns: list[str]  # result column names for client-side table toggle
         rows: list[dict[str, str]]  # raw result rows (capped at 100)
+        request_id: str  # UUID tracing this request through all log systems
+        verdict: str  # 'Yes' = discrepancy detected, 'No' = intent matches
+        discrepancy_detail: str  # one-sentence description of the discrepancy, or 'None'
 
     @app.post("/ask", response_model=AskResponse)
     async def ask_endpoint(body: AskRequest) -> AskResponse:
@@ -385,6 +525,18 @@ try:
             raise HTTPException(status_code=400, detail="question must not be empty")
 
         assert _session is not None  # guaranteed by startup event
+
+        request_id = str(uuid.uuid4())
+        request_start = time.monotonic()
+        lang = _detect_language(body.question)
+
+        # Rate limit: 10 requests per 60 seconds per session_id.
+        sid_for_limit = body.session_id or "anonymous"
+        if not _check_rate_limit(sid_for_limit):
+            raise HTTPException(
+                status_code=429,
+                detail="Rate limit exceeded: max 10 requests per minute per session.",
+            )
 
         # Resolve conversation context for multi-turn follow-ups.
         conversation: Conversation | None = None
@@ -418,6 +570,35 @@ try:
             base64.b64encode(result.chart.png_bytes).decode() if result.chart.png_bytes else None
         )
 
+        # Verdict: compare original question vs SQL interpretation.
+        verdict, discrepancy_detail = "No", "None"
+        if result.sql and result.inferred_question:
+            verdict, discrepancy_detail = _session._client.get_verdict(
+                body.question, result.inferred_question
+            )
+
+        # Engineer audit log — written for analytical queries only.
+        if result.sql:
+            _write_engineer_log(
+                aws_config=_session._config.aws,
+                session_id=session_id,
+                request_id=request_id,
+                timestamp_utc=datetime.now(UTC).isoformat(),
+                question=body.question,
+                sql=result.sql,
+                inferred_question=result.inferred_question,
+                discrepancy_detail=discrepancy_detail,
+                verdict=verdict,
+                bytes_scanned=result.response.bytes_scanned,
+                athena_cost_usd=result.response.cost_usd,
+                response_time_seconds=time.monotonic() - request_start,
+                athena_query_execution_id=result.response.execution_id,
+                sql_retry_count=result.sql_retry_count,
+                row_count_returned=result.row_count,
+                chart_type_rendered=result.chart.chart_type,
+                language=lang,
+            )
+
         return AskResponse(
             insight=result.response.insight,
             assumptions=result.response.assumptions,
@@ -435,6 +616,9 @@ try:
             chart_height=result.chart.chart_height,
             columns=result.columns,
             rows=result.rows,
+            request_id=request_id,
+            verdict=verdict,
+            discrepancy_detail=discrepancy_detail,
         )
 
     class SendReportRequest(BaseModel):
@@ -548,6 +732,26 @@ try:
 
         assert _session is not None
 
+        # Rate limit check before spawning the generator.
+        sid_for_limit = body.session_id or "anonymous"
+        if not _check_rate_limit(sid_for_limit):
+
+            def _rate_err() -> Generator[str, None, None]:
+                yield (
+                    json.dumps(
+                        {
+                            "type": "error",
+                            "text": "Rate limit exceeded: max 10 requests per minute per session.",
+                        }
+                    )
+                    + "\n"
+                )
+
+            return SR(_rate_err(), media_type="application/x-ndjson")
+
+        request_id = str(uuid.uuid4())
+        request_start = time.monotonic()
+
         conversation: Conversation | None = None
         if body.session_id:
             conversation = _store.get(body.session_id)
@@ -610,6 +814,9 @@ try:
                                 "chart_height": 0,
                                 "columns": [],
                                 "rows": [],
+                                "request_id": request_id,
+                                "verdict": "No",
+                                "discrepancy_detail": "None",
                             },
                         }
                     )
@@ -700,6 +907,13 @@ try:
                 generated.sql, question=body.question
             )
 
+            # Verdict: compare original question vs SQL interpretation.
+            stream_verdict, stream_discrepancy = "No", "None"
+            if inferred_question:
+                stream_verdict, stream_discrepancy = _session._client.get_verdict(
+                    body.question, inferred_question
+                )
+
             session_id = cast(str, body.session_id) if conversation is not None else _store.create()
             _store.append_turn(
                 session_id,
@@ -709,6 +923,27 @@ try:
                     insight=insight,
                     assumptions=generated.assumptions,
                 ),
+            )
+
+            # Engineer audit log.
+            _write_engineer_log(
+                aws_config=_session._config.aws,
+                session_id=session_id,
+                request_id=request_id,
+                timestamp_utc=datetime.now(UTC).isoformat(),
+                question=body.question,
+                sql=generated.sql,
+                inferred_question=inferred_question,
+                discrepancy_detail=stream_discrepancy,
+                verdict=stream_verdict,
+                bytes_scanned=query_result.bytes_scanned,
+                athena_cost_usd=query_result.cost_usd,
+                response_time_seconds=time.monotonic() - request_start,
+                athena_query_execution_id=query_result.execution_id,
+                sql_retry_count=max(0, generated.attempts - 1),
+                row_count_returned=len(query_result.rows),
+                chart_type_rendered=chart.chart_type,
+                language=lang,
             )
 
             png_b64 = base64.b64encode(chart.png_bytes).decode() if chart.png_bytes else None
@@ -734,6 +969,9 @@ try:
                             "chart_height": chart.chart_height,
                             "columns": query_result.columns,
                             "rows": query_result.rows[:100],
+                            "request_id": request_id,
+                            "verdict": stream_verdict,
+                            "discrepancy_detail": stream_discrepancy,
                         },
                     }
                 )

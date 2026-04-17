@@ -14,6 +14,7 @@ import json
 import os
 import re
 from datetime import datetime
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -587,6 +588,125 @@ def _clean_insight_stream(text: str) -> str:
     return text.strip()
 
 
+# ---------------------------------------------------------------------------
+# PDF helpers
+# ---------------------------------------------------------------------------
+
+
+def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, str, str]]:
+    """Return up to 3 (metric_label, value, sub_label) KPI tuples from query results."""
+    if not rows or not columns:
+        return []
+
+    numeric_cols: list[str] = []
+    cat_cols: list[str] = []
+    for col in columns:
+        raw = str(rows[0].get(col, "") or "")
+        try:
+            float(raw.replace(",", "").replace("$", ""))
+            numeric_cols.append(col)
+        except ValueError:
+            cat_cols.append(col)
+
+    def _fmt(val: str) -> str:
+        try:
+            f = float(str(val).replace(",", "").replace("$", ""))
+            if f == int(f):
+                return f"{int(f):,}"
+            return f"{f:,.2f}"
+        except (ValueError, TypeError):
+            return str(val)
+
+    tiles: list[tuple[str, str, str]] = []
+
+    if cat_cols and numeric_cols:
+        metric_col = numeric_cols[0]
+        cat_col = cat_cols[0]
+        metric_label = metric_col.replace("_", " ").title()
+        top_cat = str(rows[0].get(cat_col, ""))
+        top_val = _fmt(str(rows[0].get(metric_col, "")))
+        tiles.append((metric_label, top_val, top_cat))
+        tiles.append(("Total Entries", str(len(rows)), cat_col.replace("_", " ").title() + "s"))
+        try:
+            total = sum(float(str(r.get(metric_col, 0) or 0).replace(",", "")) for r in rows)
+            tiles.append((f"Total {metric_label}", _fmt(str(total)), "All Entries"))
+        except (ValueError, TypeError):
+            pass
+    elif numeric_cols:
+        for col in numeric_cols[:3]:
+            val = _fmt(str(rows[0].get(col, "")))
+            label = col.replace("_", " ").title()
+            tiles.append((label, val, ""))
+    else:
+        tiles.append(("Total Results", str(len(rows)), ""))
+
+    return tiles[:3]
+
+
+def _plain_english_assumption(text: str) -> str:
+    """Strip SQL technical artefacts from an assumption string for stakeholder PDFs.
+
+    Removes backtick-wrapped identifiers, database prefix patterns, and
+    trailing whitespace so the assumption reads as plain English.
+    """
+    # Strip backtick wrappers but keep the content: `tablename` -> tablename
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    # Remove database prefix patterns (e.g. edp_dev_gold. or edp_dev_silver.)
+    text = re.sub(r"edp_\w+\.", "", text)
+    # Normalise whitespace
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _draw_e_mark(pdf: Any, x: float, y: float, size: float = 10.0) -> None:
+    """Draw the Geometric E logo mark (navy square, white E) at position (x, y).
+
+    The E is faithful to Concept 3 from the brand SVG: three horizontal bars
+    (top, shorter middle, bottom) plus a left vertical bar, all white on navy.
+
+    Args:
+        pdf: fpdf2 FPDF instance.
+        x, y: Top-left corner of the mark in mm.
+        size: Side length of the square in mm.
+    """
+    # Navy square background
+    pdf.set_fill_color(26, 82, 118)  # #1A5276
+    pdf.rect(x, y, size, size, style="F")
+
+    # White E bars — proportions derived from the brand SVG (80x80 unit grid)
+    pad = size * 0.175  # left/top padding
+    bar_h = size * 0.075  # bar height
+    bar_w_full = size * 0.525  # top/bottom bar width
+    bar_w_mid = size * 0.375  # middle bar width (shorter)
+    vert_w = size * 0.075  # vertical bar width
+    e_height = size * 0.55  # full height of E
+
+    pdf.set_fill_color(255, 255, 255)
+    # Vertical bar (spine of the E)
+    pdf.rect(x + pad, y + pad + (size - 2 * pad - e_height) / 2, vert_w, e_height, style="F")
+    # Top bar
+    pdf.rect(
+        x + pad,
+        y + pad + (size - 2 * pad - e_height) / 2,
+        bar_w_full,
+        bar_h,
+        style="F",
+    )
+    # Middle bar (centred vertically within the E)
+    mid_y = y + pad + (size - 2 * pad - e_height) / 2 + (e_height - bar_h) / 2
+    pdf.rect(x + pad, mid_y, bar_w_mid, bar_h, style="F")
+    # Bottom bar
+    pdf.rect(
+        x + pad,
+        y + pad + (size - 2 * pad - e_height) / 2 + e_height - bar_h,
+        bar_w_full,
+        bar_h,
+        style="F",
+    )
+    # Reset fill
+    pdf.set_fill_color(255, 255, 255)
+
+
 # #3: PDF generation is cached. Individual hashable fields are the cache key so
 # Streamlit avoids rebuilding PDFs on every rerun for historical turns.
 @st.cache_data(show_spinner=False)
@@ -596,242 +716,284 @@ def _cached_build_pdf(
     sql: str,
     assumptions_json: str,
     png_b64: str,
-    cost_usd: float,
-    bytes_scanned: int,
-    chart_type: str,
-    inferred_question: str,
+    columns_json: str,
+    rows_json: str,
 ) -> bytes:
-    """Build a complete PDF report. Called via _build_pdf(turn)."""
+    """Build an enterprise-grade two-page PDF stakeholder report.
+
+    Page 1: Header (logo + name + classification) | Question | KPI tiles |
+            Chart | Key Finding | Footer.
+    Page 2: Header | Methodology (plain-English assumptions) | SQL Query | Footer.
+    """
     import datetime
     import io
+    import zoneinfo as _zi
 
     from fpdf import FPDF
 
     lang = _detect_language(question)
     assumptions: list[str] = json.loads(assumptions_json) if assumptions_json else []
+    columns: list[str] = json.loads(columns_json) if columns_json else []
+    rows: list[dict] = json.loads(rows_json) if rows_json else []
 
-    # ── FPDF subclass with page-number footer ───────────────────────────────
-    # footer() is called automatically by fpdf2 at the end of each page.
-    # alias_nb_pages() inserts a "{nb}" placeholder that fpdf2 replaces with
-    # the final page count on output, enabling "Page X of Y" footers.
-    class _PDFReport(FPDF):
-        def footer(self) -> None:
-            self.set_y(-12)
-            self.set_font("Helvetica", "", 8)  # built-in: always available
-            self.set_text_color(148, 163, 184)  # #94a3b8 slate-400
-            self.cell(0, 6, f"Page {self.page_no()} of {{nb}}", align="C")
-            self.set_text_color(0, 0, 0)
-
-    pdf = _PDFReport()
-    pdf.alias_nb_pages()
-    pdf.set_margins(15, 15, 15)
-    pdf.set_auto_page_break(auto=True, margin=20)  # 20 pt bottom margin for footer
-    # Pages are added explicitly below. W is computed after page 1.
+    generated_str = datetime.datetime.now(_zi.ZoneInfo("Europe/Berlin")).strftime(
+        "%d %B %Y, %H:%M %Z"
+    )
 
     # ── Font selection ──────────────────────────────────────────────────────
-    # CJK scripts need Noto CJK (installed via fonts-noto-cjk in the Dockerfile).
-    # All other scripts use DejaVu (installed via fonts-dejavu-core).
-    # Helvetica is the built-in fallback if neither font file is found.
-    #
-    # The exact install path varies across Debian versions and operating systems,
-    # so we try known paths first, then fall back to a glob search.
-    #
-    # IMPORTANT: fpdf2 2.8.x does NOT support the font_index parameter for TTC
-    # files. Passing font_index=0 raises "unexpected keyword argument 'font_index'"
-    # which the outer except catches silently, causing every TTC path to be skipped
-    # and the font to fall back to Helvetica (no CJK glyphs). Solution: call
-    # add_font() without font_index for all file types — fpdf2 defaults to the
-    # first face in a TTC collection automatically.
     _NOTO_CJK_PATHS = [
-        # Linux: Debian/Ubuntu (installed by fonts-noto-cjk)
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-        # macOS: built-in CJK-capable system fonts (local dev)
         "/System/Library/Fonts/STHeiti Medium.ttc",
         "/System/Library/Fonts/Hiragino Sans GB.ttc",
     ] + _glob.glob("/usr/share/fonts/**/*[Nn]oto*[Cc][Jj][Kk]*", recursive=True)
     _DEJAVU_DIR = "/usr/share/fonts/truetype/dejavu"
 
-    font_name = "Helvetica"
+    # Resolve font name before instantiating _PDFReport (header() needs it).
+    _font_name_resolved = "Helvetica"
+    _font_map: dict[str, str] = {}
+
+    # We'll register fonts after instantiation; store paths for later.
+    _cjk_path_to_use: str | None = None
     if lang in ("zh", "ja", "ko"):
         for cjk_path in _NOTO_CJK_PATHS:
-            if not os.path.exists(cjk_path):
-                continue
-            try:
-                pdf.add_font("NotoSansCJK", fname=cjk_path)
-                font_name = "NotoSansCJK"
-                # Bold registration is non-fatal: fpdf2 falls back to regular if it fails.
-                try:
-                    pdf.add_font("NotoSansCJK", style="B", fname=cjk_path)
-                except Exception:
-                    pass
+            if os.path.exists(cjk_path):
+                _cjk_path_to_use = cjk_path
+                _font_name_resolved = "NotoSansCJK"
                 break
-            except Exception:
-                continue
+    if _font_name_resolved == "Helvetica":
+        dejavu_reg = f"{_DEJAVU_DIR}/DejaVuSans.ttf"
+        dejavu_bold = f"{_DEJAVU_DIR}/DejaVuSans-Bold.ttf"
+        if os.path.exists(dejavu_reg):
+            _font_name_resolved = "DejaVu"
+            _font_map["reg"] = dejavu_reg
+            _font_map["bold"] = dejavu_bold if os.path.exists(dejavu_bold) else dejavu_reg
 
-    if font_name == "Helvetica":
+    font_name = _font_name_resolved
+
+    # ── FPDF subclass with enterprise header + footer on every page ─────────
+    # Captures font_name, lang, generated_str from the enclosing scope.
+    class _PDFReport(FPDF):
+        _fn: str = font_name
+        _lang: str = lang
+        _gen: str = generated_str
+
+        def header(self) -> None:
+            # Full-width navy header strip (25 mm tall, edge-to-edge)
+            self.set_fill_color(26, 82, 118)  # #1A5276 navy
+            self.rect(0, 0, self.w, 25, style="F")
+
+            # Geometric E mark — 12 mm square, vertically centred in strip
+            _draw_e_mark(self, x=7, y=6.5, size=12)
+
+            # Name + title (left of mark)
+            self.set_xy(22, 7)
+            self.set_font(self._fn, "B", 9)
+            self.set_text_color(255, 255, 255)
+            self.cell(55, 5, "EMEKA EDEH")
+            self.set_xy(22, 13)
+            self.set_font(self._fn, "", 7)
+            self.set_text_color(180, 210, 230)
+            self.cell(55, 4, "DATA ENGINEER")
+
+            # Centre: report title
+            report_title = _t("EDP Analytics Report", self._lang)
+            self.set_font(self._fn, "B", 10)
+            self.set_text_color(255, 255, 255)
+            title_w = 70.0
+            self.set_xy(self.w / 2 - title_w / 2, 9)
+            self.cell(title_w, 6, report_title, align="C")
+
+            # Right: classification + generation timestamp
+            self.set_font(self._fn, "", 7)
+            self.set_text_color(180, 210, 230)
+            self.set_xy(self.w - 62, 7)
+            self.cell(57, 5, "INTERNAL  |  CONFIDENTIAL", align="R")
+            self.set_xy(self.w - 62, 13)
+            self.set_font(self._fn, "", 6)
+            self.cell(57, 4, f"Generated: {self._gen}", align="R")
+
+            # Reset colour; content starts at y=28
+            self.set_text_color(0, 0, 0)
+            self.set_y(28)
+
+        def footer(self) -> None:
+            self.set_y(-13)
+            col_w = self.epw / 3
+            self.set_font("Helvetica", "", 7)
+            self.set_text_color(148, 163, 184)
+            self.set_x(self.l_margin)
+            self.cell(col_w, 5, f"Data as of {self._gen}", align="L")
+            self.cell(col_w, 5, "Confidential \u2014 Internal Use Only", align="C")
+            self.cell(col_w, 5, f"Page {self.page_no()} of {{nb}}", align="R")
+            self.set_text_color(0, 0, 0)
+
+    pdf = _PDFReport()
+    pdf.alias_nb_pages()
+    # Top margin 28 mm matches the header strip height. Left/right 15 mm.
+    pdf.set_margins(15, 28, 15)
+    pdf.set_auto_page_break(auto=True, margin=18)
+
+    # Register fonts now (after instantiation, before add_page).
+    if _cjk_path_to_use:
         try:
-            pdf.add_font("DejaVu", fname=f"{_DEJAVU_DIR}/DejaVuSans.ttf")
-            pdf.add_font("DejaVu", style="B", fname=f"{_DEJAVU_DIR}/DejaVuSans-Bold.ttf")
-            font_name = "DejaVu"
+            pdf.add_font("NotoSansCJK", fname=_cjk_path_to_use)
+            try:
+                pdf.add_font("NotoSansCJK", style="B", fname=_cjk_path_to_use)
+            except Exception:
+                pass
         except Exception:
             font_name = "Helvetica"
+            pdf._fn = "Helvetica"
+    elif font_name == "DejaVu":
+        try:
+            pdf.add_font("DejaVu", fname=_font_map["reg"])
+            pdf.add_font("DejaVu", style="B", fname=_font_map["bold"])
+        except Exception:
+            font_name = "Helvetica"
+            pdf._fn = "Helvetica"
+
+    # Sync resolved font name onto the subclass attribute (header uses it).
+    pdf._fn = font_name  # type: ignore[attr-defined]
 
     # ════════════════════════════════════════════════════════════════════════
-    # PAGE 1 — Title · Question · Summary · Chart
+    # PAGE 1 — Question · KPI tiles · Chart · Key Finding
     # ════════════════════════════════════════════════════════════════════════
     pdf.add_page()
-    W = pdf.epw
+    W = pdf.epw  # effective page width inside margins
 
-    # Title + generation timestamp
-    pdf.set_font(font_name, "B", 20)
-    pdf.cell(W, 12, _t("EDP Analytics Report", lang), new_x="LMARGIN", new_y="NEXT")
-    import zoneinfo as _zi
-
-    generated_str = datetime.datetime.now(_zi.ZoneInfo("Europe/Berlin")).strftime(
-        "Generated: %d %B %Y, %H:%M %Z"
-    )
-    pdf.set_font(font_name, "", 8)
-    pdf.set_text_color(148, 163, 184)  # #94a3b8 slate-400
-    pdf.cell(W, 5, generated_str, new_x="LMARGIN", new_y="NEXT")
-    pdf.set_text_color(0, 0, 0)
-    pdf.ln(6)
-
-    # Question
+    # ── Question ─────────────────────────────────────────────────────────────
+    pdf.set_font(font_name, "B", 11)
+    pdf.set_text_color(100, 116, 139)  # slate-500 label
+    pdf.cell(W, 5, _t("Question", lang).upper(), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_draw_color(226, 232, 240)  # slate-200 rule
+    pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + W, pdf.get_y())
+    pdf.ln(3)
     pdf.set_font(font_name, "B", 13)
-    pdf.cell(W, 8, _t("Question", lang), new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font(font_name, "", 11)
+    pdf.set_text_color(15, 23, 42)  # slate-950
     pdf.multi_cell(W, 7, question, align="L")
     pdf.ln(8)
 
-    # Summary — blue left-accent bar, left-aligned text.
-    # Strip markdown: fpdf2 renders **bold** markers as literal asterisks.
+    # ── KPI tiles ─────────────────────────────────────────────────────────────
+    kpi_tiles = _extract_kpi_tiles(columns, rows)
+    if kpi_tiles:
+        tile_w = W / len(kpi_tiles)
+        tile_h = 22.0
+        tile_y = pdf.get_y()
+        for i, (metric_lbl, value, sub_lbl) in enumerate(kpi_tiles):
+            tx = pdf.l_margin + i * tile_w
+            # Tile background
+            pdf.set_fill_color(240, 247, 255)  # #f0f7ff blue-50
+            pdf.rect(tx, tile_y, tile_w - 2, tile_h, style="F")
+            # Top navy accent stripe (3 mm)
+            pdf.set_fill_color(26, 82, 118)
+            pdf.rect(tx, tile_y, tile_w - 2, 3, style="F")
+            # Metric label (small caps)
+            pdf.set_xy(tx + 3, tile_y + 4)
+            pdf.set_font(font_name, "", 7)
+            pdf.set_text_color(100, 116, 139)
+            pdf.cell(tile_w - 5, 4, metric_lbl.upper(), align="L")
+            # Value (large bold)
+            pdf.set_xy(tx + 3, tile_y + 9)
+            pdf.set_font(font_name, "B", 14)
+            pdf.set_text_color(15, 23, 42)
+            pdf.cell(tile_w - 5, 7, value, align="L")
+            # Sub-label
+            pdf.set_xy(tx + 3, tile_y + 16)
+            pdf.set_font(font_name, "", 7)
+            pdf.set_text_color(100, 116, 139)
+            pdf.cell(tile_w - 5, 4, sub_lbl, align="L")
+
+        pdf.set_y(tile_y + tile_h + 6)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_fill_color(255, 255, 255)
+
+    # ── Chart image ──────────────────────────────────────────────────────────
+    if png_b64:
+        png_bytes = _b64.b64decode(png_b64)
+        pdf.image(io.BytesIO(png_bytes), x=pdf.l_margin, w=W)
+        pdf.ln(6)
+
+    # ── Key Finding (insight) — blue left-accent bar ──────────────────────────
     pdf_insight = re.sub(r"\*{1,3}([^*\n]+)\*{1,3}", r"\1", insight)
     pdf_insight = pdf_insight.replace("\r\n", "\n").replace("\r", "\n")
-    pdf.set_font(font_name, "B", 13)
-    pdf.cell(W, 8, _t("Summary", lang), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font(font_name, "B", 11)
+    pdf.set_text_color(100, 116, 139)
+    pdf.cell(W, 5, _t("Summary", lang).upper(), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_draw_color(226, 232, 240)
+    pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + W, pdf.get_y())
+    pdf.ln(4)
     pdf.set_font(font_name, "", 11)
+    pdf.set_text_color(30, 41, 59)  # slate-800
     y_before = pdf.get_y()
     pdf.set_x(pdf.l_margin + 6)
     pdf.multi_cell(W - 6, 7, pdf_insight, align="L")
     y_after = pdf.get_y()
     pdf.set_fill_color(37, 99, 235)  # #2563EB blue
     pdf.rect(pdf.l_margin, y_before, 3, y_after - y_before, style="F")
-    pdf.ln(8)
-
-    # Chart image
-    if png_b64:
-        png_bytes = _b64.b64decode(png_b64)
-        pdf.image(io.BytesIO(png_bytes), x=15, w=W)
+    pdf.set_fill_color(255, 255, 255)
 
     # ════════════════════════════════════════════════════════════════════════
-    # PAGE 2 — Assumptions · SQL Query · Query Metadata · Query Intent Check
+    # PAGE 2 — Methodology (plain-English assumptions) · SQL Query
     # ════════════════════════════════════════════════════════════════════════
     if assumptions or sql:
         pdf.add_page()
 
-        # ── Assumptions — blue left-accent bar matching Summary style ────────
+        # ── Methodology — plain-English rewrite of assumptions ───────────────
         if assumptions:
-            pdf.set_font(font_name, "B", 13)
-            pdf.cell(W, 8, _t("Assumptions", lang), new_x="LMARGIN", new_y="NEXT")
-            pdf.ln(2)
+            pdf.set_font(font_name, "B", 11)
+            pdf.set_text_color(100, 116, 139)
+            pdf.cell(W, 5, "METHODOLOGY", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_draw_color(226, 232, 240)
+            pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + W, pdf.get_y())
+            pdf.ln(4)
             pdf.set_font(font_name, "", 11)
+            pdf.set_text_color(30, 41, 59)
             y_before_a = pdf.get_y()
             for item in assumptions:
+                clean = _plain_english_assumption(item)
                 pdf.set_x(pdf.l_margin + 6)
-                pdf.multi_cell(W - 6, 7, f"\u2022 {item}", align="L")
-                pdf.ln(2)
+                pdf.multi_cell(W - 6, 7, f"\u2022 {clean}", align="L")
+                pdf.ln(1)
             y_after_a = pdf.get_y()
-            pdf.set_fill_color(37, 99, 235)  # #2563EB blue — matches Summary bar
+            pdf.set_fill_color(37, 99, 235)
             pdf.rect(pdf.l_margin, y_before_a, 3, y_after_a - y_before_a, style="F")
-            pdf.ln(8)
+            pdf.set_fill_color(255, 255, 255)
+            pdf.ln(10)
 
         # ── SQL Query — editor-style code block ──────────────────────────────
         if sql:
-            pdf.set_font(font_name, "B", 13)
-            pdf.cell(W, 8, _t("SQL Query", lang), new_x="LMARGIN", new_y="NEXT")
-            pdf.ln(2)
+            pdf.set_font(font_name, "B", 11)
+            pdf.set_text_color(100, 116, 139)
+            pdf.cell(W, 5, _t("SQL Query", lang).upper(), new_x="LMARGIN", new_y="NEXT")
+            pdf.set_draw_color(226, 232, 240)
+            pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + W, pdf.get_y())
+            pdf.ln(4)
 
-            # Header bar: dark slate strip with filename label
-            bar_h = 9
+            bar_h = 9.0
             bar_y = pdf.get_y()
-            pdf.set_fill_color(30, 41, 59)  # #1e293b slate-800
+            pdf.set_fill_color(30, 41, 59)  # slate-800 header bar
             pdf.rect(pdf.l_margin, bar_y, W, bar_h, style="F")
             pdf.set_xy(pdf.l_margin + 5, bar_y)
-            pdf.set_text_color(148, 163, 184)  # #94a3b8 slate-400
+            pdf.set_text_color(148, 163, 184)
             pdf.set_font("Courier", "", 8)
             pdf.cell(W - 5, bar_h, "query.sql", new_x="LMARGIN", new_y="NEXT")
 
-            # Code body: near-black background, light grey monospace text
-            pdf.set_fill_color(15, 23, 42)  # #0f172a slate-950
+            pdf.set_fill_color(15, 23, 42)  # slate-950 code body
             pdf.set_text_color(212, 212, 212)
             pdf.set_font("Courier", "", 9)
             sql_padded = "\n".join("  " + line for line in sql.split("\n"))
             pdf.set_x(pdf.l_margin)
             pdf.multi_cell(W, 5, sql_padded, fill=True)
 
-            # Closing bar: thin dark strip to visually close the editor window
             close_y = pdf.get_y()
-            pdf.set_fill_color(30, 41, 59)  # #1e293b slate-800
+            pdf.set_fill_color(30, 41, 59)
             pdf.rect(pdf.l_margin, close_y, W, 4, style="F")
             pdf.set_y(close_y + 4)
-
-            # Reset colours after dark block
             pdf.set_text_color(0, 0, 0)
             pdf.set_fill_color(255, 255, 255)
-            pdf.ln(10)
-
-            # ── Query Metadata — 3-column layout matching the UI metric widgets
-            pdf.set_font(font_name, "B", 13)
-            pdf.cell(W, 8, _t("Query Metadata", lang), new_x="LMARGIN", new_y="NEXT")
-            col_w = W / 3
-            labels = [
-                _t("Athena cost", lang),
-                _t("Data scanned", lang),
-                _t("Chart type", lang),
-            ]
-            values = [
-                _format_cost(cost_usd),
-                _format_bytes(bytes_scanned),
-                (chart_type or "none").title(),
-            ]
-            # Label row — small uppercase caption style
-            pdf.set_font(font_name, "", 8)
-            for lbl in labels:
-                pdf.cell(col_w, 5, lbl.upper(), align="L")
-            pdf.ln(5)
-            # Value row — large bold numbers
-            pdf.set_font(font_name, "B", 13)
-            for val in values:
-                pdf.cell(col_w, 8, val, align="L")
-            pdf.ln(12)
-
-            # ── Query Intent Check — caption + blue left-accent inferred block
-            if inferred_question:
-                pdf.set_font(font_name, "B", 13)
-                pdf.cell(W, 8, _t("Query intent check", lang), new_x="LMARGIN", new_y="NEXT")
-                pdf.set_font(font_name, "", 9)
-                caption = _t(
-                    "Claude was shown only the SQL (not your question) and asked "
-                    "what it thinks the query is trying to answer:",
-                    lang,
-                )
-                pdf.set_text_color(100, 116, 139)  # #64748b slate-500
-                pdf.multi_cell(W, 5, caption, align="L")
-                pdf.set_text_color(0, 0, 0)
-                pdf.ln(3)
-                inferred_label = _t("Inferred:", lang)
-                inferred_text = f"{inferred_label} {inferred_question}"
-                pdf.set_font(font_name, "", 10)
-                y_i = pdf.get_y()
-                pdf.set_x(pdf.l_margin + 6)
-                pdf.set_fill_color(239, 246, 255)  # #eff6ff blue-50 (light blue bg)
-                pdf.multi_cell(W - 6, 6, inferred_text, fill=True, align="L")
-                y_i2 = pdf.get_y()
-                pdf.set_fill_color(37, 99, 235)  # #2563EB blue — matches Summary bar
-                pdf.rect(pdf.l_margin, y_i, 3, y_i2 - y_i, style="F")
 
     return bytes(pdf.output())
 
@@ -844,10 +1006,8 @@ def _build_pdf(turn: dict) -> bytes:
         sql=turn.get("sql", ""),
         assumptions_json=json.dumps(turn.get("assumptions", [])),
         png_b64=turn.get("png_b64") or "",
-        cost_usd=turn.get("cost_usd", 0.0),
-        bytes_scanned=turn.get("bytes_scanned", 0),
-        chart_type=turn.get("chart_type", ""),
-        inferred_question=turn.get("inferred_question", ""),
+        columns_json=json.dumps(turn.get("columns", [])),
+        rows_json=json.dumps(turn.get("rows", [])),
     )
 
 
@@ -980,6 +1140,15 @@ def _render_turn(turn: dict, form_key: str) -> None:
                     f"<strong>{inferred_label}</strong> {escaped_inferred}</div>",
                     unsafe_allow_html=True,
                 )
+                verdict = turn.get("verdict", "No")
+                discrepancy_detail = turn.get("discrepancy_detail", "None")
+                if verdict == "Yes":
+                    st.warning(
+                        f"Intent mismatch detected: {discrepancy_detail}",
+                        icon="⚠️",
+                    )
+                else:
+                    st.success(_t("Intent matches your question.", lang), icon="✓")
     elif turn.get("assumptions"):
         with st.expander(_t("Details", lang)):
             st.caption(f"**{_t('Assumptions', lang)}**")
@@ -1061,6 +1230,13 @@ with st.sidebar:
                 "insight": t["insight"],
                 "sql": t.get("sql", ""),
                 "assumptions": t.get("assumptions", []),
+                "inferred_question": t.get("inferred_question", ""),
+                "verdict": t.get("verdict", "No"),
+                "discrepancy_detail": t.get("discrepancy_detail", "None"),
+                "request_id": t.get("request_id", ""),
+                "cost_usd": t.get("cost_usd", 0.0),
+                "bytes_scanned": t.get("bytes_scanned", 0),
+                "timestamp": t.get("timestamp", ""),
             }
             for t in st.session_state.history
         ]
@@ -1104,6 +1280,9 @@ with st.sidebar:
                     "rows": [],
                     "chart_height": 0,
                     "timestamp": "",
+                    "request_id": "",
+                    "verdict": "No",
+                    "discrepancy_detail": "None",
                 }
                 for t in imported
             ]
@@ -1256,6 +1435,9 @@ if question:
                 "rows": turn_data.get("rows", []),
                 "chart_height": turn_data.get("chart_height", 400),
                 "timestamp": now_str,  # #12: stored so card header shows it on replay
+                "request_id": turn_data.get("request_id", ""),
+                "verdict": turn_data.get("verdict", "No"),
+                "discrepancy_detail": turn_data.get("discrepancy_detail", "None"),
             }
             _render_turn(turn, form_key="current")
             st.session_state.history.append(turn)

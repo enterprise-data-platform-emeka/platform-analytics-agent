@@ -417,3 +417,38 @@ def build_insight_messages(
         f"Write a 2-3 sentence insight that directly answers the question."
     )
     return [{"role": "user", "content": content}]
+
+
+# ---------------------------------------------------------------------------
+# System prompt and message builders — verdict computation
+# ---------------------------------------------------------------------------
+
+VERDICT_SYSTEM_PROMPT: Final[str] = """\
+You compare a user's original business question with an AI's interpretation \
+of a SQL query.
+
+Output EXACTLY two lines — no other text:
+Line 1: 'No' if both have the same business intent. 'Yes' if they meaningfully differ.
+Line 2: If 'Yes', one sentence describing what differs. If 'No', write 'None'.
+"""
+
+
+def build_verdict_messages(
+    original_question: str,
+    inferred_question: str,
+) -> list[dict[str, str]]:
+    """Build messages for the verdict Claude call.
+
+    Args:
+        original_question: The raw user question.
+        inferred_question: Claude's independent inference from the SQL only.
+
+    Returns:
+        Messages list for a single-turn verdict call.
+    """
+    content = (
+        f"Original question: {original_question}\n\n"
+        f"SQL interpretation: {inferred_question}\n\n"
+        f"Do they have the same business intent?"
+    )
+    return [{"role": "user", "content": content}]
