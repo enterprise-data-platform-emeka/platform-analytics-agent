@@ -493,18 +493,154 @@ st.set_page_config(
 st.markdown(
     """
 <style>
+/* ── Reset Streamlit chrome ─────────────────────────────────────────────── */
+header[data-testid="stHeader"]  { display: none !important; }
+[data-testid="stToolbar"]        { display: none !important; }
+[data-testid="stDecoration"]     { display: none !important; }
+#MainMenu                        { display: none !important; }
+footer                           { display: none !important; }
+
+/* ── Global typography ──────────────────────────────────────────────────── */
+html, body, [class*="css"] {
+    font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+}
+
+/* ── Branded page header ────────────────────────────────────────────────── */
+.edp-header {
+    background: linear-gradient(135deg, #0f172a 0%, #1A5276 100%);
+    border-radius: 10px;
+    padding: 20px 28px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+}
+.edp-header-logo {
+    width: 44px;
+    height: 44px;
+    background: rgba(255,255,255,0.12);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    flex-shrink: 0;
+}
+.edp-header-text h1 {
+    color: #ffffff !important;
+    font-size: 22px !important;
+    font-weight: 700 !important;
+    margin: 0 0 2px 0 !important;
+    letter-spacing: -0.3px;
+}
+.edp-header-text p {
+    color: #94a3b8 !important;
+    font-size: 13px !important;
+    margin: 0 !important;
+}
+.edp-header-badge {
+    margin-left: auto;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: #cbd5e1 !important;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 4px 10px;
+    border-radius: 20px;
+    white-space: nowrap;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+[data-testid="stSidebar"] {
+    background: #0f172a !important;
+    border-right: 1px solid #1e293b !important;
+}
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3,
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] .stCaption,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
+    color: #cbd5e1 !important;
+}
+[data-testid="stSidebar"] .stButton > button {
+    background: #1e293b !important;
+    border: 1px solid #334155 !important;
+    color: #e2e8f0 !important;
+    border-radius: 6px !important;
+    font-size: 13px !important;
+    transition: background 0.15s;
+}
+[data-testid="stSidebar"] .stButton > button:hover {
+    background: #263548 !important;
+    border-color: #475569 !important;
+}
+[data-testid="stSidebar"] hr {
+    border-color: #1e293b !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] {
+    background: #1e293b !important;
+    border-color: #334155 !important;
+}
+
+/* ── Q&A cards (bordered containers) ────────────────────────────────────── */
+[data-testid="stVerticalBlockBorderWrapper"] {
+    border: none !important;
+    border-left: 4px solid #1A5276 !important;
+    border-radius: 0 8px 8px 0 !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.07), 0 0 0 1px rgba(0,0,0,0.04) !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin-bottom: 14px !important;
+}
+
+/* ── Card header ─────────────────────────────────────────────────────────── */
+.turn-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+.turn-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: #1A5276;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    background: #EBF5FB;
+    padding: 2px 8px;
+    border-radius: 3px;
+}
+.turn-time {
+    font-size: 11px;
+    color: #94a3b8;
+    font-variant-numeric: tabular-nums;
+}
+.turn-question {
+    font-size: 17px;
+    font-weight: 600;
+    color: #0f172a;
+    margin: 8px 0 0 0;
+    line-height: 1.4;
+}
+
+/* ── Insight card ────────────────────────────────────────────────────────── */
 .insight-card {
     background: #f0f7ff;
     border-left: 4px solid #2563EB;
     padding: 14px 18px;
     border-radius: 0 6px 6px 0;
     font-size: 15px;
-    line-height: 1.7;
+    line-height: 1.75;
     margin: 4px 0 14px 0;
     color: #1e293b;
 }
 
-/* #11: Visible status badge during query processing. */
+/* ── Status badge ────────────────────────────────────────────────────────── */
 .status-badge {
     background: #eff6ff;
     border: 1px solid #bfdbfe;
@@ -515,33 +651,106 @@ st.markdown(
     margin: 6px 0;
 }
 
-/* #1: Card header metadata row. */
-.turn-meta {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 6px;
+/* ── Tabs ────────────────────────────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+    border-bottom: 2px solid #e2e8f0 !important;
+    gap: 4px;
 }
-.turn-label {
-    font-size: 11px;
-    font-weight: 700;
-    color: #64748b;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+.stTabs [data-baseweb="tab"] {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: #64748b !important;
+    padding: 8px 16px !important;
+    border-bottom: 2px solid transparent !important;
+    transition: color 0.15s !important;
 }
-.turn-time {
-    font-size: 11px;
-    color: #94a3b8;
+.stTabs [data-baseweb="tab"][aria-selected="true"] {
+    color: #1A5276 !important;
+    border-bottom: 2px solid #1A5276 !important;
+    background: transparent !important;
 }
-.turn-question {
-    font-size: 16px;
-    font-weight: 600;
-    color: #0f172a;
-    margin: 4px 0 0 0;
+.stTabs [data-baseweb="tab-highlight"] { display: none !important; }
+
+/* ── Metrics ─────────────────────────────────────────────────────────────── */
+[data-testid="stMetricValue"] {
+    font-size: 22px !important;
+    font-weight: 700 !important;
+    color: #0f172a !important;
+}
+[data-testid="stMetricLabel"] {
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    color: #64748b !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.06em !important;
+}
+[data-testid="metric-container"] {
+    background: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 8px !important;
+    padding: 12px 16px !important;
 }
 
-.streamlit-expanderContent { padding: 8px 12px !important; }
-[data-testid="stMetricLabel"] { font-size: 12px !important; }
+/* ── Expander ────────────────────────────────────────────────────────────── */
+[data-testid="stExpander"] {
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 8px !important;
+    background: #fafafa !important;
+}
+[data-testid="stExpander"] summary {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: #475569 !important;
+}
+
+/* ── Code blocks inside expander ─────────────────────────────────────────── */
+[data-testid="stExpander"] [data-testid="stCode"] {
+    border-radius: 6px !important;
+}
+
+/* ── Download / primary buttons ──────────────────────────────────────────── */
+[data-testid="stDownloadButton"] > button,
+.stButton > button[kind="primary"] {
+    background: #1A5276 !important;
+    border: none !important;
+    color: #ffffff !important;
+    font-weight: 600 !important;
+    border-radius: 6px !important;
+}
+[data-testid="stDownloadButton"] > button:hover,
+.stButton > button[kind="primary"]:hover {
+    background: #154360 !important;
+}
+
+/* ── Example question buttons ────────────────────────────────────────────── */
+[data-testid="stMainBlockContainer"] .stButton > button {
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 8px !important;
+    font-size: 13px !important;
+    color: #334155 !important;
+    background: #ffffff !important;
+    text-align: left !important;
+    transition: border-color 0.15s, background 0.15s !important;
+}
+[data-testid="stMainBlockContainer"] .stButton > button:hover {
+    border-color: #1A5276 !important;
+    background: #EBF5FB !important;
+    color: #1A5276 !important;
+}
+
+/* ── Chat input ──────────────────────────────────────────────────────────── */
+[data-testid="stChatInput"] {
+    border: 2px solid #cbd5e1 !important;
+    border-radius: 10px !important;
+    transition: border-color 0.15s !important;
+}
+[data-testid="stChatInput"]:focus-within {
+    border-color: #1A5276 !important;
+    box-shadow: 0 0 0 3px rgba(26,82,118,0.12) !important;
+}
+
+/* ── Divider ─────────────────────────────────────────────────────────────── */
+hr { border-color: #e2e8f0 !important; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -826,7 +1035,7 @@ def _cached_build_pdf(
             self.set_text_color(148, 163, 184)
             self.set_x(self.l_margin)
             self.cell(col_w, 5, f"Data as of {self._gen}", align="L")
-            self.cell(col_w, 5, "Confidential \u2014 Internal Use Only", align="C")
+            self.cell(col_w, 5, "Confidential - Internal Use Only", align="C")
             self.cell(col_w, 5, f"Page {self.page_no()} of {{nb}}", align="R")
             self.set_text_color(0, 0, 0)
 
@@ -1195,12 +1404,22 @@ def _load_examples() -> list[str]:
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     sl = _session_language()
-    st.header(_t("Session", sl))
     n = len(st.session_state.history)
-    # #9: No session ID — it means nothing to a stakeholder.
-    # #12: Show session start time and question count instead.
-    st.caption(f"{_t('Started at', sl)} {st.session_state.session_start}")
-    st.caption(_t_questions_answered(n, sl))
+    st.markdown(
+        f"""
+<div style="padding:6px 0 18px 0;">
+  <div style="font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;
+              letter-spacing:0.12em;margin-bottom:12px;">Session</div>
+  <div style="font-size:13px;color:#94a3b8;margin-bottom:4px;">
+    Started at <strong style="color:#cbd5e1">{st.session_state.session_start}</strong>
+  </div>
+  <div style="font-size:13px;color:#94a3b8;">
+    <strong style="color:#cbd5e1">{n}</strong> question{"s" if n != 1 else ""} answered
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
     # #10: Confirm before wiping the session. Accidental click on "Start new
     # session" would previously clear everything with no way to recover.
@@ -1294,13 +1513,25 @@ with st.sidebar:
 
 # ── Page header ───────────────────────────────────────────────────────────────
 hl = _session_language()
-st.title("📊 EDP Analytics Agent")
-st.caption(
+_subtitle = html_lib.escape(
     _t(
         "Ask questions about your Gold data in any language. "
         "Follow-up questions remember prior context.",
         hl,
     )
+)
+st.markdown(
+    f"""
+<div class="edp-header">
+  <div class="edp-header-logo">&#x1F4CA;</div>
+  <div class="edp-header-text">
+    <h1>EDP Analytics Agent</h1>
+    <p>{_subtitle}</p>
+  </div>
+  <div class="edp-header-badge">Gold Layer &nbsp;&#x25CF;&nbsp; Live</div>
+</div>
+""",
+    unsafe_allow_html=True,
 )
 
 # ── Empty state — example questions ──────────────────────────────────────────
