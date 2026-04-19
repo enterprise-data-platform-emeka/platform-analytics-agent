@@ -1262,7 +1262,38 @@ def _render_turn(turn: dict, form_key: str) -> None:
                 components.html(turn["html_chart"], height=chart_h + 20, scrolling=False)
             with tab_table:
                 df = pd.DataFrame(turn["rows"])
-                st.dataframe(df, use_container_width=True)
+                styled = df.style.set_table_styles(
+                    [
+                        {
+                            "selector": "thead th",
+                            "props": [
+                                ("background-color", "#4B5320"),
+                                ("color", "white"),
+                                ("font-weight", "600"),
+                                ("font-size", "12px"),
+                                ("letter-spacing", "0.04em"),
+                                ("border-bottom", "2px solid #3A4118"),
+                            ],
+                        },
+                        {
+                            "selector": "tbody tr:nth-child(even)",
+                            "props": [("background-color", "#F3F4EC")],
+                        },
+                        {
+                            "selector": "tbody tr:hover",
+                            "props": [("background-color", "#e8ebd8")],
+                        },
+                        {
+                            "selector": "td",
+                            "props": [
+                                ("font-size", "13px"),
+                                ("color", "#1e293b"),
+                                ("border-bottom", "1px solid #e2e8f0"),
+                            ],
+                        },
+                    ]
+                )
+                st.dataframe(styled, use_container_width=True)
         else:
             components.html(turn["html_chart"], height=chart_h + 20, scrolling=False)
 
