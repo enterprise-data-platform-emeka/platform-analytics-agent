@@ -1237,6 +1237,41 @@ def _build_pdf(turn: dict) -> bytes:
     )
 
 
+def _branded_table_html(df: pd.DataFrame) -> str:
+    """Render a DataFrame as a branded HTML table matching the EDP olive theme.
+
+    Used instead of st.dataframe + pandas Styler because Styler CSS (especially
+    thead background) is not reliably applied across Streamlit versions.
+    """
+    th_style = (
+        "background:#4B5320;color:white;padding:8px 12px;"
+        "font-size:12px;font-weight:600;letter-spacing:0.04em;"
+        "border-bottom:2px solid #3A4118;text-align:left;white-space:nowrap;"
+    )
+    td_style_base = "padding:8px 12px;font-size:13px;color:#1e293b;border-bottom:1px solid #e2e8f0;"
+    row_bg = ("#F3F4EC", "#ffffff")
+
+    headers = "".join(
+        f'<th style="{th_style}">{html_lib.escape(str(col))}</th>' for col in df.columns
+    )
+    rows_html = ""
+    for i, (_, row) in enumerate(df.iterrows()):
+        bg = row_bg[i % 2]
+        cells = "".join(
+            f'<td style="{td_style_base}background:{bg};">{html_lib.escape(str(v))}</td>'
+            for v in row
+        )
+        rows_html += f"<tr>{cells}</tr>"
+
+    return (
+        '<div style="overflow-x:auto;border-radius:8px;border:1px solid #e2e8f0;">'
+        f'<table style="width:100%;border-collapse:collapse;">'
+        f"<thead><tr>{headers}</tr></thead>"
+        f"<tbody>{rows_html}</tbody>"
+        "</table></div>"
+    )
+
+
 def _render_turn(turn: dict, form_key: str) -> None:
     """Render one Q&A turn's answer content. Called inside a turn card."""
     lang = _detect_language(turn["question"])
@@ -1261,38 +1296,7 @@ def _render_turn(turn: dict, form_key: str) -> None:
                 components.html(turn["html_chart"], height=chart_h + 20, scrolling=False)
             with tab_table:
                 df = pd.DataFrame(turn["rows"])
-                styled = df.style.set_table_styles(
-                    [
-                        {
-                            "selector": "thead th",
-                            "props": [
-                                ("background-color", "#4B5320"),
-                                ("color", "white"),
-                                ("font-weight", "600"),
-                                ("font-size", "12px"),
-                                ("letter-spacing", "0.04em"),
-                                ("border-bottom", "2px solid #3A4118"),
-                            ],
-                        },
-                        {
-                            "selector": "tbody tr:nth-child(even)",
-                            "props": [("background-color", "#F3F4EC")],
-                        },
-                        {
-                            "selector": "tbody tr:hover",
-                            "props": [("background-color", "#e8ebd8")],
-                        },
-                        {
-                            "selector": "td",
-                            "props": [
-                                ("font-size", "13px"),
-                                ("color", "#1e293b"),
-                                ("border-bottom", "1px solid #e2e8f0"),
-                            ],
-                        },
-                    ]
-                )
-                st.dataframe(styled, use_container_width=True)
+                st.markdown(_branded_table_html(df), unsafe_allow_html=True)
         else:
             components.html(turn["html_chart"], height=chart_h + 20, scrolling=False)
 

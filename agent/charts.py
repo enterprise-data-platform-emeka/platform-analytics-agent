@@ -530,8 +530,19 @@ class ChartGenerator:
             max_i = int(np.argmax(y_values))
             min_i = int(np.argmin(y_values))
             monetary = _is_monetary(y_col)
-            for idx, offset in [(max_i, 22), (min_i, -22)]:
+            y_min_val = min(y_values)
+            y_range = max(y_values) - y_min_val or 1.0
+            for idx, default_offset in [(max_i, 22), (min_i, -22)]:
                 val = y_values[idx]
+                # Flip label direction when near the chart edge to avoid title overlap.
+                # Peak in top 25% of range -> label below; valley in bottom 25% -> label above.
+                normalized = (val - y_min_val) / y_range
+                if default_offset > 0 and normalized > 0.75:
+                    offset = -22
+                elif default_offset < 0 and normalized < 0.25:
+                    offset = 22
+                else:
+                    offset = default_offset
                 lbl = f"${val:,.0f}" if monetary else f"{val:,.0f}"
                 ax.annotate(
                     lbl,
