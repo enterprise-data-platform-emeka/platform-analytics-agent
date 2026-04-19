@@ -36,6 +36,7 @@ import glob as _glob
 import logging
 import os as _os
 from dataclasses import dataclass
+from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
@@ -149,7 +150,7 @@ def _catmull_rom_smooth(
     x_indices: list[int],
     y_values: list[float],
     n_points: int = 300,
-) -> tuple:
+) -> tuple[Any, Any]:
     """Return smoothed (x, y) arrays using Catmull-Rom spline interpolation.
 
     Passes through every data point. Requires numpy only — no scipy.
