@@ -1020,7 +1020,6 @@ def _cached_build_pdf(
     from fpdf import FPDF
 
     lang = _detect_language(question)
-    assumptions: list[str] = json.loads(assumptions_json) if assumptions_json else []
     columns: list[str] = json.loads(columns_json) if columns_json else []
     rows: list[dict] = json.loads(rows_json) if rows_json else []
 
