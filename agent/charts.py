@@ -119,8 +119,83 @@ _METRIC_HINTS: frozenset[str] = frozenset(
     }
 )
 
+# High-priority monetary hints — always preferred over count/quantity columns.
+# When a result has both total_revenue and total_customers, revenue wins.
+_PRIORITY_METRIC_HINTS: frozenset[str] = frozenset(
+    {"revenue", "amount", "sales", "profit", "income", "spend", "price", "value", "payment"}
+)
+
+# Count-like hints — deprioritised when a monetary column is also available.
+_COUNT_HINTS: frozenset[str] = frozenset(
+    {"count", "customers", "users", "visitors", "quantity", "qty", "num_", "number"}
+)
+
 # EDP brand colour used for matplotlib charts.
 _BRAND_COLOUR = "#4B5320"  # EDP army olive (primary)
+
+# Column name hints that suggest monetary values (used to format callout labels with $).
+_MONETARY_HINTS: frozenset[str] = frozenset(
+    {"revenue", "amount", "sales", "profit", "spend", "cost", "price", "total", "income"}
+)
+
+
+def _is_monetary(col: str) -> bool:
+    """Return True if the column name suggests a monetary metric."""
+    col_lower = col.lower()
+    return any(hint in col_lower for hint in _MONETARY_HINTS)
+
+
+def _catmull_rom_smooth(
+    x_indices: list[int],
+    y_values: list[float],
+    n_points: int = 300,
+) -> tuple:
+    """Return smoothed (x, y) arrays using Catmull-Rom spline interpolation.
+
+    Passes through every data point. Requires numpy only — no scipy.
+    Falls back to straight-line arrays when fewer than 3 points are given.
+    """
+    import numpy as np
+
+    n = len(x_indices)
+    if n < 3:
+        return np.array(x_indices, float), np.array(y_values, float)
+
+    # Pad endpoints by reflecting so the spline has well-defined tangents at both ends.
+    xs = [2 * x_indices[0] - x_indices[1]] + list(x_indices) + [2 * x_indices[-1] - x_indices[-2]]
+    ys = [2 * y_values[0] - y_values[1]] + list(y_values) + [2 * y_values[-1] - y_values[-2]]
+
+    result_x: list[float] = []
+    result_y: list[float] = []
+    segments = n - 1
+    pts_per_seg = max(2, n_points // segments)
+
+    for i in range(1, n):
+        p0x, p0y = xs[i - 1], ys[i - 1]
+        p1x, p1y = xs[i], ys[i]
+        p2x, p2y = xs[i + 1], ys[i + 1]
+        p3x, p3y = xs[i + 2], ys[i + 2]
+
+        is_last = i == n - 1
+        for t in np.linspace(0, 1, pts_per_seg, endpoint=is_last):
+            t2 = t * t
+            t3 = t2 * t
+            rx = 0.5 * (
+                (2 * p1x)
+                + (-p0x + p2x) * t
+                + (2 * p0x - 5 * p1x + 4 * p2x - p3x) * t2
+                + (-p0x + 3 * p1x - 3 * p2x + p3x) * t3
+            )
+            ry = 0.5 * (
+                (2 * p1y)
+                + (-p0y + p2y) * t
+                + (2 * p0y - 5 * p1y + 4 * p2y - p3y) * t2
+                + (-p0y + 3 * p1y - 3 * p2y + p3y) * t3
+            )
+            result_x.append(rx)
+            result_y.append(ry)
+
+    return np.array(result_x), np.array(result_y)
 
 
 def _display_label(value: str) -> str:
@@ -300,19 +375,32 @@ class ChartGenerator:
     def _best_metric_column(numeric_cols: list[str]) -> str:
         """Pick the most likely metric column from a list of numeric columns.
 
-        Iterates in reverse so the last matching column wins. Claude puts
-        general counts (total_orders, rank) early in the SELECT list and
-        the specific requested metric (avg_revenue_per_unit) last. Reversing
-        means a specific metric beats a general one when both match a hint.
+        Three-pass priority so that a revenue column always beats a customer
+        count column when both are present (e.g. total_revenue vs total_customers):
+
+          Pass 1 — monetary/value hints (revenue, amount, sales, profit, payment...)
+          Pass 2 — any metric hint that is NOT a count/quantity hint
+          Pass 3 — any metric hint (last resort before raw fallback)
+
+        Each pass iterates in reverse so the last matching column wins when
+        multiple columns tie within the same priority tier. Claude puts
+        general counts early in the SELECT list and specific metrics last.
 
         Falls back to the last numeric column — identifiers appear first,
         metrics appear last.
         """
         for col in reversed(numeric_cols):
-            col_lower = col.lower()
-            if any(hint in col_lower for hint in _METRIC_HINTS):
+            if any(hint in col.lower() for hint in _PRIORITY_METRIC_HINTS):
                 return col
-        # Last column is the safest fallback: IDs come first, metrics come last.
+        for col in reversed(numeric_cols):
+            col_lower = col.lower()
+            if any(hint in col_lower for hint in _METRIC_HINTS) and not any(
+                h in col_lower for h in _COUNT_HINTS
+            ):
+                return col
+        for col in reversed(numeric_cols):
+            if any(hint in col.lower() for hint in _METRIC_HINTS):
+                return col
         return numeric_cols[-1]
 
     # ── Rendering ─────────────────────────────────────────────────────────────
@@ -420,11 +508,55 @@ class ChartGenerator:
         y_col = non_time_numeric[0]
         y_values = [float(row.get(y_col, 0) or 0) for row in result.rows]
 
+        import numpy as np
+
+        x_indices = list(range(len(x_labels)))
+        x_smooth, y_smooth = _catmull_rom_smooth(x_indices, y_values)
+
         fig, ax = plt.subplots(figsize=(12, 5))
-        ax.plot(x_labels, y_values, marker="o", color=_BRAND_COLOUR, linewidth=2)
+
+        # Gradient area fill under the curve.
+        ax.fill_between(x_smooth, y_smooth, alpha=0.13, color=_BRAND_COLOUR)
+
+        # Smooth line.
+        ax.plot(x_smooth, y_smooth, color=_BRAND_COLOUR, linewidth=2.5)
+
+        # Data point markers on top of the smooth line.
+        ax.scatter(x_indices, y_values, color=_BRAND_COLOUR, s=40, zorder=5)
+
+        # Callout pill labels for the peak and valley.
+        if len(y_values) >= 2:
+            max_i = int(np.argmax(y_values))
+            min_i = int(np.argmin(y_values))
+            monetary = _is_monetary(y_col)
+            for idx, offset in [(max_i, 22), (min_i, -22)]:
+                val = y_values[idx]
+                lbl = f"${val:,.0f}" if monetary else f"{val:,.0f}"
+                ax.annotate(
+                    lbl,
+                    xy=(idx, val),
+                    xytext=(0, offset),
+                    textcoords="offset points",
+                    ha="center",
+                    va="bottom" if offset > 0 else "top",
+                    fontsize=9,
+                    color="white",
+                    fontweight="bold",
+                    bbox={"boxstyle": "round,pad=0.35", "fc": _BRAND_COLOUR, "ec": "none"},
+                    arrowprops={"arrowstyle": "-", "color": _BRAND_COLOUR, "lw": 1},
+                )
+
+        # Axis labels and ticks.
+        ax.set_xticks(x_indices)
+        ax.set_xticklabels(x_labels, rotation=45, ha="right")
         ax.set_xlabel(x_title)
         ax.set_ylabel(y_col.replace("_", " ").title())
-        ax.tick_params(axis="x", rotation=45)
+
+        # Clean up chart borders.
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.grid(axis="y", color="#e0e0e0", linewidth=0.7, linestyle="--")
+
         if title:
             ax.set_title(title, fontsize=11, pad=12)
         fig.tight_layout()
@@ -565,24 +697,65 @@ def _plotly_line(
     y_col: str,
     title: str = "",
 ) -> str:
-    """Return a Plotly line chart as an HTML fragment."""
+    """Return a Plotly line chart as an HTML fragment.
+
+    Uses spline smoothing, a translucent area fill, and pill callout labels on
+    the peak and valley data points.
+    """
     import plotly.graph_objects as go
+
+    monetary = _is_monetary(y_col)
+
+    # Build callout annotations for peak and valley.
+    annotations = []
+    if len(y_values) >= 2:
+        max_i = y_values.index(max(y_values))
+        min_i = y_values.index(min(y_values))
+        for idx, ay_offset in [(max_i, -40), (min_i, 40)]:
+            val = y_values[idx]
+            lbl = f"${val:,.0f}" if monetary else f"{val:,.0f}"
+            annotations.append(
+                {
+                    "x": x_labels[idx],
+                    "y": val,
+                    "text": f"<b>·{lbl}</b>",
+                    "showarrow": True,
+                    "arrowhead": 0,
+                    "arrowwidth": 1.5,
+                    "arrowcolor": _BRAND_COLOUR,
+                    "ax": 0,
+                    "ay": ay_offset,
+                    "bgcolor": _BRAND_COLOUR,
+                    "font": {"color": "white", "size": 11},
+                    "borderpad": 5,
+                    "bordercolor": _BRAND_COLOUR,
+                    "borderwidth": 0,
+                    "opacity": 1.0,
+                }
+            )
 
     fig = go.Figure(
         go.Scatter(
             x=x_labels,
             y=y_values,
             mode="lines+markers",
-            line={"color": _BRAND_COLOUR, "width": 2},
+            line={"color": _BRAND_COLOUR, "width": 2.5, "shape": "spline", "smoothing": 1.0},
+            fill="tozeroy",
+            fillcolor="rgba(75, 83, 32, 0.10)",
+            marker={"size": 6, "color": _BRAND_COLOUR},
         )
     )
     fig.update_layout(
         title=title or None,
         xaxis_title=x_title,
-        xaxis={"type": "category"},
+        xaxis={"type": "category", "showgrid": True, "gridcolor": "rgba(0,0,0,0.07)"},
         yaxis_title=y_col.replace("_", " ").title(),
+        yaxis={"showgrid": True, "gridcolor": "rgba(0,0,0,0.07)"},
         margin={"l": 60, "r": 20, "t": 50 if title else 20, "b": 60},
-        height=400,
+        height=420,
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        annotations=annotations,
     )
     return str(fig.to_html(full_html=False, include_plotlyjs="cdn"))
 

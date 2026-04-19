@@ -835,12 +835,27 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
         except (ValueError, TypeError):
             return str(val)
 
+    # Priority hints for picking the primary KPI metric — mirrors charts.py logic.
+    _kpi_priority = {"revenue", "amount", "sales", "profit", "income", "spend", "price", "value", "payment"}
+    _kpi_counts = {"count", "customers", "users", "visitors", "quantity", "qty"}
+    _kpi_any = {"revenue", "total", "amount", "sales", "profit", "sum", "value", "orders", "avg", "average"}
+
+    def _pick_metric(cols: list[str]) -> str:
+        for c in reversed(cols):
+            if any(h in c.lower() for h in _kpi_priority):
+                return c
+        for c in reversed(cols):
+            if any(h in c.lower() for h in _kpi_any) and not any(h in c.lower() for h in _kpi_counts):
+                return c
+        for c in reversed(cols):
+            if any(h in c.lower() for h in _kpi_any):
+                return c
+        return cols[-1]
+
     tiles: list[tuple[str, str, str]] = []
 
     if cat_cols and numeric_cols:
-        # Use the LAST numeric column as the primary metric — queries order with
-        # the derived/computed metric last (e.g. revenue_per_unit after total_revenue).
-        metric_col = numeric_cols[-1]
+        metric_col = _pick_metric(numeric_cols)
         cat_col = cat_cols[0]
         metric_label = metric_col.replace("_", " ").title()
         top_cat = str(rows[0].get(cat_col, ""))
@@ -884,6 +899,9 @@ def _plain_english_assumption(text: str) -> str:
       5. Replace remaining snake_case identifiers (word_word) with Title Case words
       6. Normalise whitespace
     """
+    # 0. Replace em dash (—) and pseudo-em-dash ( -- ) with a comma+space.
+    text = re.sub(r"\s*\u2014\s*", ", ", text)
+    text = re.sub(r"\s+--\s+", ", ", text)
     # 1. Strip markdown bold/italic (up to triple asterisk)
     text = re.sub(r"\*{1,3}([^*\n]+)\*{1,3}", r"\1", text)
     # 2. Strip backtick wrappers
@@ -1183,10 +1201,16 @@ def _cached_build_pdf(
     pdf.set_fill_color(255, 255, 255)
 
     # ════════════════════════════════════════════════════════════════════════
-    # PAGE 2 — Methodology (plain-English assumptions, no SQL, no tech names)
+    # METHODOLOGY — follows insight on the same page when space allows,
+    # otherwise starts a new page. Avoids near-empty overflow pages when
+    # the insight runs just a few lines long on a second page.
     # ════════════════════════════════════════════════════════════════════════
     if assumptions:
-        pdf.add_page()
+        remaining_mm = pdf.h - pdf.get_y() - pdf.b_margin
+        if remaining_mm < 55:
+            pdf.add_page()
+        else:
+            pdf.ln(10)
 
         # ── Methodology — plain-English rewrite of assumptions ───────────────
         pdf.set_font(font_name, "B", 11)
