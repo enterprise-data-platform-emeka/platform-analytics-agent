@@ -836,16 +836,39 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
             return str(val)
 
     # Priority hints for picking the primary KPI metric — mirrors charts.py logic.
-    _kpi_priority = {"revenue", "amount", "sales", "profit", "income", "spend", "price", "value", "payment"}
+    _kpi_priority = {
+        "revenue",
+        "amount",
+        "sales",
+        "profit",
+        "income",
+        "spend",
+        "price",
+        "value",
+        "payment",
+    }
     _kpi_counts = {"count", "customers", "users", "visitors", "quantity", "qty"}
-    _kpi_any = {"revenue", "total", "amount", "sales", "profit", "sum", "value", "orders", "avg", "average"}
+    _kpi_any = {
+        "revenue",
+        "total",
+        "amount",
+        "sales",
+        "profit",
+        "sum",
+        "value",
+        "orders",
+        "avg",
+        "average",
+    }
 
     def _pick_metric(cols: list[str]) -> str:
         for c in reversed(cols):
             if any(h in c.lower() for h in _kpi_priority):
                 return c
         for c in reversed(cols):
-            if any(h in c.lower() for h in _kpi_any) and not any(h in c.lower() for h in _kpi_counts):
+            if any(h in c.lower() for h in _kpi_any) and not any(
+                h in c.lower() for h in _kpi_counts
+            ):
                 return c
         for c in reversed(cols):
             if any(h in c.lower() for h in _kpi_any):
