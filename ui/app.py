@@ -1007,11 +1007,11 @@ def _cached_build_pdf(
     columns_json: str,
     rows_json: str,
 ) -> bytes:
-    """Build an enterprise-grade two-page PDF stakeholder report.
+    """Build a single-page stakeholder PDF report.
 
-    Page 1: Header (logo + name + classification) | Question | KPI tiles |
-            Chart | Key Finding | Footer.
-    Page 2: Header | Methodology (plain-English assumptions) | Footer.
+    Header (logo + name + classification) | Question | KPI tiles |
+    Chart | Key Finding | Footer.
+    Methodology is written to the engineer log, not the PDF.
     """
     import datetime
     import io
@@ -1222,38 +1222,6 @@ def _cached_build_pdf(
     pdf.set_fill_color(75, 83, 32)  # #4B5320 army olive
     pdf.rect(pdf.l_margin, y_before, 3, y_after - y_before, style="F")
     pdf.set_fill_color(255, 255, 255)
-
-    # ════════════════════════════════════════════════════════════════════════
-    # METHODOLOGY — follows insight on the same page when space allows,
-    # otherwise starts a new page. Avoids near-empty overflow pages when
-    # the insight runs just a few lines long on a second page.
-    # ════════════════════════════════════════════════════════════════════════
-    if assumptions:
-        remaining_mm = pdf.h - pdf.get_y() - pdf.b_margin
-        if remaining_mm < 55:
-            pdf.add_page()
-        else:
-            pdf.ln(10)
-
-        # ── Methodology — plain-English rewrite of assumptions ───────────────
-        pdf.set_font(font_name, "B", 11)
-        pdf.set_text_color(100, 116, 139)
-        pdf.cell(W, 5, "METHODOLOGY", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_draw_color(226, 232, 240)
-        pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + W, pdf.get_y())
-        pdf.ln(4)
-        pdf.set_font(font_name, "", 11)
-        pdf.set_text_color(30, 41, 59)
-        y_before_a = pdf.get_y()
-        for item in assumptions:
-            clean = _plain_english_assumption(item)
-            pdf.set_x(pdf.l_margin + 6)
-            pdf.multi_cell(W - 6, 7, f"\u2022 {clean}", align="L")
-            pdf.ln(1)
-        y_after_a = pdf.get_y()
-        pdf.set_fill_color(75, 83, 32)  # #4B5320 army olive
-        pdf.rect(pdf.l_margin, y_before_a, 3, y_after_a - y_before_a, style="F")
-        pdf.set_fill_color(255, 255, 255)
 
     return bytes(pdf.output())
 

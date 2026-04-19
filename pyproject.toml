@@ -32,6 +32,7 @@ module = [
     "matplotlib.*",
     "moto.*",
     "fpdf.*",
+    "sqlparse.*",
 ]
 ignore_missing_imports = true
 

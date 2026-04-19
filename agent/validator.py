@@ -152,7 +152,7 @@ class SQLValidator:
             )
 
         stmt = statements[0]
-        stmt_type = stmt.get_type()  # type: ignore[no-untyped-call]
+        stmt_type = stmt.get_type()
 
         if stmt_type == "SELECT":
             return
