@@ -438,7 +438,7 @@ def _write_engineer_log(
                 "discrepancy_detail": discrepancy_detail,
                 "verdict": verdict,
                 "bytes_scanned": bytes_scanned,
-                "athena_cost_usd": athena_cost_usd,
+                "athena_cost_usd": f"{athena_cost_usd:.8f}",
                 "response_time_seconds": round(response_time_seconds, 3),
                 "athena_query_execution_id": athena_query_execution_id,
                 "sql_retry_count": sql_retry_count,
