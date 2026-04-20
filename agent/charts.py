@@ -131,6 +131,12 @@ _COUNT_HINTS: frozenset[str] = frozenset(
     {"count", "customers", "users", "visitors", "quantity", "qty", "num_", "number"}
 )
 
+# Rank/ordinal column name patterns — never chosen as the primary metric.
+# Checked via endswith("_rank") / endswith("_position") plus exact matches.
+_RANK_COL_EXACT: frozenset[str] = frozenset(
+    {"rank", "position", "pos", "row_num", "row_number", "rn", "ntile", "dense_rank"}
+)
+
 # EDP brand colour used for matplotlib charts.
 _BRAND_COLOUR = "#4B5320"  # EDP army olive (primary)
 
@@ -388,8 +394,27 @@ class ChartGenerator:
             return False
 
     @staticmethod
+    def _is_rank_col(col: str) -> bool:
+        """Return True if the column is a rank/ordinal position, not a metric.
+
+        Catches columns like revenue_rank, customer_rank, position, row_num.
+        These should never be used as the primary chart metric even when their
+        names contain monetary hints (e.g. 'revenue' inside 'revenue_rank').
+        """
+        col_l = col.lower()
+        return (
+            col_l in _RANK_COL_EXACT
+            or col_l.endswith("_rank")
+            or col_l.endswith("_position")
+            or col_l.endswith("_pos")
+        )
+
+    @staticmethod
     def _best_metric_column(numeric_cols: list[str]) -> str:
         """Pick the most likely metric column from a list of numeric columns.
+
+        Rank/ordinal columns (revenue_rank, position, row_num …) are excluded
+        first so that monetary-hint matching cannot accidentally pick them.
 
         Three-pass priority so that a revenue column always beats a customer
         count column when both are present (e.g. total_revenue vs total_customers):
@@ -402,22 +427,24 @@ class ChartGenerator:
         multiple columns tie within the same priority tier. Claude puts
         general counts early in the SELECT list and specific metrics last.
 
-        Falls back to the last numeric column — identifiers appear first,
-        metrics appear last.
+        Falls back to the last non-rank column, or the last column overall.
         """
-        for col in reversed(numeric_cols):
+        non_rank = [c for c in numeric_cols if not ChartGenerator._is_rank_col(c)]
+        candidates = non_rank if non_rank else numeric_cols
+
+        for col in reversed(candidates):
             if any(hint in col.lower() for hint in _PRIORITY_METRIC_HINTS):
                 return col
-        for col in reversed(numeric_cols):
+        for col in reversed(candidates):
             col_lower = col.lower()
             if any(hint in col_lower for hint in _METRIC_HINTS) and not any(
                 h in col_lower for h in _COUNT_HINTS
             ):
                 return col
-        for col in reversed(numeric_cols):
+        for col in reversed(candidates):
             if any(hint in col.lower() for hint in _METRIC_HINTS):
                 return col
-        return numeric_cols[-1]
+        return candidates[-1]
 
     # ── Rendering ─────────────────────────────────────────────────────────────
 
@@ -466,7 +493,10 @@ class ChartGenerator:
         import matplotlib.ticker as mticker
 
         _bar_monetary = _is_monetary(y_col)
-        fig, ax = plt.subplots(figsize=(10, max(4, len(labels) * 0.6)))
+        # Cap height at 7 inches so charts with many bars (e.g. 15 countries)
+        # still fit on a single PDF page alongside the summary and data snapshot.
+        fig_h = min(max(4, len(labels) * 0.6), 7.0)
+        fig, ax = plt.subplots(figsize=(10, fig_h))
         bars = ax.barh(labels, values, color=_BRAND_COLOUR)
         # Bar end labels formatted with $ and K/M.
         bar_labels = [_fmt_axis(v, _bar_monetary) for v in values]

@@ -889,19 +889,34 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
     }
     _time_col_hints = {"year", "month", "date", "week", "quarter", "period"}
 
+    _rank_exact = frozenset(
+        {"rank", "position", "pos", "row_num", "row_number", "rn", "ntile", "dense_rank"}
+    )
+
+    def _is_rank_col(c: str) -> bool:
+        cl = c.lower()
+        return (
+            cl in _rank_exact
+            or cl.endswith("_rank")
+            or cl.endswith("_position")
+            or cl.endswith("_pos")
+        )
+
     def _pick_metric(cols: list[str]) -> str:
-        for c in reversed(cols):
+        non_rank = [c for c in cols if not _is_rank_col(c)]
+        cands = non_rank if non_rank else cols
+        for c in reversed(cands):
             if any(h in c.lower() for h in _kpi_priority):
                 return c
-        for c in reversed(cols):
+        for c in reversed(cands):
             if any(h in c.lower() for h in _kpi_any) and not any(
                 h in c.lower() for h in _kpi_counts
             ):
                 return c
-        for c in reversed(cols):
+        for c in reversed(cands):
             if any(h in c.lower() for h in _kpi_any):
                 return c
-        return cols[-1]
+        return cands[-1]
 
     tiles: list[tuple[str, str, str, str]] = []
 
@@ -915,7 +930,11 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
         # so the MoM badge is consistent with the value displayed.
         display_row = rows[-1] if is_time_cat else rows[0]
         top_raw = str(display_row.get(cat_col, ""))
-        top_cat = _fmt_period(top_raw) if is_time_cat else top_raw
+        if is_time_cat:
+            top_cat = _fmt_period(top_raw)
+        else:
+            # Title-case database-stored lowercase values (e.g. "germany" → "Germany").
+            top_cat = top_raw.title() if top_raw == top_raw.lower() else top_raw
         top_val = _fmt(str(display_row.get(metric_col, "")))
 
         # MoM badge: most-recent vs prior period for time-series results.
@@ -1265,7 +1284,9 @@ def _cached_build_pdf(
                 return f"{int(f):,}"
             return f"{f:,.2f}"
         except (ValueError, TypeError):
-            return str(val)
+            s = str(val)
+            # Title-case lowercase database values (e.g. "germany" → "Germany").
+            return s.title() if s == s.lower() else s
 
     # Classify columns for snapshot table and period detection.
     _pdf_numeric: list[str] = []
