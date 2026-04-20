@@ -704,7 +704,7 @@ class ChartGenerator:
         colours = (_OLIVE_PALETTE * 2)[: len(labels)]
 
         fig, ax = plt.subplots(figsize=(8, 6))
-        pie_result = ax.pie(
+        _wedges, _texts, autotexts = ax.pie(  # type: ignore[misc]
             values,
             labels=labels,
             autopct="%1.1f%%",
@@ -713,7 +713,6 @@ class ChartGenerator:
             pctdistance=0.78,
             wedgeprops={"linewidth": 1.5, "edgecolor": "white"},
         )
-        autotexts = pie_result[2]  # (wedges, texts, autotexts) when autopct is set
         for at in autotexts:
             at.set_fontsize(9)
             at.set_color("white")
