@@ -2,7 +2,12 @@
 
 from unittest.mock import MagicMock, patch
 
-from agent.charts import _CHARTS_PREFIX, _PRESIGNED_URL_EXPIRY, ChartGenerator, ChartOutput
+from agent.charts import (
+    _CHARTS_PREFIX,
+    _PRESIGNED_URL_EXPIRY,
+    ChartGenerator,
+    ChartOutput,
+)
 from agent.config import AWSConfig
 from agent.executor import QueryResult
 
@@ -82,6 +87,40 @@ TEXT_ONLY_ROWS = [
     {"country": "Germany", "customer_frequency_band": "vip"},
     {"country": "France", "customer_frequency_band": "core"},
 ]
+
+# ── New chart type fixtures ────────────────────────────────────────────────────
+
+# Scatter: payment method volume vs revenue lost (correlation question)
+SCATTER_COLS = ["payment_method", "total_transactions", "revenue_lost"]
+SCATTER_ROWS = [
+    {"payment_method": "Credit Card", "total_transactions": "450", "revenue_lost": "12500"},
+    {"payment_method": "PayPal", "total_transactions": "230", "revenue_lost": "8200"},
+    {"payment_method": "Bank Transfer", "total_transactions": "180", "revenue_lost": "3100"},
+    {"payment_method": "Klarna", "total_transactions": "95", "revenue_lost": "4500"},
+    {"payment_method": "Apple Pay", "total_transactions": "310", "revenue_lost": "9800"},
+]
+SCATTER_QUESTION = "Is there a correlation between payment volume and revenue lost?"
+
+# Pie: payment method revenue share (proportion question, ≤8 rows)
+PIE_COLS = ["payment_method", "total_revenue"]
+PIE_ROWS = [
+    {"payment_method": "Credit Card", "total_revenue": "453702"},
+    {"payment_method": "PayPal", "total_revenue": "231654"},
+    {"payment_method": "Bank Transfer", "total_revenue": "156466"},
+    {"payment_method": "Klarna", "total_revenue": "89211"},
+    {"payment_method": "Apple Pay", "total_revenue": "73818"},
+]
+PIE_QUESTION = "What is the revenue breakdown by payment method?"
+
+# Multi-line: two metrics over the same time dimension
+MULTILINE_COLS = ["order_year", "order_month", "total_revenue", "total_orders"]
+MULTILINE_ROWS = [
+    {"order_year": "2025", "order_month": "1", "total_revenue": "80000", "total_orders": "120"},
+    {"order_year": "2025", "order_month": "2", "total_revenue": "95000", "total_orders": "145"},
+    {"order_year": "2025", "order_month": "3", "total_revenue": "110000", "total_orders": "160"},
+    {"order_year": "2025", "order_month": "4", "total_revenue": "88000", "total_orders": "132"},
+]
+MULTILINE_QUESTION = "Show me both revenue and order volume trends over the last year"
 
 
 # ── ChartOutput dataclass ──────────────────────────────────────────────────────
@@ -399,3 +438,291 @@ class TestNonFatalErrors:
         with patch.object(gen, "_render", side_effect=RuntimeError("render failed")):
             output = gen.generate(result, "Any question")
         assert isinstance(output, ChartOutput)
+
+
+# ── Scatter chart detection ────────────────────────────────────────────────────
+
+
+class TestScatterDetection:
+    def test_scatter_for_correlation_question(self) -> None:
+        result = _result(SCATTER_COLS, SCATTER_ROWS)
+        chart_type = ChartGenerator._detect_chart_type(result, SCATTER_QUESTION)
+        assert chart_type == "scatter"
+
+    def test_scatter_requires_correlation_hint(self) -> None:
+        # Same data, no correlation keyword in question → bar (not scatter).
+        result = _result(SCATTER_COLS, SCATTER_ROWS)
+        chart_type = ChartGenerator._detect_chart_type(result, "Show payment method stats")
+        assert chart_type == "bar"
+
+    def test_scatter_requires_two_numeric_columns(self) -> None:
+        # Only one numeric column → bar even with correlation hint.
+        result = _result(
+            ["payment_method", "total_transactions"],
+            [{"payment_method": "Credit Card", "total_transactions": "450"}],
+        )
+        chart_type = ChartGenerator._detect_chart_type(result, SCATTER_QUESTION)
+        assert chart_type == "bar"
+
+    def test_scatter_vs_hint_triggers_scatter(self) -> None:
+        result = _result(SCATTER_COLS, SCATTER_ROWS)
+        chart_type = ChartGenerator._detect_chart_type(
+            result, "Does order volume vs revenue show a pattern?"
+        )
+        assert chart_type == "scatter"
+
+    def test_scatter_relationship_hint_triggers_scatter(self) -> None:
+        result = _result(SCATTER_COLS, SCATTER_ROWS)
+        chart_type = ChartGenerator._detect_chart_type(
+            result, "What is the relationship between transactions and revenue lost?"
+        )
+        assert chart_type == "scatter"
+
+
+# ── Pie chart detection ────────────────────────────────────────────────────────
+
+
+class TestPieDetection:
+    def test_pie_for_proportion_question(self) -> None:
+        result = _result(PIE_COLS, PIE_ROWS)
+        chart_type = ChartGenerator._detect_chart_type(result, PIE_QUESTION)
+        assert chart_type == "pie"
+
+    def test_pie_for_share_question(self) -> None:
+        result = _result(PIE_COLS, PIE_ROWS)
+        chart_type = ChartGenerator._detect_chart_type(
+            result, "What share of revenue does each payment method contribute?"
+        )
+        assert chart_type == "pie"
+
+    def test_pie_for_percentage_question(self) -> None:
+        result = _result(PIE_COLS, PIE_ROWS)
+        chart_type = ChartGenerator._detect_chart_type(
+            result, "What percentage of total revenue comes from each country?"
+        )
+        assert chart_type == "pie"
+
+    def test_no_pie_without_proportion_hint(self) -> None:
+        # Same data, no proportion keyword → bar.
+        result = _result(PIE_COLS, PIE_ROWS)
+        chart_type = ChartGenerator._detect_chart_type(result, "Show revenue by payment method")
+        assert chart_type == "bar"
+
+    def test_no_pie_when_more_than_eight_rows(self) -> None:
+        # >8 rows even with proportion keyword → bar.
+        many_rows = [
+            {"payment_method": f"Method{i}", "total_revenue": str(i * 1000)} for i in range(9)
+        ]
+        result = _result(PIE_COLS, many_rows)
+        chart_type = ChartGenerator._detect_chart_type(result, PIE_QUESTION)
+        assert chart_type == "bar"
+
+    def test_no_pie_with_time_dimension(self) -> None:
+        # Time column present → not pie (line takes priority).
+        result = _result(
+            ["order_month", "total_revenue"],
+            [{"order_month": "1", "total_revenue": "50000"}],
+        )
+        chart_type = ChartGenerator._detect_chart_type(result, PIE_QUESTION)
+        assert chart_type != "pie"
+
+
+# ── Multi-line chart detection ─────────────────────────────────────────────────
+
+
+class TestMultilineDetection:
+    def test_multiline_for_time_plus_two_numerics(self) -> None:
+        result = _result(MULTILINE_COLS, MULTILINE_ROWS)
+        chart_type = ChartGenerator._detect_chart_type(result, MULTILINE_QUESTION)
+        assert chart_type == "multiline"
+
+    def test_line_not_multiline_for_single_metric(self) -> None:
+        # Only 1 non-time numeric → line, not multiline.
+        result = _result(MONTHLY_TREND_COLS, MONTHLY_TREND_ROWS)
+        chart_type = ChartGenerator._detect_chart_type(result, "Show monthly revenue trend")
+        assert chart_type == "line"
+
+    def test_multiline_without_question_hint(self) -> None:
+        # multiline is data-driven (no question keyword needed).
+        result = _result(MULTILINE_COLS, MULTILINE_ROWS)
+        chart_type = ChartGenerator._detect_chart_type(result, "Show me the data")
+        assert chart_type == "multiline"
+
+    def test_multiline_three_metrics(self) -> None:
+        cols = ["order_year", "order_month", "total_revenue", "total_orders", "unique_customers"]
+        rows = [
+            {
+                "order_year": "2025",
+                "order_month": str(m),
+                "total_revenue": str(m * 10000),
+                "total_orders": str(m * 15),
+                "unique_customers": str(m * 8),
+            }
+            for m in range(1, 4)
+        ]
+        result = _result(cols, rows)
+        chart_type = ChartGenerator._detect_chart_type(result, "Compare metrics over time")
+        assert chart_type == "multiline"
+
+
+# ── Scatter PNG and HTML generation ───────────────────────────────────────────
+
+
+class TestScatterGeneration:
+    def test_scatter_chart_returns_png_bytes(self) -> None:
+        gen, _ = _generator()
+        result = _result(SCATTER_COLS, SCATTER_ROWS)
+        output = gen.generate(result, SCATTER_QUESTION)
+        assert output.png_bytes is not None
+        assert len(output.png_bytes) > 0
+
+    def test_scatter_png_signature(self) -> None:
+        gen, _ = _generator()
+        result = _result(SCATTER_COLS, SCATTER_ROWS)
+        output = gen.generate(result, SCATTER_QUESTION)
+        assert output.png_bytes is not None
+        assert output.png_bytes[:4] == b"\x89PNG"
+
+    def test_scatter_chart_type_field(self) -> None:
+        gen, _ = _generator()
+        result = _result(SCATTER_COLS, SCATTER_ROWS)
+        output = gen.generate(result, SCATTER_QUESTION)
+        assert output.chart_type == "scatter"
+
+    def test_scatter_returns_html(self) -> None:
+        gen, _ = _generator()
+        result = _result(SCATTER_COLS, SCATTER_ROWS)
+        output = gen.generate(result, SCATTER_QUESTION)
+        assert output.html is not None
+        assert "plotly" in output.html.lower()
+
+    def test_scatter_with_two_point_minimum_no_trend_line(self) -> None:
+        # 2 rows: trend line requires >=3 points — should still render without error.
+        two_rows = SCATTER_ROWS[:2]
+        gen, _ = _generator()
+        result = _result(SCATTER_COLS, two_rows)
+        output = gen.generate(result, SCATTER_QUESTION)
+        assert output.png_bytes is not None
+        assert output.error is None
+
+
+# ── Pie PNG and HTML generation ────────────────────────────────────────────────
+
+
+class TestPieGeneration:
+    def test_pie_chart_returns_png_bytes(self) -> None:
+        gen, _ = _generator()
+        result = _result(PIE_COLS, PIE_ROWS)
+        output = gen.generate(result, PIE_QUESTION)
+        assert output.png_bytes is not None
+        assert len(output.png_bytes) > 0
+
+    def test_pie_png_signature(self) -> None:
+        gen, _ = _generator()
+        result = _result(PIE_COLS, PIE_ROWS)
+        output = gen.generate(result, PIE_QUESTION)
+        assert output.png_bytes is not None
+        assert output.png_bytes[:4] == b"\x89PNG"
+
+    def test_pie_chart_type_field(self) -> None:
+        gen, _ = _generator()
+        result = _result(PIE_COLS, PIE_ROWS)
+        output = gen.generate(result, PIE_QUESTION)
+        assert output.chart_type == "pie"
+
+    def test_pie_returns_html(self) -> None:
+        gen, _ = _generator()
+        result = _result(PIE_COLS, PIE_ROWS)
+        output = gen.generate(result, PIE_QUESTION)
+        assert output.html is not None
+        assert "plotly" in output.html.lower()
+
+    def test_pie_single_row_renders(self) -> None:
+        result = _result(PIE_COLS, PIE_ROWS[:1])
+        gen, _ = _generator()
+        output = gen.generate(result, PIE_QUESTION)
+        assert output.png_bytes is not None
+        assert output.error is None
+
+
+# ── Multi-line PNG and HTML generation ────────────────────────────────────────
+
+
+class TestMultilineGeneration:
+    def test_multiline_chart_returns_png_bytes(self) -> None:
+        gen, _ = _generator()
+        result = _result(MULTILINE_COLS, MULTILINE_ROWS)
+        output = gen.generate(result, MULTILINE_QUESTION)
+        assert output.png_bytes is not None
+        assert len(output.png_bytes) > 0
+
+    def test_multiline_png_signature(self) -> None:
+        gen, _ = _generator()
+        result = _result(MULTILINE_COLS, MULTILINE_ROWS)
+        output = gen.generate(result, MULTILINE_QUESTION)
+        assert output.png_bytes is not None
+        assert output.png_bytes[:4] == b"\x89PNG"
+
+    def test_multiline_chart_type_field(self) -> None:
+        gen, _ = _generator()
+        result = _result(MULTILINE_COLS, MULTILINE_ROWS)
+        output = gen.generate(result, MULTILINE_QUESTION)
+        assert output.chart_type == "multiline"
+
+    def test_multiline_returns_html(self) -> None:
+        gen, _ = _generator()
+        result = _result(MULTILINE_COLS, MULTILINE_ROWS)
+        output = gen.generate(result, MULTILINE_QUESTION)
+        assert output.html is not None
+        assert "plotly" in output.html.lower()
+
+    def test_multiline_with_three_metrics(self) -> None:
+        cols = ["order_year", "order_month", "total_revenue", "total_orders", "unique_customers"]
+        rows = [
+            {
+                "order_year": "2025",
+                "order_month": str(m),
+                "total_revenue": str(m * 10000),
+                "total_orders": str(m * 15),
+                "unique_customers": str(m * 8),
+            }
+            for m in range(1, 5)
+        ]
+        gen, _ = _generator()
+        result = _result(cols, rows)
+        output = gen.generate(result, "Compare all metrics over time")
+        assert output.chart_type == "multiline"
+        assert output.png_bytes is not None
+        assert output.error is None
+
+
+# ── Rank-column exclusion (regression) ────────────────────────────────────────
+
+
+class TestRankColumnExclusion:
+    def test_revenue_rank_not_selected_as_metric(self) -> None:
+        # Simulates "Rank all countries by total revenue" result shape.
+        cols = ["country", "total_revenue", "revenue_rank"]
+        rows = [
+            {"country": "Germany", "total_revenue": "453702", "revenue_rank": "1"},
+            {"country": "France", "total_revenue": "431654", "revenue_rank": "2"},
+            {"country": "UK", "total_revenue": "356466", "revenue_rank": "3"},
+        ]
+        result = _result(cols, rows)
+        gen, _ = _generator()
+        output = gen.generate(result, "Rank all countries by total revenue")
+        # Chart should be bar (no correlation hint) and should render without error.
+        assert output.chart_type == "bar"
+        assert output.png_bytes is not None
+        assert output.error is None
+
+    def test_is_rank_col_detects_suffix(self) -> None:
+        assert ChartGenerator._is_rank_col("revenue_rank") is True
+        assert ChartGenerator._is_rank_col("customer_position") is True
+        # Detection is case-insensitive (col.lower() applied internally).
+        assert ChartGenerator._is_rank_col("REVENUE_RANK") is True
+
+    def test_is_rank_col_exact_match(self) -> None:
+        assert ChartGenerator._is_rank_col("rank") is True
+        assert ChartGenerator._is_rank_col("dense_rank") is True
+        assert ChartGenerator._is_rank_col("total_revenue") is False

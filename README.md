@@ -202,7 +202,7 @@ Claude reads the question against the schema already in the system prompt and re
 
 ### Step 5: Chart and insight
 
-`ChartGenerator` selects chart type from data shape: time-series data gets a line chart, 8 or fewer categories get a bar chart, more than 8 get a horizontal bar chart sorted by value. The chart is uploaded to S3 and returned as a presigned URL (Uniform Resource Locator).
+`ChartGenerator` selects chart type from the shape of the result and keywords in the question. Five types are supported: **line** (time + 1 metric), **multi-line** (time + 2+ metrics), **bar** (categorical + metric), **scatter** (2 numeric + categorical, correlation question), and **pie/donut** (proportion question, ≤ 8 rows). The chart is uploaded to S3 and returned as a presigned URL (Uniform Resource Locator).
 
 `InsightGenerator` makes a final Claude call with the original question, SQL, result sample, and assumptions, and returns a 2-3 sentence plain-English insight.
 
@@ -594,6 +594,25 @@ The agent takes 12-20 seconds to respond. On the first run there's an additional
 - A 2-3 sentence plain-English insight
 - A presigned S3 URL (Uniform Resource Locator) for the chart PNG
 
+---
+
+### Chart type reference
+
+The agent picks a chart type automatically from the shape of the query result and, where relevant, keywords in the question.
+
+| Chart type | Question keywords that trigger it | Data shape required | Example question |
+|---|---|---|---|
+| **Line** | *(data-driven, no keyword needed)* | Time column + 1 numeric metric | "Show monthly revenue over the last year" |
+| **Multi-line** | *(data-driven, no keyword needed)* | Time column + 2+ numeric metrics | "Show me both revenue and order volume trends over the last 12 months" |
+| **Bar** | *(data-driven, no keyword needed)* | Categorical + 1 numeric metric, no time | "Which country generates the most revenue?" |
+| **Scatter** | `correlation`, `relationship`, `vs`, `versus`, `against`, `affect`, `predict`, `scatter` | 2+ numeric columns + 1 categorical label column | "Is there a correlation between payment volume and revenue lost by payment method?" |
+| **Pie / Donut** | `share`, `proportion`, `distribution`, `breakdown`, `percentage`, `split`, `mix`, `composition`, `percent` | 1 categorical + 1 numeric, ≤ 8 rows, no time | "What is the revenue breakdown by payment method?" |
+| **Table** | *(fallback)* | No numeric columns, or no matching shape | "List all payment methods and their status" |
+
+Detection priority when rules overlap: **scatter > multiline > line > pie > bar > table**.
+
+---
+
 **Step 5: Try these test questions.**
 
 Run each one with `python -m agent.main "question"`. They're ordered to cover different Gold tables, different chart types, and different kinds of reasoning.
@@ -605,16 +624,22 @@ python -m agent.main "Show me total revenue by country"
 # Line chart — time-series, tests date reasoning
 python -m agent.main "What does monthly order volume look like over the last 12 months?"
 
+# Multi-line chart — two metrics on the same time axis
+python -m agent.main "Show me both revenue and order volume trends over the last 12 months"
+
+# Scatter chart — correlation between two numeric variables
+python -m agent.main "Is there a correlation between payment volume and revenue lost by payment method?"
+
+# Pie / Donut chart — proportion question, ≤8 categories
+python -m agent.main "What is the revenue breakdown by payment method?"
+
 # Filtering + aggregation — tests WHERE clause generation
 python -m agent.main "Which product categories are most popular in Germany?"
-
-# Multi-metric — tests selecting the right columns
-python -m agent.main "Compare average order value across countries"
 
 # Count + group by — tests COUNT vs SUM disambiguation
 python -m agent.main "How many unique customers placed orders in each country?"
 
-# Trend question — tests the agent's ability to reason about time
+# Trend question — tests pattern-recognition in insight generation
 python -m agent.main "Is revenue growing or declining? Show me the trend."
 ```
 
@@ -793,16 +818,18 @@ Press Ctrl-C to stop tailing. The most common startup errors are documented in t
 
 These six questions cover every Gold table, every chart type, and several multi-turn follow-up patterns. Run them in sequence during a demo session.
 
-| # | Question | What it tests |
-|---|---|---|
-| 1 | "Which country has the highest total revenue?" | Bar chart, top-N aggregation |
-| 2 | "Show me monthly order volume as a trend over the last year" | Line chart, time-series, date reasoning |
-| 3 | "What are the top 5 product categories by revenue in Germany?" | Filtered bar chart, WHERE clause with partition |
-| 4 | "Compare average order value across all countries" | Horizontal bar chart (many categories) |
-| 5 | "How many unique customers have placed orders in each country?" | COUNT DISTINCT, tests SUM vs COUNT disambiguation |
-| 6 | "Is there a seasonal pattern in order volume?" | Line chart, tests pattern-recognition insight generation |
+| # | Question | Chart type | What it tests |
+|---|---|---|---|
+| 1 | "Which country has the highest total revenue?" | Bar | Top-N aggregation, rank ordering |
+| 2 | "Show me monthly revenue as a trend over the last year" | Line | Time-series, date reasoning |
+| 3 | "Show me both revenue and order volume trends over the last 12 months" | Multi-line | Two metrics on one time axis |
+| 4 | "Is there a correlation between payment volume and revenue lost by payment method?" | Scatter | Correlation question, trend line |
+| 5 | "What is the revenue breakdown by payment method?" | Pie / Donut | Proportion question, ≤8 categories |
+| 6 | "Compare average order value across all countries" | Bar | Horizontal bar with many categories |
+| 7 | "How many unique customers have placed orders in each country?" | Bar | COUNT DISTINCT, SUM vs COUNT disambiguation |
+| 8 | "Is there a seasonal pattern in order volume?" | Line | Pattern-recognition insight |
 
-For multi-turn follow-up, after question 2 ask: "Which month had the lowest volume and why do you think that is?" — the agent will answer referencing the same SQL execution without re-running the query.
+For multi-turn follow-up, after question 2 ask: "Which month had the lowest volume and why do you think that is?" — the agent answers referencing the same SQL execution without re-running the query.
 
 ---
 
@@ -1008,12 +1035,10 @@ Deliverable: `python -m agent.main "Show total orders by country"` returns SQL, 
 ### Phase 10: Charts — complete
 
 - `agent/charts.py` — `ChartGenerator`:
-  - Detects data shape from the DataFrame: time-series, category vs metric, or distribution
-  - Time-series → line chart (matplotlib static PNG)
-  - 8 or fewer categories → vertical bar chart
-  - More than 8 categories → horizontal bar chart sorted by value
+  - Detects chart type from data shape and question keywords (five types supported)
   - Uploads PNG to `s3://{gold_bucket}/charts/`, returns presigned URL (valid 1 hour)
   - Plotly interactive HTML version returned in the HTTP endpoint response
+  - See the chart type reference below for which question phrasing triggers which chart
 
 ### Phase 11: FastAPI HTTP endpoint and session state — complete
 

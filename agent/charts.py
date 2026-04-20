@@ -145,6 +145,55 @@ _MONETARY_HINTS: frozenset[str] = frozenset(
     {"revenue", "amount", "sales", "profit", "spend", "cost", "price", "total", "income"}
 )
 
+# Question-level keyword hints that signal a scatter / correlation chart.
+_SCATTER_HINTS: frozenset[str] = frozenset(
+    {
+        "correlation",
+        "correlate",
+        "relationship",
+        "relate",
+        " vs ",
+        "versus",
+        "against",
+        "scatter",
+        "affect",
+        "predict",
+        "linked to",
+        "tied to",
+        "does.*have",
+    }
+)
+
+# Question-level keyword hints that signal a pie / donut chart.
+_PIE_HINTS: frozenset[str] = frozenset(
+    {
+        "share",
+        "proportion",
+        "distribution",
+        "breakdown",
+        "percentage",
+        "split",
+        "mix",
+        "composition",
+        "portion",
+        "percent",
+        "make up",
+        "makeup",
+    }
+)
+
+# Olive-family colour palette for multi-series charts (pie slices, multi-line traces).
+_OLIVE_PALETTE: list[str] = [
+    "#4B5320",  # brand olive (darkest)
+    "#6B7A3F",
+    "#8B9A5B",
+    "#A8BA7A",
+    "#C8D4A8",
+    "#566117",
+    "#D4DDB5",
+    "#3A4D0E",
+]
+
 
 def _is_monetary(col: str) -> bool:
     """Return True if the column name suggests a monetary metric."""
@@ -298,7 +347,7 @@ class ChartGenerator:
             )
             return ChartOutput(chart_type="none")
 
-        chart_type = self._detect_chart_type(result)
+        chart_type = self._detect_chart_type(result, question)
         logger.info(
             "Chart type detected: %s for execution_id=%s",
             chart_type,
@@ -329,18 +378,20 @@ class ChartGenerator:
     # ── Chart type detection ───────────────────────────────────────────────────
 
     @staticmethod
-    def _detect_chart_type(result: QueryResult) -> str:
-        """Choose bar, line, or table based on column names and values.
+    def _detect_chart_type(result: QueryResult, question: str = "") -> str:
+        """Choose chart type from data shape and optional question keywords.
 
-        Rules (in order):
-          1. If any column name contains a time hint (year/month/date/week/quarter)
-             AND at least one other column is numeric
-             AND there are no non-time categorical columns -> line
-             (time is the primary grouping dimension, e.g. monthly revenue trend)
-          2. If at least one column is categorical and one is numeric -> bar
-             (categorical grouping beats time when both exist, e.g. customers with
-             first_order_date metadata columns should still render as a bar chart)
-          3. Fallback -> table
+        Detection order (first match wins):
+          1. scatter  — 2+ numeric cols, 1+ categorical label col, question
+                        contains a correlation/relationship hint
+          2. multiline — time dimension col + 2+ non-time numeric cols,
+                         no non-time categorical col
+          3. line     — time dimension col + 1 non-time numeric col,
+                         no non-time categorical col
+          4. pie      — question contains a proportion/share hint,
+                         ≤8 rows, 1 categorical + 1 numeric (no time)
+          5. bar      — at least 1 categorical + 1 numeric col
+          6. table    — fallback (no numeric cols, or nothing else matches)
         """
         numeric_cols = ChartGenerator._numeric_columns(result)
         if not numeric_cols:
@@ -353,10 +404,35 @@ class ChartGenerator:
         categorical_cols = [c for c in result.columns if c not in numeric_cols]
         non_time_categorical = [c for c in categorical_cols if c not in time_cols]
 
-        # Only use line when time is the sole grouping dimension (no other string cols).
+        ql = question.lower()
+
+        # 1. Scatter: correlation/relationship question + 2+ numerics + categorical labels.
+        if (
+            len(non_time_numeric) >= 2
+            and non_time_categorical
+            and any(h in ql for h in _SCATTER_HINTS)
+        ):
+            return "scatter"
+
+        # 2. Multi-line: time axis + 2+ separate metric columns, no string grouping.
+        if time_cols and len(non_time_numeric) >= 2 and not non_time_categorical:
+            return "multiline"
+
+        # 3. Single-metric line chart over time.
         if time_cols and non_time_numeric and not non_time_categorical:
             return "line"
 
+        # 4. Pie/donut: proportion question + ≤8 rows + exactly one category + one metric.
+        if (
+            non_time_categorical
+            and non_time_numeric
+            and not time_cols
+            and len(result.rows) <= 8
+            and any(h in ql for h in _PIE_HINTS)
+        ):
+            return "pie"
+
+        # 5. Bar: any categorical grouping with a numeric metric.
         if categorical_cols:
             return "bar"
 
@@ -459,6 +535,12 @@ class ChartGenerator:
             return self._render_line(result, title)
         if chart_type == "bar":
             return self._render_bar(result, title)
+        if chart_type == "scatter":
+            return self._render_scatter(result, title)
+        if chart_type == "pie":
+            return self._render_pie(result, title)
+        if chart_type == "multiline":
+            return self._render_multiline(result, title)
         return self._render_table(result, title)
 
     def _render_bar(self, result: QueryResult, title: str) -> tuple[bytes, str, int]:
@@ -517,6 +599,218 @@ class ChartGenerator:
         html = _plotly_bar(labels, values, x_col, y_col, title, height=plotly_height)
         # Add padding for title, axis labels, and iframe border.
         return png_bytes, html, plotly_height + 80
+
+    def _render_scatter(self, result: QueryResult, title: str) -> tuple[bytes, str, int]:
+        """Render a scatter plot with an optional linear trend line.
+
+        The y-axis is the primary metric column (revenue-like). The x-axis is the
+        secondary numeric column (volume / count-like). Each point is labelled with
+        the categorical dimension value (payment method, carrier, country…).
+        A dashed trend line is added when there are 3 or more data points.
+        """
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import matplotlib.ticker as mticker
+        import numpy as np
+
+        numeric_cols = self._numeric_columns(result)
+        categorical_cols = [c for c in result.columns if c not in numeric_cols]
+        non_rank = [c for c in numeric_cols if not self._is_rank_col(c)]
+        candidates = non_rank if len(non_rank) >= 2 else numeric_cols
+
+        y_col = self._best_metric_column(candidates)
+        x_candidates = [c for c in candidates if c != y_col]
+        x_col = x_candidates[0] if x_candidates else candidates[0]
+        label_col = categorical_cols[0] if categorical_cols else ""
+
+        labels = (
+            [_display_label(str(row.get(label_col, ""))) for row in result.rows]
+            if label_col
+            else [""] * len(result.rows)
+        )
+        x_vals = [float(row.get(x_col, 0) or 0) for row in result.rows]
+        y_vals = [float(row.get(y_col, 0) or 0) for row in result.rows]
+
+        _x_mon = _is_monetary(x_col)
+        _y_mon = _is_monetary(y_col)
+
+        fig, ax = plt.subplots(figsize=(9, 6))
+        ax.scatter(x_vals, y_vals, color=_BRAND_COLOUR, s=80, zorder=5)
+
+        # Label each point slightly offset from the marker.
+        for lbl, xv, yv in zip(labels, x_vals, y_vals, strict=False):
+            ax.annotate(
+                lbl,
+                (xv, yv),
+                textcoords="offset points",
+                xytext=(7, 4),
+                fontsize=8,
+                color="#333333",
+            )
+
+        # Dashed trend line via linear regression (numpy polyfit).
+        if len(x_vals) >= 3:
+            z = np.polyfit(x_vals, y_vals, 1)
+            p = np.poly1d(z)
+            x_line = [min(x_vals), max(x_vals)]
+            ax.plot(
+                x_line,
+                [p(v) for v in x_line],
+                color=_BRAND_COLOUR,
+                linewidth=1.5,
+                linestyle="--",
+                alpha=0.55,
+                label="Trend",
+            )
+
+        ax.set_xlabel(x_col.replace("_", " ").title())
+        ax.set_ylabel(y_col.replace("_", " ").title())
+        ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _p: _fmt_axis(v, _x_mon)))
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _p: _fmt_axis(v, _y_mon)))
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.grid(color="#e0e0e0", linewidth=0.7, linestyle="--")
+        if title:
+            ax.set_title(title, fontsize=11, pad=12)
+        fig.tight_layout()
+
+        png_bytes = _fig_to_png(fig)
+        plt.close(fig)
+
+        html = _plotly_scatter(labels, x_vals, y_vals, x_col, y_col, title)
+        return png_bytes, html, 500
+
+    def _render_pie(self, result: QueryResult, title: str) -> tuple[bytes, str, int]:
+        """Render a donut / pie chart for proportion and share questions.
+
+        Each slice shows its label and percentage. The donut hole keeps the chart
+        readable when there are many thin slices.
+        """
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        numeric_cols = self._numeric_columns(result)
+        categorical_cols = [c for c in result.columns if c not in numeric_cols]
+        x_col = categorical_cols[0] if categorical_cols else result.columns[0]
+        y_col = self._best_metric_column(numeric_cols)
+
+        labels = [_display_label(str(row.get(x_col, ""))) for row in result.rows]
+        values = [float(row.get(y_col, 0) or 0) for row in result.rows]
+        colours = (_OLIVE_PALETTE * 2)[: len(labels)]
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        wedges, _texts, autotexts = ax.pie(
+            values,
+            labels=labels,
+            autopct="%1.1f%%",
+            colors=colours,
+            startangle=90,
+            pctdistance=0.78,
+            wedgeprops={"linewidth": 1.5, "edgecolor": "white"},
+        )
+        for at in autotexts:
+            at.set_fontsize(9)
+            at.set_color("white")
+            at.set_fontweight("bold")
+        # Draw the donut hole.
+        centre_circle = plt.Circle((0, 0), 0.55, fc="white")
+        ax.add_patch(centre_circle)
+        ax.axis("equal")
+        if title:
+            ax.set_title(title, fontsize=11, pad=16)
+        fig.tight_layout()
+
+        png_bytes = _fig_to_png(fig)
+        plt.close(fig)
+
+        html = _plotly_pie(labels, values, x_col, y_col, title)
+        return png_bytes, html, 450
+
+    def _render_multiline(self, result: QueryResult, title: str) -> tuple[bytes, str, int]:
+        """Render a multi-line chart: shared time axis, one line per metric column.
+
+        Up to 3 metric columns are plotted. Each line uses a distinct olive-palette
+        colour and a legend entry. Catmull-Rom spline smoothing is applied per line.
+        """
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import matplotlib.ticker as mticker
+
+        numeric_cols = self._numeric_columns(result)
+        time_cols = [
+            col for col in result.columns if any(hint in col.lower() for hint in _TIME_HINTS)
+        ]
+        non_time_numeric = [c for c in numeric_cols if c not in time_cols]
+
+        x_dim_cols = [
+            tc
+            for tc in time_cols
+            if all(
+                ChartGenerator._is_integer_like(str(row.get(tc, "")))
+                for row in result.rows
+                if row.get(tc, "")
+            )
+        ]
+        if not x_dim_cols:
+            x_dim_cols = time_cols[:1]
+
+        if len(x_dim_cols) >= 2:
+            x_labels = [
+                "-".join(str(row.get(tc, "")).zfill(2) for tc in x_dim_cols[:2])
+                for row in result.rows
+            ]
+            x_title = " / ".join(tc.replace("_", " ").title() for tc in x_dim_cols[:2])
+        else:
+            x_labels = [str(row.get(x_dim_cols[0], "")) for row in result.rows]
+            x_title = x_dim_cols[0].replace("_", " ").title()
+
+        metric_cols = non_time_numeric[:3]
+        colours = _OLIVE_PALETTE[: len(metric_cols)]
+
+        x_indices = list(range(len(x_labels)))
+        fig, ax = plt.subplots(figsize=(12, 5))
+
+        for col, colour in zip(metric_cols, colours, strict=False):
+            y_values = [float(row.get(col, 0) or 0) for row in result.rows]
+            x_smooth, y_smooth = _catmull_rom_smooth(x_indices, y_values)
+            ax.fill_between(x_smooth, y_smooth, alpha=0.06, color=colour)
+            ax.plot(
+                x_smooth,
+                y_smooth,
+                color=colour,
+                linewidth=2.5,
+                label=col.replace("_", " ").title(),
+            )
+            ax.scatter(x_indices, y_values, color=colour, s=35, zorder=5)
+
+        ax.set_xticks(x_indices)
+        ax.set_xticklabels(x_labels, rotation=45, ha="right")
+        ax.set_xlabel(x_title)
+        # Format y-axis with K/M if any metric is monetary.
+        _ml_monetary = any(_is_monetary(c) for c in metric_cols)
+        ax.yaxis.set_major_formatter(
+            mticker.FuncFormatter(lambda v, _p: _fmt_axis(v, _ml_monetary))
+        )
+        ax.legend(loc="upper left", fontsize=9, framealpha=0.7)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.grid(axis="y", color="#e0e0e0", linewidth=0.7, linestyle="--")
+        if title:
+            ax.set_title(title, fontsize=11, pad=20)
+        fig.tight_layout()
+        fig.subplots_adjust(top=0.88)
+
+        png_bytes = _fig_to_png(fig)
+        plt.close(fig)
+
+        html = _plotly_multiline(x_labels, metric_cols, result.rows, x_title, title)
+        return png_bytes, html, 480
 
     def _render_line(self, result: QueryResult, title: str) -> tuple[bytes, str, int]:
         """Render a line chart: time axis vs first numeric column."""
@@ -853,5 +1147,147 @@ def _plotly_table(
     fig.update_layout(
         title=title or None,
         margin={"l": 20, "r": 20, "t": 50 if title else 20, "b": 20},
+    )
+    return str(fig.to_html(full_html=False, include_plotlyjs="cdn"))
+
+
+def _plotly_scatter(
+    labels: list[str],
+    x_vals: list[float],
+    y_vals: list[float],
+    x_col: str,
+    y_col: str,
+    title: str = "",
+) -> str:
+    """Return a Plotly scatter chart with point labels and a linear trend line."""
+    import numpy as np
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+
+    # Data points with category labels.
+    fig.add_trace(
+        go.Scatter(
+            x=x_vals,
+            y=y_vals,
+            mode="markers+text",
+            marker={"size": 12, "color": _BRAND_COLOUR, "opacity": 0.85},
+            text=labels,
+            textposition="top right",
+            textfont={"size": 10},
+            name="Data",
+            hovertemplate=(
+                f"<b>%{{text}}</b><br>"
+                f"{x_col.replace('_', ' ').title()}: %{{x:,.0f}}<br>"
+                f"{y_col.replace('_', ' ').title()}: %{{y:,.0f}}<extra></extra>"
+            ),
+        )
+    )
+
+    # Dashed trend line.
+    if len(x_vals) >= 3:
+        z = np.polyfit(x_vals, y_vals, 1)
+        p = np.poly1d(z)
+        x_line = sorted(x_vals)
+        fig.add_trace(
+            go.Scatter(
+                x=x_line,
+                y=[float(p(v)) for v in x_line],
+                mode="lines",
+                line={"color": _BRAND_COLOUR, "width": 1.5, "dash": "dash"},
+                name="Trend",
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+
+    fig.update_layout(
+        title=title or None,
+        xaxis_title=x_col.replace("_", " ").title(),
+        yaxis_title=y_col.replace("_", " ").title(),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        xaxis={"showgrid": True, "gridcolor": "rgba(0,0,0,0.07)"},
+        yaxis={"showgrid": True, "gridcolor": "rgba(0,0,0,0.07)"},
+        margin={"l": 60, "r": 20, "t": 50 if title else 20, "b": 60},
+        height=450,
+    )
+    return str(fig.to_html(full_html=False, include_plotlyjs="cdn"))
+
+
+def _plotly_pie(
+    labels: list[str],
+    values: list[float],
+    x_col: str,
+    y_col: str,
+    title: str = "",
+) -> str:
+    """Return a Plotly donut chart as an HTML fragment."""
+    import plotly.graph_objects as go
+
+    fig = go.Figure(
+        go.Pie(
+            labels=labels,
+            values=values,
+            hole=0.38,
+            marker={
+                "colors": (_OLIVE_PALETTE * 2)[: len(labels)],
+                "line": {"color": "white", "width": 1.5},
+            },
+            textinfo="percent+label",
+            hovertemplate="%{label}: %{value:,.0f} (%{percent})<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        title=title or None,
+        margin={"l": 20, "r": 20, "t": 50 if title else 20, "b": 20},
+        height=420,
+        showlegend=True,
+        legend={"orientation": "v", "x": 1.02, "y": 0.5},
+    )
+    return str(fig.to_html(full_html=False, include_plotlyjs="cdn"))
+
+
+def _plotly_multiline(
+    x_labels: list[str],
+    metric_cols: list[str],
+    rows: list[dict[str, str]],
+    x_title: str,
+    title: str = "",
+) -> str:
+    """Return a Plotly multi-line chart as an HTML fragment.
+
+    Each metric column becomes a separate trace with its own olive-palette colour.
+    Spline smoothing is applied. No callout annotations (too crowded with multiple lines).
+    """
+    import plotly.graph_objects as go
+
+    colours = _OLIVE_PALETTE[: len(metric_cols)]
+    fig = go.Figure()
+
+    for col, colour in zip(metric_cols, colours, strict=False):
+        y_vals = [float(row.get(col, 0) or 0) for row in rows]
+        fig.add_trace(
+            go.Scatter(
+                x=x_labels,
+                y=y_vals,
+                mode="lines+markers",
+                name=col.replace("_", " ").title(),
+                line={"color": colour, "width": 2.5, "shape": "spline", "smoothing": 0.9},
+                marker={"size": 6, "color": colour},
+                hovertemplate=f"{col.replace('_', ' ').title()}: %{{y:,.0f}}<extra></extra>",
+            )
+        )
+
+    fig.update_layout(
+        title=title or None,
+        xaxis_title=x_title,
+        xaxis={"type": "category", "showgrid": True, "gridcolor": "rgba(0,0,0,0.07)"},
+        yaxis={"showgrid": True, "gridcolor": "rgba(0,0,0,0.07)"},
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        margin={"l": 60, "r": 20, "t": 50 if title else 20, "b": 60},
+        height=420,
+        legend={"orientation": "h", "y": -0.2},
     )
     return str(fig.to_html(full_html=False, include_plotlyjs="cdn"))
