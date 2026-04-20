@@ -38,8 +38,8 @@ import os as _os
 from dataclasses import dataclass
 from typing import Any
 
-import matplotlib.patches as mpatches
 import boto3
+import matplotlib.patches as mpatches
 from botocore.exceptions import ClientError
 
 from agent.config import AWSConfig
