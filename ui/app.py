@@ -811,8 +811,12 @@ def _clean_insight_stream(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, str, str]]:
-    """Return up to 3 (metric_label, value, sub_label) KPI tuples from query results."""
+def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, str, str, str]]:
+    """Return up to 3 (metric_label, value, sub_label, badge) KPI tuples from query results.
+
+    badge is a MoM/period change string like '+12.3% vs prior' or '' when not applicable.
+    sub_label for time-series results shows a human-readable period value (e.g. 'Apr 2025').
+    """
     if not rows or not columns:
         return []
 
@@ -834,6 +838,29 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
             return f"{f:,.2f}"
         except (ValueError, TypeError):
             return str(val)
+
+    def _fmt_period(val: str) -> str:
+        """Format '2025-04' or '2025-04-01' → 'Apr 2025'. Falls back to val."""
+        _months = [
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+        ]
+        m = re.match(r"^(\d{4})-(\d{2})(?:-\d{2})?$", str(val).strip())
+        if m:
+            mo = int(m.group(2)) - 1
+            if 0 <= mo <= 11:
+                return f"{_months[mo]} {m.group(1)}"
+        return val
 
     # Priority hints for picking the primary KPI metric — mirrors charts.py logic.
     _kpi_priority = {
@@ -860,6 +887,7 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
         "avg",
         "average",
     }
+    _time_col_hints = {"year", "month", "date", "week", "quarter", "period"}
 
     def _pick_metric(cols: list[str]) -> str:
         for c in reversed(cols):
@@ -875,38 +903,77 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
                 return c
         return cols[-1]
 
-    tiles: list[tuple[str, str, str]] = []
+    tiles: list[tuple[str, str, str, str]] = []
 
     if cat_cols and numeric_cols:
         metric_col = _pick_metric(numeric_cols)
         cat_col = cat_cols[0]
         metric_label = metric_col.replace("_", " ").title()
-        top_cat = str(rows[0].get(cat_col, ""))
+
+        is_time_cat = any(hint in cat_col.lower() for hint in _time_col_hints)
+        top_raw = str(rows[0].get(cat_col, ""))
+        top_cat = _fmt_period(top_raw) if is_time_cat else top_raw
         top_val = _fmt(str(rows[0].get(metric_col, "")))
-        tiles.append((metric_label, top_val, top_cat))
-        # Proper plural for the category sub-label (category → Categories, country → Countries)
-        cat_label = cat_col.replace("_", " ").title()
-        if cat_label.endswith("y"):
-            cat_plural = cat_label[:-1] + "ies"
+
+        # MoM badge: most-recent vs prior period for time-series results.
+        badge = ""
+        if is_time_cat and len(rows) >= 2:
+            try:
+                cur = float(str(rows[-1].get(metric_col, 0) or 0).replace(",", ""))
+                prv = float(str(rows[-2].get(metric_col, 0) or 0).replace(",", ""))
+                if prv != 0:
+                    pct = (cur - prv) / abs(prv) * 100
+                    sign = "+" if pct >= 0 else ""
+                    badge = f"{sign}{pct:.1f}% vs prior"
+            except (ValueError, TypeError):
+                pass
+
+        tiles.append((metric_label, top_val, top_cat, badge))
+
+        # Tile 2: entry count with a sensible time-aware plural label.
+        if is_time_cat:
+            col_l = cat_col.lower()
+            if "month" in col_l:
+                cat_plural = "Months"
+            elif "week" in col_l:
+                cat_plural = "Weeks"
+            elif "quarter" in col_l:
+                cat_plural = "Quarters"
+            elif "year" in col_l:
+                cat_plural = "Years"
+            else:
+                cat_plural = "Periods"
         else:
-            cat_plural = cat_label + "s"
-        tiles.append(("Total Entries", str(len(rows)), cat_plural))
-        # Third tile: sum of the primary metric across all rows (meaningful aggregate)
+            cat_label = cat_col.replace("_", " ").title()
+            if cat_label.endswith("y"):
+                cat_plural = cat_label[:-1] + "ies"
+            elif cat_label.endswith("s"):
+                cat_plural = cat_label
+            else:
+                cat_plural = cat_label + "s"
+        tiles.append(("Total Entries", str(len(rows)), cat_plural, ""))
+
+        # Tile 3: aggregate total with period range sub-label for time-series.
         try:
             total = sum(float(str(r.get(metric_col, 0) or 0).replace(",", "")) for r in rows)
-            # Avoid "Total Total Revenue" — strip leading "Total" from the metric label.
             base_label = re.sub(r"^Total\s+", "", metric_label, flags=re.IGNORECASE)
-            tiles.append((f"Total {base_label} (All)", _fmt(str(total)), "All Entries"))
+            if is_time_cat and len(rows) >= 2:
+                first_fmt = _fmt_period(str(rows[0].get(cat_col, "")))
+                last_fmt = _fmt_period(str(rows[-1].get(cat_col, "")))
+                tile3_sub = f"{first_fmt} \u2013 {last_fmt}"
+            else:
+                tile3_sub = "All Entries"
+            tiles.append((f"Total {base_label} (All)", _fmt(str(total)), tile3_sub, ""))
         except (ValueError, TypeError):
             pass
     elif numeric_cols:
-        # No categorical column — show top 3 numeric values from row 0
+        # No categorical column — show top 3 numeric values from row 0.
         for col in numeric_cols[:3]:
             val = _fmt(str(rows[0].get(col, "")))
             label = col.replace("_", " ").title()
-            tiles.append((label, val, ""))
+            tiles.append((label, val, "", ""))
     else:
-        tiles.append(("Total Results", str(len(rows)), ""))
+        tiles.append(("Total Results", str(len(rows)), "", ""))
 
     return tiles[:3]
 
@@ -1112,7 +1179,7 @@ def _cached_build_pdf(
             self.set_font("Helvetica", "", 7)
             self.set_text_color(148, 163, 184)
             self.set_x(self.l_margin)
-            self.cell(col_w, 5, f"Data as of {self._gen}", align="L")
+            self.cell(col_w, 5, "Source: Gold Layer / Athena", align="L")
             self.cell(col_w, 5, "Confidential - Internal Use Only", align="C")
             self.cell(col_w, 5, f"Page {self.page_no()} of {{nb}}", align="R")
             self.set_text_color(0, 0, 0)
@@ -1145,55 +1212,140 @@ def _cached_build_pdf(
     # Sync resolved font name onto the subclass attribute (header uses it).
     pdf._fn = font_name  # type: ignore[attr-defined]
 
+    # ── Local helpers (PDF scope) ─────────────────────────────────────────────
+    _PDF_MONTHS = [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+    ]
+    _PDF_TIME_HINTS = {"year", "month", "date", "week", "quarter", "period"}
+    _PDF_MON_HINTS = {"revenue", "amount", "sales", "profit", "spend", "cost", "price", "income"}
+
+    def _fmt_period_pdf(val: str) -> str:
+        m = re.match(r"^(\d{4})-(\d{2})(?:-\d{2})?$", str(val).strip())
+        if m:
+            mo = int(m.group(2)) - 1
+            if 0 <= mo <= 11:
+                return f"{_PDF_MONTHS[mo]} {m.group(1)}"
+        return val
+
+    def _is_mon_col(col: str) -> bool:
+        return any(h in col.lower() for h in _PDF_MON_HINTS)
+
+    def _fmt_snap(val: str, col: str) -> str:
+        """Format a cell value for the data snapshot table."""
+        try:
+            f = float(str(val).replace(",", "").replace("$", ""))
+            if _is_mon_col(col):
+                return f"${f:,.0f}"
+            if f == int(f):
+                return f"{int(f):,}"
+            return f"{f:,.2f}"
+        except (ValueError, TypeError):
+            return str(val)
+
+    # Classify columns for snapshot table and period detection.
+    _pdf_numeric: list[str] = []
+    _pdf_cat: list[str] = []
+    for _col in columns:
+        _raw = str(rows[0].get(_col, "") or "") if rows else ""
+        try:
+            float(_raw.replace(",", "").replace("$", ""))
+            _pdf_numeric.append(_col)
+        except ValueError:
+            _pdf_cat.append(_col)
+
+    # Detect period range from any time-dimension column.
+    period_label = ""
+    if rows:
+        for _col in _pdf_cat:
+            if any(h in _col.lower() for h in _PDF_TIME_HINTS):
+                first_v = str(rows[0].get(_col, "")).strip()
+                last_v = str(rows[-1].get(_col, "")).strip()
+                if re.match(r"^\d{4}", first_v):
+                    first_fmt = _fmt_period_pdf(first_v)
+                    last_fmt = _fmt_period_pdf(last_v)
+                    if first_fmt and first_fmt != last_fmt:
+                        period_label = f"Period: {first_fmt} \u2013 {last_fmt}"
+                    elif first_fmt:
+                        period_label = f"Period: {first_fmt}"
+                    break
+
     # ════════════════════════════════════════════════════════════════════════
-    # PAGE 1 — Question · KPI tiles · Chart · Key Finding
+    # PAGE 1 — Question · Period · KPI tiles · Chart · Summary · Snapshot
     # ════════════════════════════════════════════════════════════════════════
     pdf.add_page()
     W = pdf.epw  # effective page width inside margins
 
     # ── Question ─────────────────────────────────────────────────────────────
     pdf.set_font(font_name, "B", 11)
-    pdf.set_text_color(75, 83, 32)  # #4B5320 army olive label
+    pdf.set_text_color(75, 83, 32)
     pdf.cell(W, 5, _t("Question", lang).upper(), new_x="LMARGIN", new_y="NEXT")
-    pdf.set_draw_color(226, 232, 240)  # slate-200 rule
+    pdf.set_draw_color(226, 232, 240)
     pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + W, pdf.get_y())
     pdf.ln(3)
     pdf.set_font(font_name, "B", 13)
-    pdf.set_text_color(15, 23, 42)  # slate-950
+    pdf.set_text_color(15, 23, 42)
     pdf.multi_cell(W, 7, question, align="L")
-    pdf.ln(8)
+    pdf.ln(3)
 
-    # ── KPI tiles ─────────────────────────────────────────────────────────────
+    # ── Period coverage line ─────────────────────────────────────────────────
+    if period_label:
+        pdf.set_font(font_name, "", 8)
+        pdf.set_text_color(100, 116, 139)
+        pdf.cell(W, 5, period_label, new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(3)
+    else:
+        pdf.ln(5)
+
+    # ── KPI tiles (26 mm tall — extra row for MoM badge on tile 0) ──────────
     kpi_tiles = _extract_kpi_tiles(columns, rows)
     if kpi_tiles:
         tile_w = W / len(kpi_tiles)
-        tile_h = 22.0
+        tile_h = 26.0
         tile_y = pdf.get_y()
-        for i, (metric_lbl, value, sub_lbl) in enumerate(kpi_tiles):
+        for i, (metric_lbl, value, sub_lbl, badge) in enumerate(kpi_tiles):
             tx = pdf.l_margin + i * tile_w
             # Tile background
-            pdf.set_fill_color(240, 247, 255)  # #f0f7ff blue-50
+            pdf.set_fill_color(240, 247, 255)
             pdf.rect(tx, tile_y, tile_w - 2, tile_h, style="F")
-            # Top navy accent stripe (3 mm) — deep navy primary
-            pdf.set_fill_color(75, 83, 32)  # #4B5320 army olive
+            # Top olive accent stripe (3 mm)
+            pdf.set_fill_color(75, 83, 32)
             pdf.rect(tx, tile_y, tile_w - 2, 3, style="F")
-            # Metric label (small caps)
+            # Metric label
             pdf.set_xy(tx + 3, tile_y + 4)
             pdf.set_font(font_name, "", 7)
-            pdf.set_text_color(75, 83, 32)  # #4B5320 army olive
+            pdf.set_text_color(75, 83, 32)
             pdf.cell(tile_w - 5, 4, metric_lbl.upper(), align="L")
-            # Value (large bold)
+            # Value
             pdf.set_xy(tx + 3, tile_y + 9)
-            pdf.set_font(font_name, "B", 14)
+            pdf.set_font(font_name, "B", 13)
             pdf.set_text_color(15, 23, 42)
             pdf.cell(tile_w - 5, 7, value, align="L")
             # Sub-label
-            pdf.set_xy(tx + 3, tile_y + 16)
+            pdf.set_xy(tx + 3, tile_y + 17)
             pdf.set_font(font_name, "", 7)
-            pdf.set_text_color(75, 83, 32)  # #4B5320 army olive
+            pdf.set_text_color(75, 83, 32)
             pdf.cell(tile_w - 5, 4, sub_lbl, align="L")
+            # MoM badge (tile 0 only, when available)
+            if badge:
+                positive = badge.startswith("+")
+                r, g, b = (34, 197, 94) if positive else (239, 68, 68)
+                pdf.set_xy(tx + 3, tile_y + 21)
+                pdf.set_font(font_name, "B", 7)
+                pdf.set_text_color(r, g, b)
+                pdf.cell(tile_w - 5, 4, badge, align="L")
 
-        pdf.set_y(tile_y + tile_h + 6)
+        pdf.set_y(tile_y + tile_h + 5)
         pdf.set_text_color(0, 0, 0)
         pdf.set_fill_color(255, 255, 255)
 
@@ -1201,9 +1353,13 @@ def _cached_build_pdf(
     if png_b64:
         png_bytes = _b64.b64decode(png_b64)
         pdf.image(io.BytesIO(png_bytes), x=pdf.l_margin, w=W)
-        pdf.ln(6)
+        # Data source caption flush-right below chart.
+        pdf.set_font(font_name, "", 7)
+        pdf.set_text_color(148, 163, 184)
+        pdf.cell(W, 4, "Source: Gold Layer \u00b7 Athena", align="R", new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(3)
 
-    # ── Key Finding (insight) — blue left-accent bar ──────────────────────────
+    # ── Summary (insight) — olive left-accent bar ─────────────────────────────
     pdf_insight = re.sub(r"\*{1,3}([^*\n]+)\*{1,3}", r"\1", insight)
     pdf_insight = pdf_insight.replace("\r\n", "\n").replace("\r", "\n")
     pdf.set_font(font_name, "B", 11)
@@ -1213,14 +1369,58 @@ def _cached_build_pdf(
     pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + W, pdf.get_y())
     pdf.ln(4)
     pdf.set_font(font_name, "", 11)
-    pdf.set_text_color(30, 41, 59)  # slate-800
+    pdf.set_text_color(30, 41, 59)
     y_before = pdf.get_y()
     pdf.set_x(pdf.l_margin + 6)
     pdf.multi_cell(W - 6, 7, pdf_insight, align="L")
     y_after = pdf.get_y()
-    pdf.set_fill_color(75, 83, 32)  # #4B5320 army olive
+    pdf.set_fill_color(75, 83, 32)
     pdf.rect(pdf.l_margin, y_before, 3, y_after - y_before, style="F")
     pdf.set_fill_color(255, 255, 255)
+
+    # ── Data Snapshot — top 5 rows compact table ──────────────────────────────
+    snap_cols = (_pdf_cat[:1] if _pdf_cat else []) + _pdf_numeric[:3]
+    snap_rows = rows[:5]
+    remaining_mm = pdf.h - pdf.get_y() - pdf.b_margin
+    if snap_cols and snap_rows and remaining_mm >= 38:
+        pdf.ln(7)
+        pdf.set_font(font_name, "B", 11)
+        pdf.set_text_color(100, 116, 139)
+        pdf.cell(W, 5, "DATA SNAPSHOT", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_draw_color(226, 232, 240)
+        pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + W, pdf.get_y())
+        pdf.ln(3)
+
+        col_w_s = W / len(snap_cols)
+        row_h_s = 6.5
+
+        # Header row
+        hdr_y = pdf.get_y()
+        pdf.set_fill_color(75, 83, 32)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font(font_name, "B", 8)
+        for j, sc in enumerate(snap_cols):
+            pdf.set_xy(pdf.l_margin + j * col_w_s, hdr_y)
+            pdf.cell(col_w_s, row_h_s, sc.replace("_", " ").title(), fill=True)
+        pdf.set_y(hdr_y + row_h_s)
+
+        # Data rows
+        for ri, row in enumerate(snap_rows):
+            row_y = pdf.get_y()
+            if ri % 2 == 0:
+                pdf.set_fill_color(243, 244, 236)
+            else:
+                pdf.set_fill_color(255, 255, 255)
+            pdf.set_text_color(30, 41, 59)
+            pdf.set_font(font_name, "", 8)
+            for j, sc in enumerate(snap_cols):
+                cell_val = _fmt_snap(str(row.get(sc, "")), sc)
+                pdf.set_xy(pdf.l_margin + j * col_w_s, row_y)
+                pdf.cell(col_w_s, row_h_s, cell_val, fill=True)
+            pdf.set_y(row_y + row_h_s)
+
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_fill_color(255, 255, 255)
 
     return bytes(pdf.output())
 

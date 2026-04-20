@@ -146,6 +146,21 @@ def _is_monetary(col: str) -> bool:
     return any(hint in col_lower for hint in _MONETARY_HINTS)
 
 
+def _fmt_axis(value: float, monetary: bool) -> str:
+    """Format an axis tick value with K/M suffix and optional $ prefix.
+
+    Examples: 140000 → '$140K', 1500000 → '$1.5M', 42 → '42'.
+    """
+    abs_v = abs(value)
+    if abs_v >= 1_000_000:
+        s = f"{value / 1_000_000:.1f}M"
+    elif abs_v >= 1_000:
+        s = f"{value / 1_000:.0f}K"
+    else:
+        s = f"{value:.0f}"
+    return f"${s}" if monetary else s
+
+
 def _catmull_rom_smooth(
     x_indices: list[int],
     y_values: list[float],
@@ -448,10 +463,18 @@ class ChartGenerator:
             values = [v for v, _ in sorted_pairs]
             labels = [lbl for _, lbl in sorted_pairs]
 
+        import matplotlib.ticker as mticker
+
+        _bar_monetary = _is_monetary(y_col)
         fig, ax = plt.subplots(figsize=(10, max(4, len(labels) * 0.6)))
         bars = ax.barh(labels, values, color=_BRAND_COLOUR)
-        ax.bar_label(bars, fmt="%.0f", padding=4, fontsize=9)
+        # Bar end labels formatted with $ and K/M.
+        bar_labels = [_fmt_axis(v, _bar_monetary) for v in values]
+        ax.bar_label(bars, labels=bar_labels, padding=4, fontsize=9)
         ax.set_xlabel(y_col.replace("_", " ").title())
+        ax.xaxis.set_major_formatter(
+            mticker.FuncFormatter(lambda v, _p: _fmt_axis(v, _bar_monetary))
+        )
         ax.invert_yaxis()
         if title:
             ax.set_title(title, fontsize=11, pad=12)
@@ -558,20 +581,28 @@ class ChartGenerator:
                     arrowprops={"arrowstyle": "-", "color": _BRAND_COLOUR, "lw": 1},
                 )
 
-        # Axis labels and ticks.
+        # Axis labels, ticks, and formatted y-axis.
+        import matplotlib.ticker as mticker
+
         ax.set_xticks(x_indices)
         ax.set_xticklabels(x_labels, rotation=45, ha="right")
         ax.set_xlabel(x_title)
         ax.set_ylabel(y_col.replace("_", " ").title())
+        _line_monetary = _is_monetary(y_col)
+        ax.yaxis.set_major_formatter(
+            mticker.FuncFormatter(lambda v, _p: _fmt_axis(v, _line_monetary))
+        )
 
         # Clean up chart borders.
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.grid(axis="y", color="#e0e0e0", linewidth=0.7, linestyle="--")
 
+        # Extra top padding so the title never overlaps callout annotations.
         if title:
-            ax.set_title(title, fontsize=11, pad=12)
+            ax.set_title(title, fontsize=11, pad=20)
         fig.tight_layout()
+        fig.subplots_adjust(top=0.88)
 
         png_bytes = _fig_to_png(fig)
         plt.close(fig)
