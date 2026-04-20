@@ -38,6 +38,7 @@ import os as _os
 from dataclasses import dataclass
 from typing import Any
 
+import matplotlib.patches as mpatches
 import boto3
 from botocore.exceptions import ClientError
 
@@ -703,7 +704,7 @@ class ChartGenerator:
         colours = (_OLIVE_PALETTE * 2)[: len(labels)]
 
         fig, ax = plt.subplots(figsize=(8, 6))
-        wedges, _texts, autotexts = ax.pie(
+        pie_result = ax.pie(
             values,
             labels=labels,
             autopct="%1.1f%%",
@@ -712,12 +713,13 @@ class ChartGenerator:
             pctdistance=0.78,
             wedgeprops={"linewidth": 1.5, "edgecolor": "white"},
         )
+        autotexts = pie_result[2]  # (wedges, texts, autotexts) when autopct is set
         for at in autotexts:
             at.set_fontsize(9)
             at.set_color("white")
             at.set_fontweight("bold")
         # Draw the donut hole.
-        centre_circle = plt.Circle((0, 0), 0.55, fc="white")
+        centre_circle = mpatches.Circle((0, 0), 0.55, fc="white")
         ax.add_patch(centre_circle)
         ax.axis("equal")
         if title:
