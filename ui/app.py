@@ -911,9 +911,12 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
         metric_label = metric_col.replace("_", " ").title()
 
         is_time_cat = any(hint in cat_col.lower() for hint in _time_col_hints)
-        top_raw = str(rows[0].get(cat_col, ""))
+        # For time-series results, tile 0 shows the most-recent period (last row)
+        # so the MoM badge is consistent with the value displayed.
+        display_row = rows[-1] if is_time_cat else rows[0]
+        top_raw = str(display_row.get(cat_col, ""))
         top_cat = _fmt_period(top_raw) if is_time_cat else top_raw
-        top_val = _fmt(str(rows[0].get(metric_col, "")))
+        top_val = _fmt(str(display_row.get(metric_col, "")))
 
         # MoM badge: most-recent vs prior period for time-series results.
         badge = ""
@@ -951,7 +954,8 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
                 cat_plural = cat_label
             else:
                 cat_plural = cat_label + "s"
-        tiles.append(("Total Entries", str(len(rows)), cat_plural, ""))
+        tile2_label = "Periods Covered" if is_time_cat else "Total Entries"
+        tiles.append((tile2_label, str(len(rows)), cat_plural, ""))
 
         # Tile 3: aggregate total with period range sub-label for time-series.
         try:
@@ -1015,51 +1019,61 @@ def _plain_english_assumption(text: str) -> str:
 
 
 def _draw_e_mark(pdf: Any, x: float, y: float, size: float = 10.0) -> None:
-    """Draw the Geometric E logo mark (navy square, white E) at position (x, y).
+    """Draw the EDP enterprise logo mark at position (x, y).
 
-    The E is faithful to Concept 3 from the brand SVG: three horizontal bars
-    (top, shorter middle, bottom) plus a left vertical bar, all white on navy.
+    Design: four ascending data bars on a baseline inside an olive square,
+    communicating 'data analytics platform' at a glance. A thin accent line
+    runs above the bars to frame the composition.
+
+    Bar heights (as fraction of usable area): 0.30, 0.50, 0.72, 1.00
+    — each bar is slightly wider than its gap so the silhouette reads cleanly
+    at small sizes.
 
     Args:
         pdf: fpdf2 FPDF instance.
         x, y: Top-left corner of the mark in mm.
         size: Side length of the square in mm.
     """
-    # Deep navy square background
+    # ── Background ──────────────────────────────────────────────────────────
     pdf.set_fill_color(75, 83, 32)  # #4B5320 army olive
     pdf.rect(x, y, size, size, style="F")
 
-    # White E bars — proportions derived from the brand SVG (80x80 unit grid)
-    pad = size * 0.175  # left/top padding
-    bar_h = size * 0.075  # bar height
-    bar_w_full = size * 0.525  # top/bottom bar width
-    bar_w_mid = size * 0.375  # middle bar width (shorter)
-    vert_w = size * 0.075  # vertical bar width
-    e_height = size * 0.55  # full height of E
+    # ── Layout constants ────────────────────────────────────────────────────
+    pad_x = size * 0.16  # horizontal inset on each side
+    pad_top = size * 0.15  # top inset
+    pad_bot = size * 0.16  # bottom inset (above baseline)
+
+    usable_w = size - 2 * pad_x
+    usable_h = size - pad_top - pad_bot
+
+    n_bars = 4
+    gap = usable_w * 0.10  # gap between bars (10 % of usable width)
+    bar_w = (usable_w - (n_bars - 1) * gap) / n_bars
+
+    baseline_y = y + size - pad_bot
+    bar_fractions = [0.30, 0.52, 0.73, 1.00]  # height ratios
 
     pdf.set_fill_color(255, 255, 255)
-    # Vertical bar (spine of the E)
-    pdf.rect(x + pad, y + pad + (size - 2 * pad - e_height) / 2, vert_w, e_height, style="F")
-    # Top bar
-    pdf.rect(
-        x + pad,
-        y + pad + (size - 2 * pad - e_height) / 2,
-        bar_w_full,
-        bar_h,
-        style="F",
-    )
-    # Middle bar (centred vertically within the E)
-    mid_y = y + pad + (size - 2 * pad - e_height) / 2 + (e_height - bar_h) / 2
-    pdf.rect(x + pad, mid_y, bar_w_mid, bar_h, style="F")
-    # Bottom bar
-    pdf.rect(
-        x + pad,
-        y + pad + (size - 2 * pad - e_height) / 2 + e_height - bar_h,
-        bar_w_full,
-        bar_h,
-        style="F",
-    )
-    # Reset fill
+
+    # ── Ascending bars ───────────────────────────────────────────────────────
+    for i, frac in enumerate(bar_fractions):
+        bh = usable_h * frac
+        bx = x + pad_x + i * (bar_w + gap)
+        by = baseline_y - bh
+        pdf.rect(bx, by, bar_w, bh, style="F")
+
+    # ── Baseline ─────────────────────────────────────────────────────────────
+    pdf.set_fill_color(255, 255, 255)
+    baseline_h = size * 0.045
+    pdf.rect(x + pad_x, baseline_y, usable_w, baseline_h, style="F")
+
+    # ── Top accent line (frames the composition) ─────────────────────────────
+    accent_y = y + pad_top * 0.4
+    accent_h = size * 0.03
+    pdf.set_fill_color(255, 255, 255)
+    pdf.rect(x + pad_x, accent_y, usable_w * 0.55, accent_h, style="F")
+
+    # Reset fill colour
     pdf.set_fill_color(255, 255, 255)
 
 
