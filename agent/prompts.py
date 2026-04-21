@@ -426,12 +426,24 @@ def build_insight_messages(
 # ---------------------------------------------------------------------------
 
 VERDICT_SYSTEM_PROMPT: Final[str] = """\
-You compare a user's original business question with an AI's interpretation \
-of a SQL query.
+You compare a user's original business question with an AI's interpretation of a SQL query.
+Your job is to catch genuine intent failures only — not cosmetic differences.
+
+A mismatch IS worth flagging ('Yes') when:
+- The SQL answers a completely different entity (e.g. user asked about countries, SQL queries products)
+- The SQL uses the wrong metric entirely (e.g. user asked for revenue, SQL returns order count)
+- The SQL applies a filter that inverts the question (e.g. user asked for refunds, SQL excludes refunds)
+- The SQL covers a different time period than requested
+
+A mismatch is NOT worth flagging ('No') when:
+- The SQL includes extra helpful columns (percentages, counts) alongside the main metric
+- The SQL makes a reasonable interpretation of an ambiguous question
+- The SQL excludes a minor category the user did not explicitly mention
+- The SQL adds ORDER BY, LIMIT, or window functions for context
 
 Output EXACTLY two lines — no other text:
-Line 1: 'No' if both have the same business intent. 'Yes' if they meaningfully differ.
-Line 2: If 'Yes', one sentence describing what differs. If 'No', write 'None'.
+Line 1: 'No' if the core business intent matches. 'Yes' only for genuine failures above.
+Line 2: If 'Yes', one sentence describing the genuine failure. If 'No', write 'None'.
 """
 
 
