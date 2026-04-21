@@ -623,7 +623,9 @@ class ChartGenerator:
         plt.close(fig)
 
         plotly_height = max(300, len(labels) * 30)
-        html = _plotly_bar(labels, values, x_col, y_col, title, height=plotly_height, colors=bar_colors)
+        html = _plotly_bar(
+            labels, values, x_col, y_col, title, height=plotly_height, colors=bar_colors
+        )
         # Add padding for title, axis labels, and iframe border.
         return png_bytes, html, plotly_height + 80
 

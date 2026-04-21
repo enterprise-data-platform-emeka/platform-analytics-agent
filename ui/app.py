@@ -990,7 +990,9 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
                 tile3_sub = f"{first_fmt} \u2013 {last_fmt}"
             else:
                 tile3_sub = "All Entries"
-            tiles.append((f"Total {base_label} (All)", _fmt(str(total), col=metric_col), tile3_sub, ""))
+            tiles.append(
+                (f"Total {base_label} (All)", _fmt(str(total), col=metric_col), tile3_sub, "")
+            )
         except (ValueError, TypeError):
             pass
     elif numeric_cols:
@@ -1060,7 +1062,7 @@ def _draw_e_mark(pdf: Any, x: float, y: float, size: float = 10.0) -> None:
     pdf.rect(x, y, size, size, style="F")
 
     # ── Layout constants ────────────────────────────────────────────────────
-    pad_x = size * 0.18   # horizontal inset on each side
+    pad_x = size * 0.18  # horizontal inset on each side
     pad_top = size * 0.14  # top inset
     pad_bot = size * 0.20  # bottom inset (above baseline)
 
@@ -1068,7 +1070,7 @@ def _draw_e_mark(pdf: Any, x: float, y: float, size: float = 10.0) -> None:
     usable_h = size - pad_top - pad_bot
 
     n_bars = 3
-    gap = usable_w * 0.12   # gap between bars (12 % of usable width)
+    gap = usable_w * 0.12  # gap between bars (12 % of usable width)
     bar_w = (usable_w - (n_bars - 1) * gap) / n_bars
 
     baseline_y = y + size - pad_bot
