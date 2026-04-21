@@ -147,12 +147,13 @@ When you type a web address into Chrome or Safari, your browser connects to a pr
 Both Streamlit and FastAPI run inside the same ECS container. Think of a container as a small private computer with its own isolated network. When the Streamlit code calls `localhost:8080`, it means "call the program listening on port 8080 inside this container" — which is FastAPI. The stakeholder's browser never sees or uses localhost. They only ever type the ALB's DNS address. Localhost is purely internal, invisible to the outside world.
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#4B5320', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#3a4118', 'lineColor': '#4B5320', 'signalColor': '#4B5320', 'actorLineColor': '#4B5320', 'secondaryColor': '#F0F7FF', 'tertiaryColor': '#F0F7FF', 'background': '#ffffff', 'clusterBkg': '#F0F7FF', 'edgeLabelBackground': '#ffffff'}}}%%
 sequenceDiagram
     autonumber
     actor S as Stakeholder
     participant ALB as AWS Load Balancer
-    participant UI as Streamlit UI<br/>(web page)
-    participant API as Analytics Backend<br/>(FastAPI)
+    participant UI as Streamlit UI (web page)
+    participant API as Analytics Backend (FastAPI)
     participant AI as Athena + Claude
 
     note over UI,API: These two live inside the same server (ECS container)
@@ -163,8 +164,8 @@ sequenceDiagram
 
     S->>ALB: Types a question and clicks Submit
     ALB->>UI: Forwards the question
-    UI->>API: Sends the question internally<br/>(no network hop — same server)
-    API->>AI: Runs an Athena SQL query<br/>and asks Claude for an insight
+    UI->>API: Sends the question internally (no network hop, same server)
+    API->>AI: Runs an Athena SQL query and asks Claude for an insight
     AI-->>API: Returns query results and insight
     API-->>UI: Returns insight, chart, and cost
     UI-->>S: Renders the answer, chart, and cost in the browser
