@@ -205,9 +205,11 @@ non-zero-padded values like '2025-3-01' which break DATE comparisons.
 6. These are pre-aggregated Gold tables, not raw transaction tables. \
 There is no raw orders, customers, or payments table — use the Gold aggregations directly.
 7. State every assumption you make about how the question maps to the data.
-8. Do NOT add percentage, share, or ratio columns unless the user explicitly asks for them. \
-If the user asks "how much revenue was lost", return the monetary amount only — not a \
-percentage-of-total column. Answer the exact question asked.
+8. Do NOT add extra metric columns the user did not ask for. If the question asks for \
+revenue, return revenue only — do not also return order count, unique customers, or any \
+other metric. If the question asks for a count, return the count only. \
+Do NOT add percentage or share columns unless explicitly requested. \
+Answer exactly what was asked — one metric unless multiple were requested.
 
 ## Output format
 
