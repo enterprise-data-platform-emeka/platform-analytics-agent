@@ -1403,10 +1403,47 @@ def _cached_build_pdf(
     pdf.ln(4)
     pdf.set_font(font_name, "", 11)
     pdf.set_text_color(30, 41, 59)
+
+    # Measure how much vertical space the summary will need before drawing it.
+    # line_height=7mm, cell_width=W-6. Count wrapped lines per paragraph.
+    _line_h = 7.0
+    _cell_w = W - 6
+    _char_per_line = max(1, int(_cell_w / (11 * 0.45)))  # approx chars at 11pt
+    _total_lines = 0
+    for _para in pdf_insight.split("\n"):
+        _para = _para.strip()
+        _total_lines += max(1, (len(_para) + _char_per_line - 1) // _char_per_line)
+    _summary_h = _total_lines * _line_h
+
+    # How much space remains on this page above the footer?
+    # Reserve 38mm for the DATA SNAPSHOT section heading + at least one row.
+    _safe_bottom = pdf.h - 18  # footer is 13mm, give 5mm buffer
+    _available = _safe_bottom - pdf.get_y() - 38  # 38mm for snapshot
+
+    # If the full summary won't fit, truncate it to leave room for the snapshot.
+    if _summary_h > _available and _available > _line_h:
+        _max_lines = max(1, int(_available / _line_h))
+        _truncated_lines: list[str] = []
+        _count = 0
+        for _para in pdf_insight.split("\n"):
+            _para = _para.strip()
+            _para_lines = max(1, (len(_para) + _char_per_line - 1) // _char_per_line)
+            if _count + _para_lines > _max_lines:
+                break
+            _truncated_lines.append(_para)
+            _count += _para_lines
+        pdf_insight = " ".join(_truncated_lines)
+
+    # Disable auto page break for the summary block so multi_cell never
+    # triggers a page break mid-paragraph. The truncation above ensures the
+    # text fits. The accent bar rect is only valid on a single page.
+    pdf.set_auto_page_break(False)
     y_before = pdf.get_y()
     pdf.set_x(pdf.l_margin + 6)
-    pdf.multi_cell(W - 6, 7, pdf_insight, align="L")
+    pdf.multi_cell(_cell_w, _line_h, pdf_insight, align="L")
     y_after = pdf.get_y()
+    pdf.set_auto_page_break(True, margin=18)
+
     pdf.set_fill_color(75, 83, 32)
     pdf.rect(pdf.l_margin, y_before, 3, y_after - y_before, style="F")
     pdf.set_fill_color(255, 255, 255)
