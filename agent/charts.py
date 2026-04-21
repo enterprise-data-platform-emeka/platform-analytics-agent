@@ -222,7 +222,7 @@ def _fmt_month_axis(label: str) -> str:
     """
     import re as _re
 
-    m = _re.match(r"^(\d{4})-(\d{1,2})$", str(label).strip())
+    m = _re.match(r"^(\d{4})-(\d{1,2})(?:-\d{2})?$", str(label).strip())
     if m:
         mo = int(m.group(2))
         if 1 <= mo <= 12:

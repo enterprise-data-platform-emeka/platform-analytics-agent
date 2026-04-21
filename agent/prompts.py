@@ -205,6 +205,9 @@ non-zero-padded values like '2025-3-01' which break DATE comparisons.
 6. These are pre-aggregated Gold tables, not raw transaction tables. \
 There is no raw orders, customers, or payments table — use the Gold aggregations directly.
 7. State every assumption you make about how the question maps to the data.
+8. Select only the columns that directly answer the question. Do NOT select every column \
+from the table. If the question asks for revenue over time, SELECT only the time dimension \
+and the revenue column, not orders, customers, or other metrics the user did not ask for.
 
 ## Output format
 
