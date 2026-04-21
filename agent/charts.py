@@ -202,10 +202,35 @@ def _is_monetary(col: str) -> bool:
     return any(hint in col_lower for hint in _MONETARY_HINTS)
 
 
-def _fmt_axis(value: float, monetary: bool) -> str:
-    """Format an axis tick value with K/M suffix and optional $ prefix.
+def _bar_gradient_colors(n: int) -> list[str]:
+    """Return n hex colors interpolated from dark olive (highest) to light olive (lowest).
 
-    Examples: 140000 → '$140K', 1500000 → '$1.5M', 42 → '42'.
+    Bars are sorted descending before rendering, so index 0 is the highest value
+    and receives the darkest shade. The last bar receives the lightest shade.
+    The two endpoints are:
+      dark  = #4B5320  (brand olive, RGB 75, 83, 32)
+      light = #B8C88A  (pale olive, RGB 184, 200, 138)
+
+    With only one bar, the single color is the brand dark olive.
+    """
+    if n <= 0:
+        return []
+    dark = (75, 83, 32)
+    light = (184, 200, 138)
+    colors: list[str] = []
+    for i in range(n):
+        t = i / max(n - 1, 1)  # 0.0 at top (darkest) → 1.0 at bottom (lightest)
+        r = int(dark[0] + t * (light[0] - dark[0]))
+        g = int(dark[1] + t * (light[1] - dark[1]))
+        b = int(dark[2] + t * (light[2] - dark[2]))
+        colors.append(f"#{r:02x}{g:02x}{b:02x}")
+    return colors
+
+
+def _fmt_axis(value: float, monetary: bool) -> str:
+    """Format an axis tick value with K/M suffix and optional € prefix.
+
+    Examples: 140000 → '€140K', 1_500_000 → '€1.5M', 42 → '42'.
     """
     abs_v = abs(value)
     if abs_v >= 1_000_000:
@@ -214,7 +239,7 @@ def _fmt_axis(value: float, monetary: bool) -> str:
         s = f"{value / 1_000:.0f}K"
     else:
         s = f"{value:.0f}"
-    return f"${s}" if monetary else s
+    return f"€{s}" if monetary else s
 
 
 def _catmull_rom_smooth(
@@ -580,7 +605,8 @@ class ChartGenerator:
         # still fit on a single PDF page alongside the summary and data snapshot.
         fig_h = min(max(4, len(labels) * 0.6), 7.0)
         fig, ax = plt.subplots(figsize=(10, fig_h))
-        bars = ax.barh(labels, values, color=_BRAND_COLOUR)
+        bar_colors = _bar_gradient_colors(len(values))
+        bars = ax.barh(labels, values, color=bar_colors)
         # Bar end labels formatted with $ and K/M.
         bar_labels = [_fmt_axis(v, _bar_monetary) for v in values]
         ax.bar_label(bars, labels=bar_labels, padding=4, fontsize=9)
@@ -597,7 +623,7 @@ class ChartGenerator:
         plt.close(fig)
 
         plotly_height = max(300, len(labels) * 30)
-        html = _plotly_bar(labels, values, x_col, y_col, title, height=plotly_height)
+        html = _plotly_bar(labels, values, x_col, y_col, title, height=plotly_height, colors=bar_colors)
         # Add padding for title, axis labels, and iframe border.
         return png_bytes, html, plotly_height + 80
 
@@ -891,7 +917,7 @@ class ChartGenerator:
                     offset = 22
                 else:
                     offset = default_offset
-                lbl = f"${val:,.0f}" if monetary else f"{val:,.0f}"
+                lbl = f"€{val:,.0f}" if monetary else f"{val:,.0f}"
                 ax.annotate(
                     lbl,
                     xy=(idx, val),
@@ -1035,16 +1061,18 @@ def _plotly_bar(
     y_col: str,
     title: str = "",
     height: int = 300,
+    colors: list[str] | None = None,
 ) -> str:
     """Return a Plotly horizontal bar chart as an HTML fragment."""
     import plotly.graph_objects as go
 
+    bar_colors = colors if colors else _bar_gradient_colors(len(values))
     fig = go.Figure(
         go.Bar(
             x=values,
             y=labels,
             orientation="h",
-            marker_color=_BRAND_COLOUR,
+            marker_color=bar_colors,
         )
     )
     fig.update_layout(
@@ -1081,7 +1109,7 @@ def _plotly_line(
         min_i = y_values.index(min(y_values))
         for idx, ay_offset in [(max_i, -40), (min_i, 40)]:
             val = y_values[idx]
-            lbl = f"${val:,.0f}" if monetary else f"{val:,.0f}"
+            lbl = f"€{val:,.0f}" if monetary else f"{val:,.0f}"
             annotations.append(
                 {
                     "x": x_labels[idx],

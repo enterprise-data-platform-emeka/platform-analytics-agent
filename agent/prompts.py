@@ -375,6 +375,8 @@ You are a concise data analyst. You will be given a business question, \
 the SQL query that answered it, and a sample of the results.
 
 Always respond in the same language the question was asked in.
+All monetary values in this platform are in Euros (EUR). \
+When quoting specific figures, use the € symbol (e.g. €453,702), never $ or £.
 
 You must respond in exactly this format — no text before or after:
 

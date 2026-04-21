@@ -830,12 +830,14 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
         except ValueError:
             cat_cols.append(col)
 
-    def _fmt(val: str) -> str:
+    def _fmt(val: str, col: str = "") -> str:
         try:
-            f = float(str(val).replace(",", "").replace("$", ""))
+            f = float(str(val).replace(",", "").replace("€", "").replace("$", ""))
+            _mon = col and any(h in col.lower() for h in _kpi_priority)
+            prefix = "€" if _mon else ""
             if f == int(f):
-                return f"{int(f):,}"
-            return f"{f:,.2f}"
+                return f"{prefix}{int(f):,}"
+            return f"{prefix}{f:,.2f}"
         except (ValueError, TypeError):
             return str(val)
 
@@ -905,15 +907,17 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
     def _pick_metric(cols: list[str]) -> str:
         non_rank = [c for c in cols if not _is_rank_col(c)]
         cands = non_rank if non_rank else cols
-        for c in reversed(cands):
+        # Scan forward so earlier columns (e.g. total_revenue) beat later ones
+        # (e.g. avg_order_value) when both match a priority hint.
+        for c in cands:
             if any(h in c.lower() for h in _kpi_priority):
                 return c
-        for c in reversed(cands):
+        for c in cands:
             if any(h in c.lower() for h in _kpi_any) and not any(
                 h in c.lower() for h in _kpi_counts
             ):
                 return c
-        for c in reversed(cands):
+        for c in cands:
             if any(h in c.lower() for h in _kpi_any):
                 return c
         return cands[-1]
@@ -935,7 +939,7 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
         else:
             # Title-case database-stored lowercase values (e.g. "germany" → "Germany").
             top_cat = top_raw.title() if top_raw == top_raw.lower() else top_raw
-        top_val = _fmt(str(display_row.get(metric_col, "")))
+        top_val = _fmt(str(display_row.get(metric_col, "")), col=metric_col)
 
         # MoM badge: most-recent vs prior period for time-series results.
         badge = ""
@@ -986,7 +990,7 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
                 tile3_sub = f"{first_fmt} \u2013 {last_fmt}"
             else:
                 tile3_sub = "All Entries"
-            tiles.append((f"Total {base_label} (All)", _fmt(str(total)), tile3_sub, ""))
+            tiles.append((f"Total {base_label} (All)", _fmt(str(total), col=metric_col), tile3_sub, ""))
         except (ValueError, TypeError):
             pass
     elif numeric_cols:
@@ -1040,13 +1044,11 @@ def _plain_english_assumption(text: str) -> str:
 def _draw_e_mark(pdf: Any, x: float, y: float, size: float = 10.0) -> None:
     """Draw the EDP enterprise logo mark at position (x, y).
 
-    Design: four ascending data bars on a baseline inside an olive square,
-    communicating 'data analytics platform' at a glance. A thin accent line
-    runs above the bars to frame the composition.
+    Design: three ascending data bars on a thick baseline inside an olive square.
+    Three bars (vs four) gives each bar more width so the silhouette reads
+    clearly at the small 12 mm print size. No accent line — keeps it clean.
 
-    Bar heights (as fraction of usable area): 0.30, 0.50, 0.72, 1.00
-    — each bar is slightly wider than its gap so the silhouette reads cleanly
-    at small sizes.
+    Bar heights (as fraction of usable area): 0.40, 0.70, 1.00
 
     Args:
         pdf: fpdf2 FPDF instance.
@@ -1058,19 +1060,19 @@ def _draw_e_mark(pdf: Any, x: float, y: float, size: float = 10.0) -> None:
     pdf.rect(x, y, size, size, style="F")
 
     # ── Layout constants ────────────────────────────────────────────────────
-    pad_x = size * 0.16  # horizontal inset on each side
-    pad_top = size * 0.15  # top inset
-    pad_bot = size * 0.16  # bottom inset (above baseline)
+    pad_x = size * 0.18   # horizontal inset on each side
+    pad_top = size * 0.14  # top inset
+    pad_bot = size * 0.20  # bottom inset (above baseline)
 
     usable_w = size - 2 * pad_x
     usable_h = size - pad_top - pad_bot
 
-    n_bars = 4
-    gap = usable_w * 0.10  # gap between bars (10 % of usable width)
+    n_bars = 3
+    gap = usable_w * 0.12   # gap between bars (12 % of usable width)
     bar_w = (usable_w - (n_bars - 1) * gap) / n_bars
 
     baseline_y = y + size - pad_bot
-    bar_fractions = [0.30, 0.52, 0.73, 1.00]  # height ratios
+    bar_fractions = [0.40, 0.70, 1.00]  # height ratios — clear step progression
 
     pdf.set_fill_color(255, 255, 255)
 
@@ -1081,16 +1083,10 @@ def _draw_e_mark(pdf: Any, x: float, y: float, size: float = 10.0) -> None:
         by = baseline_y - bh
         pdf.rect(bx, by, bar_w, bh, style="F")
 
-    # ── Baseline ─────────────────────────────────────────────────────────────
+    # ── Baseline (thick white rule below bars) ───────────────────────────────
+    baseline_h = size * 0.06
     pdf.set_fill_color(255, 255, 255)
-    baseline_h = size * 0.045
     pdf.rect(x + pad_x, baseline_y, usable_w, baseline_h, style="F")
-
-    # ── Top accent line (frames the composition) ─────────────────────────────
-    accent_y = y + pad_top * 0.4
-    accent_h = size * 0.03
-    pdf.set_fill_color(255, 255, 255)
-    pdf.rect(x + pad_x, accent_y, usable_w * 0.55, accent_h, style="F")
 
     # Reset fill colour
     pdf.set_fill_color(255, 255, 255)
@@ -1277,9 +1273,9 @@ def _cached_build_pdf(
     def _fmt_snap(val: str, col: str) -> str:
         """Format a cell value for the data snapshot table."""
         try:
-            f = float(str(val).replace(",", "").replace("$", ""))
+            f = float(str(val).replace(",", "").replace("€", "").replace("$", ""))
             if _is_mon_col(col):
-                return f"${f:,.0f}"
+                return f"€{f:,.0f}"
             if f == int(f):
                 return f"{int(f):,}"
             return f"{f:,.2f}"
@@ -1439,9 +1435,13 @@ def _cached_build_pdf(
             pdf.cell(col_w_s, row_h_s, sc.replace("_", " ").title(), fill=True)
         pdf.set_y(hdr_y + row_h_s)
 
-        # Data rows
+        # Data rows — auto page break is off so cells never split mid-row.
+        pdf.set_auto_page_break(False)
         for ri, row in enumerate(snap_rows):
             row_y = pdf.get_y()
+            # Stop rendering rows that would overflow the printable area.
+            if row_y + row_h_s > pdf.h - pdf.b_margin:
+                break
             if ri % 2 == 0:
                 pdf.set_fill_color(243, 244, 236)
             else:
@@ -1453,6 +1453,7 @@ def _cached_build_pdf(
                 pdf.set_xy(pdf.l_margin + j * col_w_s, row_y)
                 pdf.cell(col_w_s, row_h_s, cell_val, fill=True)
             pdf.set_y(row_y + row_h_s)
+        pdf.set_auto_page_break(True, margin=18)
 
         pdf.set_text_color(0, 0, 0)
         pdf.set_fill_color(255, 255, 255)
