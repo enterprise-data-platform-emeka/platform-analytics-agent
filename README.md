@@ -47,6 +47,7 @@ Most NL-to-SQL tools only see column names. This agent sees the business meaning
 ## Architecture
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#4B5320', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#3a4118', 'lineColor': '#4B5320', 'signalColor': '#4B5320', 'actorLineColor': '#4B5320', 'secondaryColor': '#F0F7FF', 'tertiaryColor': '#F0F7FF', 'background': '#ffffff', 'clusterBkg': '#F0F7FF', 'edgeLabelBackground': '#ffffff'}}}%%
 flowchart TD
     subgraph Startup ["Startup - once per ECS task"]
         LoadSchemas["load_all_schemas()\nGlue Catalog + dbt catalog.json\nAll 7 Gold schemas into system prompt"]
@@ -152,8 +153,8 @@ sequenceDiagram
     autonumber
     actor S as Stakeholder
     participant ALB as AWS Load Balancer
-    participant UI as Streamlit UI (web page)
-    participant API as Analytics Backend (FastAPI)
+    participant UI as Streamlit UI<br/>(web page)
+    participant API as Analytics Backend<br/>(FastAPI)
     participant AI as Athena + Claude
 
     note over UI,API: These two live inside the same server (ECS container)
@@ -164,8 +165,8 @@ sequenceDiagram
 
     S->>ALB: Types a question and clicks Submit
     ALB->>UI: Forwards the question
-    UI->>API: Sends the question internally (no network hop, same server)
-    API->>AI: Runs an Athena SQL query and asks Claude for an insight
+    UI->>API: Sends the question internally<br/>(no network hop — same server)
+    API->>AI: Runs an Athena SQL query<br/>and asks Claude for an insight
     AI-->>API: Returns query results and insight
     API-->>UI: Returns insight, chart, and cost
     UI-->>S: Renders the answer, chart, and cost in the browser
@@ -1269,6 +1270,7 @@ Two tools make this possible.
 There are no CSV test data files because the agent doesn't read CSV files — it reads AWS API responses and Claude API responses. Mocking those responses directly is more accurate than representing them as CSV, and the mocks stay in sync with the code automatically.
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#4B5320', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#3a4118', 'lineColor': '#4B5320', 'signalColor': '#4B5320', 'actorLineColor': '#4B5320', 'secondaryColor': '#F0F7FF', 'tertiaryColor': '#F0F7FF', 'background': '#ffffff', 'clusterBkg': '#F0F7FF', 'edgeLabelBackground': '#ffffff'}}}%%
 flowchart TD
     A[Push to GitHub] --> B[Four jobs run in parallel]
     B --> C[Lint\nruff checks code style]
