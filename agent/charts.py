@@ -832,10 +832,21 @@ class ChartGenerator:
         import matplotlib.ticker as mticker
 
         numeric_cols = self._numeric_columns(result)
-        time_cols = [
+        all_time_hint_cols_ml = [
             col for col in result.columns if any(hint in col.lower() for hint in _TIME_HINTS)
         ]
-        non_time_numeric = [c for c in numeric_cols if c not in time_cols]
+        effective_time_cols_ml = [
+            tc
+            for tc in all_time_hint_cols_ml
+            if tc not in numeric_cols
+            or all(
+                ChartGenerator._is_integer_like(str(row.get(tc, "")))
+                for row in result.rows
+                if row.get(tc, "")
+            )
+        ]
+        time_cols = effective_time_cols_ml
+        non_time_numeric = [c for c in numeric_cols if c not in effective_time_cols_ml]
 
         x_dim_cols = [
             tc
@@ -917,10 +928,24 @@ class ChartGenerator:
         import matplotlib.pyplot as plt
 
         numeric_cols = self._numeric_columns(result)
-        time_cols = [
+        all_time_hint_cols = [
             col for col in result.columns if any(hint in col.lower() for hint in _TIME_HINTS)
         ]
-        non_time_numeric = [c for c in numeric_cols if c not in time_cols]
+        # Only treat a numeric column as a time dimension if its values are integer-like
+        # (e.g. order_month=4). Float metric columns like monthly_revenue=89311.45 contain
+        # "month" in the name but must stay in non_time_numeric, not be treated as the x-axis.
+        effective_time_cols_line = [
+            tc
+            for tc in all_time_hint_cols
+            if tc not in numeric_cols
+            or all(
+                ChartGenerator._is_integer_like(str(row.get(tc, "")))
+                for row in result.rows
+                if row.get(tc, "")
+            )
+        ]
+        time_cols = effective_time_cols_line
+        non_time_numeric = [c for c in numeric_cols if c not in effective_time_cols_line]
 
         # Filter time_cols to only true time dimensions (integer-like values, e.g. month=1..12,
         # year=2024). Columns like "monthly_revenue" match "month" in their name but contain
