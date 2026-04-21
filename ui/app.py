@@ -1432,7 +1432,16 @@ def _cached_build_pdf(
                 break
             _truncated_lines.append(_para)
             _count += _para_lines
-        pdf_insight = " ".join(_truncated_lines)
+        if _truncated_lines:
+            pdf_insight = " ".join(_truncated_lines)
+        else:
+            # The first paragraph alone is longer than the available space.
+            # Truncate it at character level so at least one line of summary appears.
+            _first_para = (pdf_insight.split("\n")[0]).strip()
+            _max_chars = _max_lines * _char_per_line
+            if len(_first_para) > _max_chars:
+                _first_para = _first_para[:_max_chars].rstrip() + "\u2026"
+            pdf_insight = _first_para
 
     # Disable auto page break for the summary block so multi_cell never
     # triggers a page break mid-paragraph. The truncation above ensures the

@@ -817,6 +817,14 @@ class ChartGenerator:
 
         labels = [_display_label(str(row.get(x_col, ""))) for row in result.rows]
         values = [float(row.get(y_col, 0) or 0) for row in result.rows]
+
+        # Drop zero-value slices — they add nothing to a proportion chart and
+        # are typically data quality artefacts (e.g. a payment_method stored as
+        # an integer enum code with no associated revenue).
+        _nonzero = [(lbl, v) for lbl, v in zip(labels, values, strict=False) if v > 0]
+        if _nonzero:
+            labels, values = [x[0] for x in _nonzero], [x[1] for x in _nonzero]
+
         colours = (_OLIVE_PALETTE * 2)[: len(labels)]
 
         fig, ax = plt.subplots(figsize=(8, 6))
