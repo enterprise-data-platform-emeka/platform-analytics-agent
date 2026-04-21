@@ -468,9 +468,27 @@ class ChartGenerator:
         time_cols = [
             col for col in result.columns if any(hint in col.lower() for hint in _TIME_HINTS)
         ]
-        non_time_numeric = [c for c in numeric_cols if c not in time_cols]
+        # A numeric column is only a true time dimension if its values are
+        # integer-like (e.g. order_year=2025, order_month=4). Float metric
+        # columns whose names happen to contain a time hint — e.g.
+        # monthly_revenue=134702.50 — must stay in non_time_numeric so the
+        # chart type is detected correctly as line/bar, not table.
+        effective_time_cols = [
+            tc
+            for tc in time_cols
+            if tc not in numeric_cols  # string date col (e.g. year_month='2025-04-01')
+            or all(  # integer-like numeric col (e.g. order_month=4)
+                ChartGenerator._is_integer_like(str(row.get(tc, "")))
+                for row in result.rows
+                if row.get(tc, "")
+            )
+        ]
+        non_time_numeric = [c for c in numeric_cols if c not in effective_time_cols]
         categorical_cols = [c for c in result.columns if c not in numeric_cols]
-        non_time_categorical = [c for c in categorical_cols if c not in time_cols]
+        non_time_categorical = [c for c in categorical_cols if c not in effective_time_cols]
+
+        # Shadow time_cols with the filtered version for the rest of the checks.
+        time_cols = effective_time_cols
 
         ql = question.lower()
 
