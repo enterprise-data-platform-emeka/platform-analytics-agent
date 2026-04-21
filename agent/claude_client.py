@@ -64,10 +64,11 @@ _CLAUDE_TIMEOUT_SECONDS: Final[float] = 30.0
 # "ANALYTICAL" = needs a new Athena query. "CONVERSATIONAL" = answerable from prior context.
 _CLASSIFY_SYSTEM: Final[str] = (
     "Classify the user message. Reply with exactly one word.\n"
-    "ANALYTICAL — requires querying a database for new or updated data. Also use "
-    "ANALYTICAL when the user explicitly asks for a chart, plot, graph, or "
-    "visualisation — even if they are requesting a repeat or translation, because "
-    "charts are only produced by running a fresh query.\n"
+    "RETYPE — the user wants to see the same data rendered as a different chart type: "
+    "e.g. 'as a bar chart', 'show it as a pie chart', 'give me a line chart instead', "
+    "'make it a table', 'switch to a bar chart'. Only use RETYPE when prior context "
+    "already contains a previous query result.\n"
+    "ANALYTICAL — requires querying a database for new or updated data.\n"
     "CONVERSATIONAL — can be answered from prior conversation context alone: asking "
     "what was said, requesting a text-only translation or summary of a prior answer, "
     "asking for clarification, or any meta-question that does not need fresh data "
@@ -283,6 +284,9 @@ class ClaudeClient:
                 max_tokens=_MAX_TOKENS_CLASSIFY,
             )
             text = self._extract_text(response).strip().upper()
+            if "RETYPE" in text:
+                logger.info("Question classified as RETYPE.")
+                return "retype"
             if "CONVERSATIONAL" in text:
                 logger.info("Question classified as CONVERSATIONAL.")
                 return "conversational"

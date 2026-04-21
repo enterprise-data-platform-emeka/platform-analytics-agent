@@ -1413,7 +1413,17 @@ def _cached_build_pdf(
 
     # ── Data Snapshot — top 5 rows compact table ──────────────────────────────
     snap_cols = (_pdf_cat[:1] if _pdf_cat else []) + _pdf_numeric[:3]
-    snap_rows = rows[:5]
+    # Sort snapshot rows by first time-dimension column ascending (ISO YYYY-MM
+    # sorts correctly as a string) so they appear in chronological order.
+    snap_rows_unsorted = rows[:5]
+    if snap_cols and any(h in snap_cols[0].lower() for h in _PDF_TIME_HINTS):
+        try:
+            snap_rows_unsorted = sorted(
+                snap_rows_unsorted, key=lambda r: str(r.get(snap_cols[0], "") or "")
+            )
+        except Exception:
+            pass
+    snap_rows = snap_rows_unsorted
     remaining_mm = pdf.h - pdf.get_y() - pdf.b_margin
     if snap_cols and snap_rows and remaining_mm >= 38:
         pdf.ln(7)
@@ -1438,11 +1448,15 @@ def _cached_build_pdf(
         pdf.set_y(hdr_y + row_h_s)
 
         # Data rows — auto page break is off so cells never split mid-row.
+        # Use an explicit safe bottom (18 mm above page bottom = above footer).
+        # pdf.b_margin becomes 0 after set_auto_page_break(False) in fpdf2,
+        # so we cannot use it for the overflow check here.
+        _snap_safe_bottom = pdf.h - 18
         pdf.set_auto_page_break(False)
         for ri, row in enumerate(snap_rows):
             row_y = pdf.get_y()
-            # Stop rendering rows that would overflow the printable area.
-            if row_y + row_h_s > pdf.h - pdf.b_margin:
+            # Stop rendering rows that would overflow into the footer area.
+            if row_y + row_h_s > _snap_safe_bottom:
                 break
             if ri % 2 == 0:
                 pdf.set_fill_color(243, 244, 236)

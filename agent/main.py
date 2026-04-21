@@ -68,6 +68,35 @@ from agent.validator import SQLValidator
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Chart retype helper
+# ---------------------------------------------------------------------------
+
+_CHART_TYPE_KEYWORDS: dict[str, str] = {
+    "pie": "pie",
+    "donut": "pie",
+    "bar chart": "bar",
+    "bar graph": "bar",
+    " bar": "bar",
+    "line chart": "line",
+    "line graph": "line",
+    " line": "line",
+    "scatter": "scatter",
+    "table": "table",
+    "multiline": "multiline",
+    "multi-line": "multiline",
+    "multi line": "multiline",
+}
+
+
+def _extract_chart_type_hint(question: str) -> str:
+    """Return the desired chart type from a retype request, or '' if unclear."""
+    ql = question.lower()
+    for keyword, chart_type in _CHART_TYPE_KEYWORDS.items():
+        if keyword in ql:
+            return chart_type
+    return ""
+
 
 # ---------------------------------------------------------------------------
 # Language detection — localised status messages
@@ -249,7 +278,13 @@ class AgentSession:
             len(self._system_prompt),
         )
 
-    def ask(self, question: str, prior_context: str = "") -> AskResult:
+    def ask(
+        self,
+        question: str,
+        prior_context: str = "",
+        last_sql: str = "",
+        last_insight: str = "",
+    ) -> AskResult:
         """Run the full question-answer pipeline for one question.
 
         When prior_context is provided (multi-turn follow-up), it is appended
@@ -282,6 +317,34 @@ class AgentSession:
                 chart=ChartOutput(),
                 sql="",
             )
+
+        # Chart retype: re-render the last result with a different chart type.
+        # No new Athena query — re-execute the previous SQL and force the chart type.
+        if question_type == "retype" and last_sql:
+            forced_type = _extract_chart_type_hint(question)
+            query_result = self._executor.execute(last_sql)
+            chart = self._chart_generator.generate(
+                result=query_result,
+                question=question,
+                title="",
+                forced_chart_type=forced_type,
+            )
+            reuse_insight = last_insight or ""
+            return AskResult(
+                response=InsightResponse(
+                    insight=reuse_insight,
+                    assumptions=[],
+                    execution_id=query_result.execution_id,
+                    bytes_scanned=query_result.bytes_scanned,
+                    cost_usd=query_result.cost_usd,
+                ),
+                chart=chart,
+                sql=last_sql,
+                columns=query_result.columns,
+                rows=query_result.rows[:100],
+                row_count=len(query_result.rows),
+            )
+        # If "retype" but no prior SQL, fall through to analytical.
 
         system_prompt = self._system_prompt
         if prior_context:
@@ -545,8 +608,23 @@ try:
 
         prior_context = conversation.context_summary() if conversation else ""
 
+        # Retrieve last analytical SQL + insight for chart retype support.
+        last_sql = ""
+        last_insight = ""
+        if conversation and conversation.turns:
+            for _t in reversed(conversation.turns):
+                if _t.sql:
+                    last_sql = _t.sql
+                    last_insight = _t.insight
+                    break
+
         try:
-            result = _session.ask(body.question, prior_context=prior_context)
+            result = _session.ask(
+                body.question,
+                prior_context=prior_context,
+                last_sql=last_sql,
+                last_insight=last_insight,
+            )
         except SQLGenerationError as exc:
             logger.error("SQL generation failed: %s", exc)
             raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -757,6 +835,16 @@ try:
             conversation = _store.get(body.session_id)
         prior_context = conversation.context_summary() if conversation else ""
 
+        # Retrieve last analytical SQL + insight for chart retype support.
+        last_sql = ""
+        last_insight = ""
+        if conversation and conversation.turns:
+            for _t in reversed(conversation.turns):
+                if _t.sql:
+                    last_sql = _t.sql
+                    last_insight = _t.insight
+                    break
+
         def _generate() -> Generator[str, None, None]:
             lang = _detect_language(body.question)
             yield (
@@ -814,6 +902,81 @@ try:
                                 "chart_height": 0,
                                 "columns": [],
                                 "rows": [],
+                                "request_id": request_id,
+                                "verdict": "No",
+                                "discrepancy_detail": "None",
+                            },
+                        }
+                    )
+                    + "\n"
+                )
+                return
+
+            # Chart retype: re-render the previous result with a different chart type.
+            if question_type == "retype" and last_sql:
+                yield (
+                    json.dumps(
+                        {
+                            "type": "status",
+                            "text": _status_msg("Querying your data warehouse...", lang),
+                        }
+                    )
+                    + "\n"
+                )
+                try:
+                    retype_result = _session._executor.execute(last_sql)
+                except AgentError as exc:
+                    logger.error("Athena re-execution failed for retype: %s", exc)
+                    yield json.dumps({"type": "error", "text": str(exc)}) + "\n"
+                    return
+
+                forced_type = _extract_chart_type_hint(body.question)
+                retype_chart = _session._chart_generator.generate(
+                    result=retype_result,
+                    question=body.question,
+                    title="",
+                    forced_chart_type=forced_type,
+                )
+
+                retype_session_id: str = (
+                    cast(str, body.session_id) if conversation is not None else _store.create()
+                )
+                _store.append_turn(
+                    retype_session_id,
+                    Turn(
+                        question=body.question,
+                        sql=last_sql,
+                        insight=last_insight,
+                        assumptions=[],
+                    ),
+                )
+
+                retype_png_b64 = (
+                    base64.b64encode(retype_chart.png_bytes).decode()
+                    if retype_chart.png_bytes
+                    else None
+                )
+                yield (
+                    json.dumps(
+                        {
+                            "type": "done",
+                            "data": {
+                                "insight": last_insight,
+                                "assumptions": [],
+                                "validation_flags": [],
+                                "execution_id": retype_result.execution_id,
+                                "bytes_scanned": retype_result.bytes_scanned,
+                                "cost_usd": retype_result.cost_usd,
+                                "session_id": retype_session_id,
+                                "chart_type": retype_chart.chart_type,
+                                "presigned_url": retype_chart.presigned_url,
+                                "html_chart": retype_chart.html,
+                                "png_b64": retype_png_b64,
+                                "sql": last_sql,
+                                "inferred_question": "",
+                                "chart_height": retype_chart.chart_height,
+                                "columns": retype_result.columns,
+                                "rows": retype_result.rows[:100],
                                 "request_id": request_id,
                                 "verdict": "No",
                                 "discrepancy_detail": "None",

@@ -196,6 +196,40 @@ _OLIVE_PALETTE: list[str] = [
 ]
 
 
+# Month abbreviations for axis label formatting ("Apr-2025" style).
+_MONTH_ABBR: tuple[str, ...] = (
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+)
+
+
+def _fmt_month_axis(label: str) -> str:
+    """Reformat an ISO year-month label from '2025-04' to 'Apr-2025'.
+
+    Pass through unchanged if the label does not match YYYY-MM.
+    This keeps x-axis ticks readable without losing sort order (sorting is
+    done on the raw ISO label before this function is called).
+    """
+    import re as _re
+
+    m = _re.match(r"^(\d{4})-(\d{1,2})$", str(label).strip())
+    if m:
+        mo = int(m.group(2))
+        if 1 <= mo <= 12:
+            return f"{_MONTH_ABBR[mo - 1]}-{m.group(1)}"
+    return label
+
+
 def _is_monetary(col: str) -> bool:
     """Return True if the column name suggests a monetary metric."""
     col_lower = col.lower()
@@ -349,7 +383,13 @@ class ChartGenerator:
         self._config = config
         self._s3 = boto3.client("s3", region_name=config.region)
 
-    def generate(self, result: QueryResult, question: str, title: str = "") -> ChartOutput:
+    def generate(
+        self,
+        result: QueryResult,
+        question: str,
+        title: str = "",
+        forced_chart_type: str = "",
+    ) -> ChartOutput:
         """Generate a PNG and HTML chart for a query result.
 
         Non-fatal: catches all exceptions, logs at WARNING, and returns a
@@ -373,7 +413,9 @@ class ChartGenerator:
             )
             return ChartOutput(chart_type="none")
 
-        chart_type = self._detect_chart_type(result, question)
+        chart_type = (
+            forced_chart_type if forced_chart_type else self._detect_chart_type(result, question)
+        )
         logger.info(
             "Chart type detected: %s for execution_id=%s",
             chart_type,
@@ -790,14 +832,22 @@ class ChartGenerator:
             x_dim_cols = time_cols[:1]
 
         if len(x_dim_cols) >= 2:
-            x_labels = [
-                "-".join(str(row.get(tc, "")).zfill(2) for tc in x_dim_cols[:2])
+            row_label_pairs = [
+                (
+                    "-".join(str(row.get(tc, "")).zfill(2) for tc in x_dim_cols[:2]),
+                    row,
+                )
                 for row in result.rows
             ]
             x_title = " / ".join(tc.replace("_", " ").title() for tc in x_dim_cols[:2])
         else:
-            x_labels = [str(row.get(x_dim_cols[0], "")) for row in result.rows]
+            row_label_pairs = [(str(row.get(x_dim_cols[0], "")), row) for row in result.rows]
             x_title = x_dim_cols[0].replace("_", " ").title()
+
+        row_label_pairs.sort(key=lambda p: p[0])
+        raw_labels = [p[0] for p in row_label_pairs]
+        sorted_rows_ml = [p[1] for p in row_label_pairs]
+        x_labels = [_fmt_month_axis(lbl) for lbl in raw_labels]
 
         metric_cols = non_time_numeric[:3]
         colours = _OLIVE_PALETTE[: len(metric_cols)]
@@ -806,7 +856,7 @@ class ChartGenerator:
         fig, ax = plt.subplots(figsize=(12, 5))
 
         for col, colour in zip(metric_cols, colours, strict=False):
-            y_values = [float(row.get(col, 0) or 0) for row in result.rows]
+            y_values = [float(row.get(col, 0) or 0) for row in sorted_rows_ml]
             x_smooth, y_smooth = _catmull_rom_smooth(x_indices, y_values)
             ax.fill_between(x_smooth, y_smooth, alpha=0.06, color=colour)
             ax.plot(
@@ -838,7 +888,7 @@ class ChartGenerator:
         png_bytes = _fig_to_png(fig)
         plt.close(fig)
 
-        html = _plotly_multiline(x_labels, metric_cols, result.rows, x_title, title)
+        html = _plotly_multiline(x_labels, metric_cols, sorted_rows_ml, x_title, title)
         return png_bytes, html, 480
 
     def _render_line(self, result: QueryResult, title: str) -> tuple[bytes, str, int]:
@@ -870,20 +920,31 @@ class ChartGenerator:
             # Fallback: use first time_col as-is (avoids blank x-axis on unusual queries).
             x_dim_cols = time_cols[:1]
 
-        # Build x-axis labels from time dimension columns, joined if there are two
-        # (e.g. order_year + order_month -> "2025-01").
+        # Build (raw_ISO_label, row) pairs so we can sort chronologically.
+        # Raw labels are in YYYY-MM format so lexicographic sort = chronological.
         if len(x_dim_cols) >= 2:
-            x_labels = [
-                "-".join(str(row.get(tc, "")).zfill(2) for tc in x_dim_cols[:2])
+            row_label_pairs = [
+                (
+                    "-".join(str(row.get(tc, "")).zfill(2) for tc in x_dim_cols[:2]),
+                    row,
+                )
                 for row in result.rows
             ]
             x_title = " / ".join(tc.replace("_", " ").title() for tc in x_dim_cols[:2])
         else:
-            x_labels = [str(row.get(x_dim_cols[0], "")) for row in result.rows]
+            row_label_pairs = [(str(row.get(x_dim_cols[0], "")), row) for row in result.rows]
             x_title = x_dim_cols[0].replace("_", " ").title()
 
+        # Sort ascending by raw label (ISO YYYY-MM sorts correctly as a string).
+        row_label_pairs.sort(key=lambda p: p[0])
+        raw_labels = [p[0] for p in row_label_pairs]
+        sorted_rows = [p[1] for p in row_label_pairs]
+
+        # Reformat "2025-04" → "Apr-2025" for human-readable tick labels.
+        x_labels = [_fmt_month_axis(lbl) for lbl in raw_labels]
+
         y_col = non_time_numeric[0]
-        y_values = [float(row.get(y_col, 0) or 0) for row in result.rows]
+        y_values = [float(row.get(y_col, 0) or 0) for row in sorted_rows]
 
         import numpy as np
 
