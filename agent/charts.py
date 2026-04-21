@@ -138,6 +138,14 @@ _RANK_COL_EXACT: frozenset[str] = frozenset(
     {"rank", "position", "pos", "row_num", "row_number", "rn", "ntile", "dense_rank"}
 )
 
+# Percentage/rate column name fragments — never chosen as the primary metric.
+# When a result has both total_refunded and pct_of_total_refunds, the actual
+# monetary column must win. Columns are excluded if their name contains any of
+# these fragments OR ends with _pct / _rate / _percent.
+_PCT_COL_HINTS: frozenset[str] = frozenset(
+    {"pct", "percent", "percentage", "share", "ratio", "rate", "proportion"}
+)
+
 # EDP brand colour used for matplotlib charts.
 _BRAND_COLOUR = "#4B5320"  # EDP army olive (primary)
 
@@ -572,11 +580,27 @@ class ChartGenerator:
         )
 
     @staticmethod
+    def _is_pct_col(col: str) -> bool:
+        """Return True if the column is a percentage/rate, not an absolute metric.
+
+        Catches columns like pct_of_total_refunds, success_per_pct, refund_rate,
+        delivery_success_pct. These should never be the primary chart metric when
+        an absolute value column (total_refunded, total_revenue) is also available.
+        """
+        col_l = col.lower()
+        return (
+            any(hint in col_l for hint in _PCT_COL_HINTS)
+            or col_l.endswith("_pct")
+            or col_l.endswith("_rate")
+            or col_l.endswith("_percent")
+        )
+
+    @staticmethod
     def _best_metric_column(numeric_cols: list[str]) -> str:
         """Pick the most likely metric column from a list of numeric columns.
 
-        Rank/ordinal columns (revenue_rank, position, row_num …) are excluded
-        first so that monetary-hint matching cannot accidentally pick them.
+        Rank/ordinal and percentage columns are excluded first so that monetary-hint
+        matching cannot accidentally pick them.
 
         Three-pass priority so that a revenue column always beats a customer
         count column when both are present (e.g. total_revenue vs total_customers):
@@ -589,9 +613,13 @@ class ChartGenerator:
         multiple columns tie within the same priority tier. Claude puts
         general counts early in the SELECT list and specific metrics last.
 
-        Falls back to the last non-rank column, or the last column overall.
+        Falls back to the last non-rank/non-pct column, or the last column overall.
         """
-        non_rank = [c for c in numeric_cols if not ChartGenerator._is_rank_col(c)]
+        non_rank = [
+            c
+            for c in numeric_cols
+            if not ChartGenerator._is_rank_col(c) and not ChartGenerator._is_pct_col(c)
+        ]
         candidates = non_rank if non_rank else numeric_cols
 
         for col in reversed(candidates):
