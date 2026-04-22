@@ -1385,7 +1385,27 @@ def _cached_build_pdf(
     # ── Chart image ──────────────────────────────────────────────────────────
     if png_b64:
         png_bytes = _b64.b64decode(png_b64)
-        pdf.image(io.BytesIO(png_bytes), x=pdf.l_margin, w=W)
+        # Cap chart height so there is always room below for the summary and
+        # data snapshot.  Reserve: snapshot(38) + summary heading+gap(13) +
+        # 3 summary lines minimum(21) + caption+gap(8) = 80 mm.
+        _chart_reserve = 80.0
+        _safe_bottom_pre = pdf.h - 18.0
+        _chart_max_h = max(40.0, _safe_bottom_pre - pdf.get_y() - _chart_reserve)
+        # Read PNG natural dimensions from the IHDR chunk (bytes 16-23).
+        _png_w_px = int.from_bytes(png_bytes[16:20], "big")
+        _png_h_px = int.from_bytes(png_bytes[20:24], "big")
+        _natural_h = W * (_png_h_px / _png_w_px) if _png_w_px > 0 else _chart_max_h
+        if _natural_h > _chart_max_h:
+            # Scale proportionally to fit within the height cap; centre horizontally.
+            _embed_w = W * (_chart_max_h / _natural_h)
+            pdf.image(
+                io.BytesIO(png_bytes),
+                x=pdf.l_margin + (W - _embed_w) / 2,
+                w=_embed_w,
+                h=_chart_max_h,
+            )
+        else:
+            pdf.image(io.BytesIO(png_bytes), x=pdf.l_margin, w=W)
         # Data source caption flush-right below chart.
         pdf.set_font(font_name, "", 7)
         pdf.set_text_color(148, 163, 184)
@@ -1408,7 +1428,7 @@ def _cached_build_pdf(
     # line_height=7mm, cell_width=W-6. Count wrapped lines per paragraph.
     _line_h = 7.0
     _cell_w = W - 6
-    _char_per_line = max(1, int(_cell_w / (11 * 0.45)))  # approx chars at 11pt
+    _char_per_line = max(1, int(_cell_w / (11 * 0.22)))  # approx chars at 11pt
     _total_lines = 0
     for _para in pdf_insight.split("\n"):
         _para = _para.strip()
