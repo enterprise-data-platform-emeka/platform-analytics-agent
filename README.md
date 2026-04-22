@@ -47,7 +47,6 @@ Most NL-to-SQL tools only see column names. This agent sees the business meaning
 ## Architecture
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#4B5320', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#3a4118', 'lineColor': '#4B5320', 'signalColor': '#4B5320', 'actorLineColor': '#4B5320', 'secondaryColor': '#F0F7FF', 'tertiaryColor': '#F0F7FF', 'background': '#ffffff', 'clusterBkg': '#F0F7FF', 'edgeLabelBackground': '#ffffff'}}}%%
 flowchart TD
     subgraph Startup ["Startup - once per ECS task"]
         LoadSchemas["load_all_schemas()\nGlue Catalog + dbt catalog.json\nAll 7 Gold schemas into system prompt"]
@@ -148,7 +147,6 @@ When you type a web address into Chrome or Safari, your browser connects to a pr
 Both Streamlit and FastAPI run inside the same ECS container. Think of a container as a small private computer with its own isolated network. When the Streamlit code calls `localhost:8080`, it means "call the program listening on port 8080 inside this container" — which is FastAPI. The stakeholder's browser never sees or uses localhost. They only ever type the ALB's DNS address. Localhost is purely internal, invisible to the outside world.
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#4B5320', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#3a4118', 'lineColor': '#4B5320', 'signalColor': '#4B5320', 'actorLineColor': '#4B5320', 'secondaryColor': '#F0F7FF', 'tertiaryColor': '#F0F7FF', 'background': '#ffffff', 'clusterBkg': '#F0F7FF', 'edgeLabelBackground': '#ffffff'}}}%%
 sequenceDiagram
     autonumber
     actor S as Stakeholder
@@ -1270,19 +1268,18 @@ Two tools make this possible.
 There are no CSV test data files because the agent doesn't read CSV files — it reads AWS API responses and Claude API responses. Mocking those responses directly is more accurate than representing them as CSV, and the mocks stay in sync with the code automatically.
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#4B5320', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#3a4118', 'lineColor': '#4B5320', 'signalColor': '#4B5320', 'actorLineColor': '#4B5320', 'secondaryColor': '#F0F7FF', 'tertiaryColor': '#F0F7FF', 'background': '#ffffff', 'clusterBkg': '#F0F7FF', 'edgeLabelBackground': '#ffffff'}}}%%
 flowchart TD
-    A[Push to GitHub] --> B[Four jobs run in parallel]
+    A[Push to GitHub] -->|triggers CI| B[Four jobs run in parallel\nall must pass before deploy]
     B --> C[Lint\nruff checks code style]
-    B --> D[Type check\nmypy checks type correctness]
-    B --> E[Unit tests\nmoto replaces AWS calls\nunittest.mock replaces Claude API\nNo real network calls made]
-    B --> F[Docker build\nVerifies image builds cleanly]
+    B --> D[Type check\nmypy checks type annotations]
+    B --> E[Unit tests\nmoto replaces AWS API calls\nunittest.mock replaces Claude API\nno real network traffic or cost]
+    B --> F[Docker build\nverifies image builds cleanly\nno push yet]
     C --> G{All four pass?}
     D --> G
     E --> G
     F --> G
-    G -->|No| H[Pipeline stops here\nDeploy workflow is skipped]
-    G -->|Yes| I[Deploy workflow triggers\nBuilds Docker image\nPushes to ECR\nTriggers ECS rolling deploy]
+    G -->|No — fix the failure| H[Pipeline stops here\nDeploy workflow is blocked]
+    G -->|Yes — safe to deploy| I[Deploy workflow triggers\nBuilds and pushes Docker image to ECR\nUpdates ECS task definition\nECS rolling deploy — old tasks replaced\nwith new ones one at a time]
 ```
 
 Integration tests also exist but are not part of the standard CI run. They are marked `@pytest.mark.integration` and only run when explicitly triggered with real AWS credentials against the deployed dev environment. They validate the full pipeline end-to-end: real Glue schema loading, real Athena query, real Claude API call.
