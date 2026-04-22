@@ -153,7 +153,9 @@ sequenceDiagram
     participant ALB as AWS Load Balancer
     participant UI as Streamlit UI<br/>(web page)
     participant API as Analytics Backend<br/>(FastAPI)
-    participant AI as Athena + Claude
+    participant CL as Claude API
+    participant ATH as Amazon Athena
+    participant S3 as S3 Gold and Audit
 
     note over UI,API: These two live inside the same server (ECS container)
 
@@ -164,9 +166,17 @@ sequenceDiagram
     S->>ALB: Types a question and clicks Submit
     ALB->>UI: Forwards the question
     UI->>API: Sends the question internally<br/>(no network hop — same server)
-    API->>AI: Runs an Athena SQL query<br/>and asks Claude for an insight
-    AI-->>API: Returns query results and insight
-    API-->>UI: Returns insight, chart, and cost
+    API->>CL: Call 1: Generate SQL
+    CL-->>API: SQL query
+    API->>API: Validate SQL guardrails
+    API->>ATH: Run query against Gold tables
+    ATH-->>API: Results — rows and columns
+    API->>CL: Call 2: Generate insight
+    CL-->>API: 2-3 sentence insight and chart title
+    API->>CL: Call 3: Verify SQL matches question
+    CL-->>API: Verdict — yes or no with explanation
+    API->>S3: Write audit log
+    API-->>UI: Returns insight, chart, cost, and verdict
     UI-->>S: Renders the answer, chart, and cost in the browser
 ```
 
