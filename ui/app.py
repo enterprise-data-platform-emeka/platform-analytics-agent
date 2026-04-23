@@ -1104,6 +1104,7 @@ def _cached_build_pdf(
     png_b64: str,
     columns_json: str,
     rows_json: str,
+    chart_type: str = "",
 ) -> bytes:
     """Build a single-page stakeholder PDF report.
 
@@ -1383,7 +1384,10 @@ def _cached_build_pdf(
         pdf.set_fill_color(255, 255, 255)
 
     # ── Chart image ──────────────────────────────────────────────────────────
-    if png_b64:
+    # Skip the PNG for table-type results: the matplotlib table is redundant
+    # because the DATA SNAPSHOT below already shows the same data in a cleaner
+    # format, and embedding it consumes most of the page and truncates the summary.
+    if png_b64 and chart_type != "table":
         png_bytes = _b64.b64decode(png_b64)
         # Cap chart height so there is always room below for the summary and
         # data snapshot.  Reserve: snapshot(38) + summary heading+gap(13) +
@@ -1478,7 +1482,13 @@ def _cached_build_pdf(
     pdf.set_fill_color(255, 255, 255)
 
     # ── Data Snapshot — top 5 rows compact table ──────────────────────────────
-    snap_cols = (_pdf_cat[:1] if _pdf_cat else []) + _pdf_numeric[:3]
+    # For mixed results: first categorical column + up to 3 numeric columns.
+    # For all-categorical results (e.g. payment methods list): show up to 4 columns
+    # so the snapshot isn't stripped to a single column.
+    if _pdf_numeric:
+        snap_cols = (_pdf_cat[:1] if _pdf_cat else []) + _pdf_numeric[:3]
+    else:
+        snap_cols = _pdf_cat[:4]
     # Sort snapshot rows by first time-dimension column ascending (ISO YYYY-MM
     # sorts correctly as a string) so they appear in chronological order.
     snap_rows_unsorted = rows[:5]
@@ -1552,6 +1562,7 @@ def _build_pdf(turn: dict) -> bytes:
         png_b64=turn.get("png_b64") or "",
         columns_json=json.dumps(turn.get("columns", [])),
         rows_json=json.dumps(turn.get("rows", [])),
+        chart_type=turn.get("chart_type", ""),
     )
 
 
@@ -1598,6 +1609,32 @@ def _render_turn(turn: dict, form_key: str) -> None:
     # Insight card
     escaped = html_lib.escape(turn["insight"]).replace("\n", "<br>")
     st.markdown(f'<div class="insight-card">{escaped}</div>', unsafe_allow_html=True)
+
+    # KPI tiles — mirror the PDF layout so stakeholders see the same numbers inline.
+    kpi_tiles = _extract_kpi_tiles(turn.get("columns", []), turn.get("rows", []))
+    if kpi_tiles:
+        st.markdown('<div style="margin:12px 0 4px 0"></div>', unsafe_allow_html=True)
+        tile_cols = st.columns(len(kpi_tiles))
+        for tcol, (metric_lbl, value, sub_lbl, badge) in zip(tile_cols, kpi_tiles):
+            with tcol:
+                badge_color = "#16a34a" if badge.startswith("+") else "#dc2626"
+                badge_html = (
+                    f'<div style="color:{badge_color};font-size:12px;font-weight:600;'
+                    f'margin-top:2px">{badge}</div>'
+                    if badge
+                    else ""
+                )
+                st.markdown(
+                    f'<div style="background:#f0f7ff;border-radius:8px;'
+                    f'border-top:3px solid #4B5320;padding:12px 16px 10px 16px;">'
+                    f'<div style="font-size:11px;color:#4B5320;font-weight:600;'
+                    f'letter-spacing:0.05em;margin-bottom:4px">{metric_lbl.upper()}</div>'
+                    f'<div style="font-size:22px;font-weight:700;color:#0f172a;'
+                    f'line-height:1.1">{value}</div>'
+                    f'<div style="font-size:12px;color:#64748b;margin-top:3px">{sub_lbl}</div>'
+                    f"{badge_html}</div>",
+                    unsafe_allow_html=True,
+                )
 
     # Validation flags
     for flag in turn.get("validation_flags", []):
