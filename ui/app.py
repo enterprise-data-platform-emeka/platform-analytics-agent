@@ -1615,7 +1615,7 @@ def _render_turn(turn: dict, form_key: str) -> None:
     if kpi_tiles:
         st.markdown('<div style="margin:12px 0 4px 0"></div>', unsafe_allow_html=True)
         tile_cols = st.columns(len(kpi_tiles))
-        for tcol, (metric_lbl, value, sub_lbl, badge) in zip(tile_cols, kpi_tiles):
+        for tcol, (metric_lbl, value, sub_lbl, badge) in zip(tile_cols, kpi_tiles, strict=False):
             with tcol:
                 badge_color = "#16a34a" if badge.startswith("+") else "#dc2626"
                 badge_html = (
