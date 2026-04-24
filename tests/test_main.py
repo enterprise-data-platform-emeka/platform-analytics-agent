@@ -383,7 +383,9 @@ class TestAgentSessionAsk:
                     # Capture what system_prompt the generator receives.
                     captured = {}
 
-                    def capture_generate(question: str, system_prompt: str) -> Any:
+                    def capture_generate(
+                        question: str, system_prompt: str, verdict_feedback: str = ""
+                    ) -> Any:
                         captured["system_prompt"] = system_prompt
                         from agent.generator import GeneratedSQL
 
