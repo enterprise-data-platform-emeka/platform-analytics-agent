@@ -169,12 +169,18 @@ sequenceDiagram
     API->>CL: Call 1: Generate SQL
     CL-->>API: SQL query
     API->>API: Validate SQL guardrails
+    API->>CL: Call 2: Infer SQL intent (question withheld)
+    CL-->>API: Inferred intent + verdict
+    loop If mismatch — regenerate SQL once with correction feedback
+        API->>CL: Regenerate SQL with correction detail
+        CL-->>API: Corrected SQL query
+        API->>API: Validate SQL guardrails
+    end
+    note over API: Loop runs at most once. Exits immediately when intent matches.
     API->>ATH: Run query against Gold tables
     ATH-->>API: Results — rows and columns
-    API->>CL: Call 2: Generate insight
+    API->>CL: Call 3: Generate insight
     CL-->>API: 2-3 sentence insight and chart title
-    API->>CL: Call 3: Verify SQL matches question
-    CL-->>API: Verdict — yes or no with explanation
     API->>S3: Write audit log
     API-->>UI: Returns insight, chart, cost, and verdict
     UI-->>S: Renders the answer, chart, and cost in the browser
@@ -202,21 +208,28 @@ Claude reads the question against the schema already in the system prompt and re
 
 `SQLValidator` parses the query with sqlparse and enforces hard rules: SELECT only, Gold database only, no DDL keywords anywhere, LIMIT present. If validation fails, the error reason is sent back to Claude with a correction request. Up to 3 attempts before raising `SQLValidationError` to the user. The Athena WorkGroup `bytes_scanned_cutoff_per_query` setting in Terraform is the hard cost backstop.
 
-### Step 3: Execute and track cost
+
+### Step 3: Pre-Athena intent check and retry
+
+Before running any Athena query, the agent checks that the generated SQL actually answers the original question. It makes a second Claude call passing only the SQL (the question is withheld) and asks Claude to infer what business question the SQL is answering. It then compares that inferred intent to the original question.
+
+If a genuine mismatch is detected (wrong metric, wrong table, wrong filter), the SQL is regenerated once with the discrepancy detail as feedback. This retry happens before touching Athena, so no query cost or scan time is spent on SQL that's already known to be wrong. The loop runs at most once per question.
+
+### Step 4: Execute and track cost
 
 `AthenaExecutor` starts the query, polls until complete, and reads the result CSV from the athena-results S3 bucket. `cost.py` converts `DataScannedInBytes` from the Athena execution metadata to USD. No pre-execution cost estimation needed — Gold tables are small pre-aggregations, and the WorkGroup hard stop handles any outliers.
 
-### Step 4: Validate results
+### Step 5: Validate results
 
 `ResultValidator` checks the DataFrame for obvious anomalies: negative values in revenue columns, unexpected nulls on key columns. Zero rows is a valid result for Gold tables — an aggregation with no matching data is a legitimate answer, not a bug. Flags are surfaced in the output, never block execution.
 
-### Step 5: Chart and insight
+### Step 6: Chart and insight
 
 `ChartGenerator` selects chart type from the shape of the result and keywords in the question. Five types are supported: **line** (time + 1 metric), **multi-line** (time + 2+ metrics), **bar** (categorical + metric), **scatter** (2 numeric + categorical, correlation question), and **pie/donut** (proportion question, ≤ 8 rows). The chart is uploaded to S3 and returned as a presigned URL (Uniform Resource Locator).
 
-`InsightGenerator` makes a final Claude call with the original question, SQL, result sample, and assumptions, and returns a 2-3 sentence plain-English insight.
+`InsightGenerator` makes a Claude call with the original question, SQL, result sample, and assumptions, and returns a 2-3 sentence plain-English insight.
 
-### Step 6: Audit
+### Step 7: Audit
 
 A structured JSON record is written to `s3://{bronze_bucket}/metadata/agent-audit/` containing the original question, SQL, assumptions, row count, bytes scanned, cost in USD, validation flags, and insight. The audit log is itself queryable via Athena.
 
