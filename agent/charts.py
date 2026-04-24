@@ -981,7 +981,8 @@ class ChartGenerator:
         ax2 = ax.twinx() if use_dual else None
 
         for col, colour in zip(metric_cols, colours, strict=False):
-            target_ax = ax2 if (use_dual and col in right_cols) else ax
+            # Use secondary axis for right-side metrics when dual-axis is active.
+            target_ax = ax2 if (use_dual and ax2 is not None and col in right_cols) else ax
             y_values = [float(row.get(col, 0) or 0) for row in sorted_rows_ml]
             x_smooth, y_smooth = _catmull_rom_smooth(x_indices, y_values)
             target_ax.fill_between(x_smooth, y_smooth, alpha=0.06, color=colour)
@@ -1531,7 +1532,7 @@ def _plotly_multiline(
             )
         )
 
-    layout: dict = {
+    layout: dict[str, Any] = {
         "title": title or None,
         "xaxis_title": x_title,
         "xaxis": {"type": "category", "showgrid": True, "gridcolor": "rgba(0,0,0,0.07)"},
