@@ -37,7 +37,11 @@ from dataclasses import dataclass
 
 from agent.claude_client import ClaudeClient
 from agent.exceptions import SQLGenerationError, SQLValidationError
-from agent.prompts import build_sql_correction_messages, build_sql_request_messages
+from agent.prompts import (
+    build_sql_correction_messages,
+    build_sql_request_messages,
+    build_verdict_retry_messages,
+)
 from agent.validator import SQLValidator
 
 logger = logging.getLogger(__name__)
@@ -77,7 +81,12 @@ class SQLGenerator:
         self._client = client
         self._validator = validator
 
-    def generate(self, question: str, system_prompt: str) -> GeneratedSQL:
+    def generate(
+        self,
+        question: str,
+        system_prompt: str,
+        verdict_feedback: str = "",
+    ) -> GeneratedSQL:
         """Generate validated SQL for a plain-English question.
 
         Drives up to MAX_ATTEMPTS (3) rounds of generation and validation.
@@ -89,6 +98,10 @@ class SQLGenerator:
             question: Plain-English analytical question from the user.
             system_prompt: System prompt with embedded Gold schemas from
                 prompts.build_system_prompt().
+            verdict_feedback: If non-empty, the verdict discrepancy detail from
+                a prior attempt. Injects the mismatch description into the
+                initial user message so Claude corrects its approach. Used for
+                the post-Athena reflection retry (max one call per question).
 
         Returns:
             GeneratedSQL with validated sql, assumptions, and attempt count.
@@ -97,7 +110,10 @@ class SQLGenerator:
             SQLGenerationError: if Claude cannot produce valid SQL after
                 MAX_ATTEMPTS attempts, or if the Claude API is unavailable.
         """
-        messages = build_sql_request_messages(question)
+        if verdict_feedback:
+            messages = build_verdict_retry_messages(question, verdict_feedback)
+        else:
+            messages = build_sql_request_messages(question)
         last_validation_error: SQLValidationError | None = None
         last_sql: str = ""
 

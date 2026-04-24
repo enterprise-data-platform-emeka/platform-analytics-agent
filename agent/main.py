@@ -60,7 +60,7 @@ from agent.executor import AthenaExecutor
 from agent.generator import SQLGenerator
 from agent.insight import InsightGenerator, InsightResponse
 from agent.logging import configure_logging
-from agent.prompts import build_system_prompt
+from agent.prompts import PROMPT_VERSION, build_system_prompt
 from agent.result_validator import validate
 from agent.schema import SchemaResolver
 from agent.session import Conversation, SessionStore, Turn
@@ -222,6 +222,8 @@ class AskResult:
     rows: list[dict[str, str]] = field(default_factory=list)
     sql_retry_count: int = 0
     row_count: int = 0
+    verdict: str = "No"
+    discrepancy_detail: str = "None"
 
 
 class AgentSession:
@@ -360,6 +362,32 @@ class AgentSession:
             generated.sql[:120],
         )
 
+        # Intent check before hitting Athena. If the verdict detects a genuine
+        # mismatch, regenerate SQL once with the discrepancy detail as feedback.
+        inferred_question = self._client.infer_question_from_sql(generated.sql, question=question)
+        verdict, discrepancy_detail = "No", "None"
+        if inferred_question:
+            verdict, discrepancy_detail = self._client.get_verdict(question, inferred_question)
+        if verdict == "Yes":
+            logger.info(
+                "Verdict mismatch detected — retrying SQL generation with feedback: %s",
+                discrepancy_detail,
+            )
+            try:
+                generated = self._generator.generate(
+                    question=question,
+                    system_prompt=system_prompt,
+                    verdict_feedback=discrepancy_detail,
+                )
+                inferred_question = self._client.infer_question_from_sql(
+                    generated.sql, question=question
+                )
+                verdict, discrepancy_detail = "No", "None"
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Verdict retry failed (%s) — proceeding with original SQL.", exc
+                )
+
         query_result = self._executor.execute(generated.sql)
         logger.info(
             "Athena execution complete: execution_id=%s rows=%d bytes_scanned=%d",
@@ -388,8 +416,6 @@ class AgentSession:
 
         self._audit.write(question=question, sql=generated.sql, response=response)
 
-        inferred_question = self._client.infer_question_from_sql(generated.sql, question=question)
-
         return AskResult(
             response=response,
             chart=chart,
@@ -399,6 +425,8 @@ class AgentSession:
             rows=query_result.rows[:100],
             sql_retry_count=max(0, generated.attempts - 1),
             row_count=len(query_result.rows),
+            verdict=verdict,
+            discrepancy_detail=discrepancy_detail,
         )
 
 
@@ -456,6 +484,7 @@ def _write_engineer_log(
     row_count_returned: int,
     chart_type_rendered: str,
     language: str,
+    prompt_version: str,
 ) -> None:
     """Write one engineer audit log row to S3 as a single-row CSV.
 
@@ -487,6 +516,7 @@ def _write_engineer_log(
             "row_count_returned",
             "chart_type_rendered",
             "language",
+            "prompt_version",
         ]
         writer = csv.DictWriter(buf, fieldnames=fieldnames)
         writer.writeheader()
@@ -508,6 +538,7 @@ def _write_engineer_log(
                 "row_count_returned": row_count_returned,
                 "chart_type_rendered": chart_type_rendered,
                 "language": language,
+                "prompt_version": prompt_version,
             }
         )
 
@@ -648,12 +679,8 @@ try:
             base64.b64encode(result.chart.png_bytes).decode() if result.chart.png_bytes else None
         )
 
-        # Verdict: compare original question vs SQL interpretation.
-        verdict, discrepancy_detail = "No", "None"
-        if result.sql and result.inferred_question:
-            verdict, discrepancy_detail = _session._client.get_verdict(
-                body.question, result.inferred_question
-            )
+        verdict = result.verdict
+        discrepancy_detail = result.discrepancy_detail
 
         # Engineer audit log — written for analytical queries only.
         if result.sql:
@@ -675,6 +702,7 @@ try:
                 row_count_returned=result.row_count,
                 chart_type_rendered=result.chart.chart_type,
                 language=lang,
+                prompt_version=PROMPT_VERSION,
             )
 
         return AskResponse(
@@ -1006,6 +1034,35 @@ try:
                 yield json.dumps({"type": "error", "text": str(exc)}) + "\n"
                 return
 
+            # Intent check before hitting Athena.
+            inferred_question = _session._client.infer_question_from_sql(
+                generated.sql, question=body.question
+            )
+            stream_verdict, stream_discrepancy = "No", "None"
+            if inferred_question:
+                stream_verdict, stream_discrepancy = _session._client.get_verdict(
+                    body.question, inferred_question
+                )
+            if stream_verdict == "Yes":
+                logger.info(
+                    "Stream: verdict mismatch — retrying SQL generation with feedback: %s",
+                    stream_discrepancy,
+                )
+                try:
+                    generated = _session._generator.generate(
+                        question=body.question,
+                        system_prompt=system_prompt,
+                        verdict_feedback=stream_discrepancy,
+                    )
+                    inferred_question = _session._client.infer_question_from_sql(
+                        generated.sql, question=body.question
+                    )
+                    stream_verdict, stream_discrepancy = "No", "None"
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Stream: verdict retry failed (%s) — proceeding with original SQL.", exc
+                    )
+
             yield (
                 json.dumps(
                     {"type": "status", "text": _status_msg("Querying your data warehouse...", lang)}
@@ -1066,16 +1123,6 @@ try:
                 sql=generated.sql,
                 response=response,
             )
-            inferred_question = _session._client.infer_question_from_sql(
-                generated.sql, question=body.question
-            )
-
-            # Verdict: compare original question vs SQL interpretation.
-            stream_verdict, stream_discrepancy = "No", "None"
-            if inferred_question:
-                stream_verdict, stream_discrepancy = _session._client.get_verdict(
-                    body.question, inferred_question
-                )
 
             session_id = cast(str, body.session_id) if conversation is not None else _store.create()
             _store.append_turn(
@@ -1107,6 +1154,7 @@ try:
                 row_count_returned=len(query_result.rows),
                 chart_type_rendered=chart.chart_type,
                 language=lang,
+                prompt_version=PROMPT_VERSION,
             )
 
             png_b64 = base64.b64encode(chart.png_bytes).decode() if chart.png_bytes else None

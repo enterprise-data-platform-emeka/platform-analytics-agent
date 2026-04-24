@@ -18,6 +18,8 @@ from typing import Any, Final
 
 from agent.schema import AllSchemas
 
+PROMPT_VERSION: Final[str] = "v1"
+
 # ---------------------------------------------------------------------------
 # Static Gold table catalog
 #
@@ -469,5 +471,32 @@ def build_verdict_messages(
         f"Original question: {original_question}\n\n"
         f"SQL interpretation: {inferred_question}\n\n"
         f"Do they have the same business intent?"
+    )
+    return [{"role": "user", "content": content}]
+
+
+def build_verdict_retry_messages(
+    question: str,
+    discrepancy_detail: str,
+) -> list[dict[str, str]]:
+    """Build the initial messages for a SQL retry after a verdict mismatch.
+
+    Used when the verdict call detected a genuine intent failure. The
+    discrepancy detail is injected so Claude can correct the SQL on the
+    single retry allowed before proceeding with the best available answer.
+
+    Args:
+        question: The original plain-English question from the user.
+        discrepancy_detail: One-sentence description of the mismatch from
+            the verdict call.
+
+    Returns:
+        A single user message with the question and the reviewer note.
+    """
+    content = (
+        f"{question}\n\n"
+        f"[Reviewer note: your previous SQL had a mismatch with the question. "
+        f"{discrepancy_detail} Please write new SQL that correctly answers "
+        f"the original question above.]"
     )
     return [{"role": "user", "content": content}]

@@ -80,11 +80,17 @@ def _patch_session_deps(mock_ask_result: AskResult | None = None) -> list[Any]:
     mock_chart_gen = MagicMock()
     mock_chart_gen.generate.return_value = ask_result.chart
 
+    mock_claude_client = MagicMock()
+    mock_claude_client.classify_question.return_value = "analytical"
+    # Return empty string so the verdict check in ask() is skipped (non-empty
+    # would require get_verdict() to return an unpackable 2-tuple).
+    mock_claude_client.infer_question_from_sql.return_value = ""
+
     patches = [
         patch("agent.main.configure_logging"),
         patch("agent.main.SchemaResolver"),
         patch("agent.main.build_system_prompt", return_value="<system prompt>"),
-        patch("agent.main.ClaudeClient"),
+        patch("agent.main.ClaudeClient", return_value=mock_claude_client),
         patch("agent.main.SQLValidator"),
         patch("agent.main.AuditLogger"),
         patch("agent.main.SQLGenerator", return_value=mock_generator),
@@ -207,11 +213,13 @@ class TestAgentSessionAsk:
         mock_chart_gen = MagicMock()
         mock_chart_gen.generate.return_value = _make_chart()
 
+        mock_client = MagicMock()
+        mock_client.infer_question_from_sql.return_value = ""
         patches = [
             patch("agent.main.configure_logging"),
             patch("agent.main.SchemaResolver"),
             patch("agent.main.build_system_prompt", return_value="<sp>"),
-            patch("agent.main.ClaudeClient"),
+            patch("agent.main.ClaudeClient", return_value=mock_client),
             patch("agent.main.SQLValidator"),
             patch("agent.main.AuditLogger"),
             patch("agent.main.SQLGenerator", return_value=mock_generator),
@@ -251,11 +259,13 @@ class TestAgentSessionAsk:
         mock_chart_gen = MagicMock()
         mock_chart_gen.generate.return_value = _make_chart()
 
+        mock_client = MagicMock()
+        mock_client.infer_question_from_sql.return_value = ""
         patches = [
             patch("agent.main.configure_logging"),
             patch("agent.main.SchemaResolver"),
             patch("agent.main.build_system_prompt", return_value="<sp>"),
-            patch("agent.main.ClaudeClient"),
+            patch("agent.main.ClaudeClient", return_value=mock_client),
             patch("agent.main.SQLValidator"),
             patch("agent.main.AuditLogger"),
             patch("agent.main.SQLGenerator", return_value=mock_generator),
@@ -293,11 +303,13 @@ class TestAgentSessionAsk:
         mock_chart_gen = MagicMock()
         mock_chart_gen.generate.return_value = _make_chart()
 
+        mock_client = MagicMock()
+        mock_client.infer_question_from_sql.return_value = ""
         patches = [
             patch("agent.main.configure_logging"),
             patch("agent.main.SchemaResolver"),
             patch("agent.main.build_system_prompt", return_value="<sp>"),
-            patch("agent.main.ClaudeClient"),
+            patch("agent.main.ClaudeClient", return_value=mock_client),
             patch("agent.main.SQLValidator"),
             patch("agent.main.AuditLogger", return_value=mock_audit),
             patch("agent.main.SQLGenerator", return_value=mock_generator),

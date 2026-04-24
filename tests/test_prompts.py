@@ -8,10 +8,12 @@ expected conversation structure for SQL generation and insight generation.
 from agent.prompts import (
     GET_SCHEMA_TOOL,
     GOLD_TABLE_CATALOG,
+    PROMPT_VERSION,
     build_insight_messages,
     build_sql_correction_messages,
     build_sql_request_messages,
     build_system_prompt,
+    build_verdict_retry_messages,
 )
 from agent.schema import ColumnSchema, TableSchema
 
@@ -293,3 +295,44 @@ class TestBuildInsightMessages:
         result = "| Germany | 432701.55 |"
         msgs = build_insight_messages("question", "SELECT 1", result)
         assert result in msgs[0]["content"]
+
+
+# ── PROMPT_VERSION ─────────────────────────────────────────────────────────────
+
+
+class TestPromptVersion:
+    def test_prompt_version_is_string(self) -> None:
+        assert isinstance(PROMPT_VERSION, str)
+
+    def test_prompt_version_is_v1(self) -> None:
+        assert PROMPT_VERSION == "v1"
+
+    def test_prompt_version_non_empty(self) -> None:
+        assert PROMPT_VERSION
+
+
+# ── build_verdict_retry_messages ──────────────────────────────────────────────
+
+
+class TestBuildVerdictRetryMessages:
+    def test_returns_single_user_message(self) -> None:
+        msgs = build_verdict_retry_messages(
+            question="Which country has the highest revenue?",
+            discrepancy_detail="SQL queries products instead of countries.",
+        )
+        assert len(msgs) == 1
+        assert msgs[0]["role"] == "user"
+
+    def test_message_contains_original_question(self) -> None:
+        question = "Which carrier has the fastest delivery time?"
+        msgs = build_verdict_retry_messages(question, "SQL returns revenue, not delivery time.")
+        assert question in msgs[0]["content"]
+
+    def test_message_contains_discrepancy_detail(self) -> None:
+        detail = "SQL uses order count instead of revenue."
+        msgs = build_verdict_retry_messages("What is the revenue by country?", detail)
+        assert detail in msgs[0]["content"]
+
+    def test_message_contains_reviewer_note(self) -> None:
+        msgs = build_verdict_retry_messages("question", "mismatch detail")
+        assert "Reviewer note" in msgs[0]["content"] or "reviewer" in msgs[0]["content"].lower()

@@ -434,3 +434,51 @@ class TestClaudeApiFailure:
 class TestMaxAttemptsConstant:
     def test_max_attempts_is_three(self) -> None:
         assert MAX_ATTEMPTS == 3
+
+
+# ── verdict_feedback parameter ────────────────────────────────────────────────
+
+
+class TestVerdictFeedback:
+    def test_verdict_feedback_succeeds_on_first_attempt(self) -> None:
+        client = _mock_client([(VALID_SQL, ["Table: revenue_by_country"])])
+        validator = _mock_validator([None])
+
+        result = _generator(client, validator).generate(QUESTION, SYSTEM, verdict_feedback="SQL queried products instead of countries.")
+
+        assert result.sql == VALID_SQL
+        assert result.attempts == 1
+
+    def test_verdict_feedback_injects_detail_into_initial_message(self) -> None:
+        detail = "SQL used order count instead of revenue."
+        client = _mock_client([(VALID_SQL, [])])
+        validator = _mock_validator([None])
+
+        _generator(client, validator).generate(QUESTION, SYSTEM, verdict_feedback=detail)
+
+        call_kwargs = client.generate_sql.call_args
+        messages = call_kwargs[1].get("messages") or call_kwargs[0][0]
+        full_content = " ".join(str(m.get("content", "")) for m in messages)
+        assert detail in full_content
+
+    def test_verdict_feedback_includes_original_question(self) -> None:
+        client = _mock_client([(VALID_SQL, [])])
+        validator = _mock_validator([None])
+
+        _generator(client, validator).generate(QUESTION, SYSTEM, verdict_feedback="some mismatch")
+
+        call_kwargs = client.generate_sql.call_args
+        messages = call_kwargs[1].get("messages") or call_kwargs[0][0]
+        full_content = " ".join(str(m.get("content", "")) for m in messages)
+        assert QUESTION in full_content
+
+    def test_no_verdict_feedback_uses_plain_question_message(self) -> None:
+        client = _mock_client([(VALID_SQL, [])])
+        validator = _mock_validator([None])
+
+        _generator(client, validator).generate(QUESTION, SYSTEM)
+
+        call_kwargs = client.generate_sql.call_args
+        messages = call_kwargs[1].get("messages") or call_kwargs[0][0]
+        assert len(messages) == 1
+        assert messages[0]["content"] == QUESTION

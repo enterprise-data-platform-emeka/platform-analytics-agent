@@ -1829,9 +1829,17 @@ def _extract_kpi_tiles(
     if not rows or not columns:
         return []
 
+    # Defined early so the classification loop can use it.
+    _time_col_hints = {"year", "month", "date", "week", "quarter", "period"}
+
     numeric_cols: list[str] = []
     cat_cols: list[str] = []
     for col in columns:
+        # Time-dimension columns are always categorical, even when their values
+        # look numeric (e.g. order_year=2024, order_month=4).
+        if any(hint in col.lower() for hint in _time_col_hints):
+            cat_cols.append(col)
+            continue
         raw = str(rows[0].get(col, "") or "")
         try:
             float(raw.replace(",", "").replace("$", ""))
@@ -1898,8 +1906,6 @@ def _extract_kpi_tiles(
         "avg",
         "average",
     }
-    _time_col_hints = {"year", "month", "date", "week", "quarter", "period"}
-
     _rank_exact = frozenset(
         {"rank", "position", "pos", "row_num", "row_number", "rn", "ntile", "dense_rank"}
     )
@@ -1938,14 +1944,30 @@ def _extract_kpi_tiles(
         cat_col = cat_cols[0]
         metric_label = _translate_col(metric_col, lang)
 
+        # Detect companion year/month cols for integer-encoded time series
+        # (e.g. order_year=2024 + order_month=4 → synthesize "2024-04-01").
+        _year_col = next((c for c in cat_cols if "year" in c.lower()), None)
+        _month_col = next(
+            (c for c in cat_cols if "month" in c.lower() and c != _year_col), None
+        )
+
+        def _period_str(row: dict) -> str:
+            """Return a YYYY-MM-01 string from split year/month cols, else the cat_col value."""
+            if _year_col and _month_col:
+                y = str(row.get(_year_col, "") or "")
+                mo = str(row.get(_month_col, "") or "")
+                if y.isdigit() and mo.isdigit():
+                    return f"{y}-{mo.zfill(2)}-01"
+            return str(row.get(cat_col, ""))
+
         is_time_cat = any(hint in cat_col.lower() for hint in _time_col_hints)
         # For time-series results, tile 0 shows the most-recent period (last row)
         # so the MoM badge is consistent with the value displayed.
         display_row = rows[-1] if is_time_cat else rows[0]
-        top_raw = str(display_row.get(cat_col, ""))
         if is_time_cat:
-            top_cat = _fmt_period(top_raw)
+            top_cat = _fmt_period(_period_str(display_row))
         else:
+            top_raw = str(display_row.get(cat_col, ""))
             # Replace underscores and title-case lowercase DB values.
             cleaned_raw = top_raw.replace("_", " ")
             top_cat = cleaned_raw.title() if top_raw == top_raw.lower() else cleaned_raw
@@ -1969,7 +1991,9 @@ def _extract_kpi_tiles(
         # Tile 2: entry count with a localised time-aware plural label.
         if is_time_cat:
             col_l = cat_col.lower()
-            if "month" in col_l:
+            # Prefer "Months" when there is a companion month column (e.g. the
+            # primary cat_col is order_year but order_month is also present).
+            if "month" in col_l or _month_col:
                 cat_plural = _t("Months", lang)
             elif "week" in col_l:
                 cat_plural = "Weeks"
@@ -2007,8 +2031,8 @@ def _extract_kpi_tiles(
             )
             tile3_label = f"{_t('Total', lang)} {_base_label} ({_t('All', lang)})"
             if is_time_cat and len(rows) >= 2:
-                first_fmt = _fmt_period(str(rows[0].get(cat_col, "")))
-                last_fmt = _fmt_period(str(rows[-1].get(cat_col, "")))
+                first_fmt = _fmt_period(_period_str(rows[0]))
+                last_fmt = _fmt_period(_period_str(rows[-1]))
                 tile3_sub = f"{first_fmt} \u2013 {last_fmt}"
             else:
                 tile3_sub = _t("All Entries", lang)
@@ -2238,6 +2262,9 @@ def _cached_build_pdf(
     def _safe(text: str) -> str:
         if _is_cjk_font:
             return text
+        # Use explicit Unicode escapes so the keys are unambiguous regardless
+        # of how the source file is saved — literal glyph chars can silently
+        # become the wrong codepoint in some editors.
         _r = {
             "–": "-",
             "—": "--",
@@ -2249,6 +2276,7 @@ def _cached_build_pdf(
             "•": "-",
             "·": ".",
             "‒": "-",
+            "―": "--",
         }
         for ch, rep in _r.items():
             text = text.replace(ch, rep)
@@ -2469,11 +2497,11 @@ def _cached_build_pdf(
             pdf.set_font(font_name, "B", 13)
             pdf.set_text_color(15, 23, 42)
             pdf.cell(tile_w - 5, 7, value, align="L")
-            # Sub-label
+            # Sub-label — _safe() converts en-dash/smart-quotes to ASCII for Helvetica.
             pdf.set_xy(tx + 3, tile_y + 17)
             pdf.set_font(font_name, "", 7)
             pdf.set_text_color(75, 83, 32)
-            pdf.cell(tile_w - 5, 4, sub_lbl, align="L")
+            pdf.cell(tile_w - 5, 4, _safe(sub_lbl), align="L")
             # MoM badge (tile 0 only, when available)
             if badge:
                 positive = badge.startswith("+")
@@ -2686,9 +2714,13 @@ def _render_turn(turn: dict, form_key: str) -> None:
     lang = _detect_language(turn["question"])
     is_analytical = bool(turn.get("sql"))
 
-    # Insight card
+    # Insight card — capped at 3 visible lines.
     escaped = html_lib.escape(turn["insight"]).replace("\n", "<br>")
-    st.markdown(f'<div class="insight-card">{escaped}</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="insight-card" style="display:-webkit-box;-webkit-line-clamp:3;'
+        f'-webkit-box-orient:vertical;overflow:hidden;">{escaped}</div>',
+        unsafe_allow_html=True,
+    )
 
     # KPI tiles — mirror the PDF layout so stakeholders see the same numbers inline.
     kpi_tiles = _extract_kpi_tiles(turn.get("columns", []), turn.get("rows", []), lang)
