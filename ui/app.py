@@ -1065,6 +1065,8 @@ _COL_TRANSLATIONS: dict[str, dict[str, str]] = {
         "total_orders": "Bestellungen gesamt",
         "product_name": "Produkt",
         "revenue": "Umsatz",
+        "avg_unit_revenue": "Ø Stückumsatz",
+        "avg_order_value": "Ø Bestellwert",
     },
     "it": {
         "year_month": "Mese",
@@ -1095,6 +1097,8 @@ _COL_TRANSLATIONS: dict[str, dict[str, str]] = {
         "total_orders": "Ordini totali",
         "product_name": "Prodotto",
         "revenue": "Ricavo",
+        "avg_unit_revenue": "Ricavo unitario medio",
+        "avg_order_value": "Valore medio ordine",
     },
     "fr": {
         "year_month": "Mois",
@@ -1125,6 +1129,8 @@ _COL_TRANSLATIONS: dict[str, dict[str, str]] = {
         "total_orders": "Commandes totales",
         "product_name": "Produit",
         "revenue": "CA",
+        "avg_unit_revenue": "CA unitaire moyen",
+        "avg_order_value": "Valeur moy. commande",
     },
     "es": {
         "year_month": "Mes",
@@ -1155,6 +1161,8 @@ _COL_TRANSLATIONS: dict[str, dict[str, str]] = {
         "total_orders": "Pedidos totales",
         "product_name": "Producto",
         "revenue": "Ingresos",
+        "avg_unit_revenue": "Ingresos unit. medios",
+        "avg_order_value": "Valor medio pedido",
     },
     "pt": {
         "year_month": "Mês",
@@ -1185,6 +1193,8 @@ _COL_TRANSLATIONS: dict[str, dict[str, str]] = {
         "total_orders": "Pedidos totais",
         "product_name": "Produto",
         "revenue": "Receita",
+        "avg_unit_revenue": "Receita unit. média",
+        "avg_order_value": "Valor médio pedido",
     },
     "zh": {
         "year_month": "月份",
@@ -1971,27 +1981,31 @@ def _extract_kpi_tiles(
                 cat_plural = "Periods"
         else:
             cat_label = _translate_col(cat_col, lang)
-            if cat_label.endswith("y"):
-                cat_plural = cat_label[:-1] + "ies"
-            elif cat_label.endswith("s"):
-                cat_plural = cat_label
+            if lang == "en":
+                if cat_label.endswith("y"):
+                    cat_plural = cat_label[:-1] + "ies"
+                elif cat_label.endswith("s"):
+                    cat_plural = cat_label
+                else:
+                    cat_plural = cat_label + "s"
             else:
-                cat_plural = cat_label + "s"
+                # Non-English: never append "s" — pluralisation rules differ
+                cat_plural = cat_label
         tile2_label = _t("Periods Covered", lang) if is_time_cat else _t("Total Entries", lang)
         tiles.append((tile2_label, str(len(rows)), cat_plural, ""))
 
         # Tile 3: aggregate total with period range sub-label for time-series.
         try:
             total = sum(float(str(r.get(metric_col, 0) or 0).replace(",", "")) for r in rows)
-            tile3_label_fmt = _t("total_metric_all_fmt", lang)
-            if tile3_label_fmt == "total_metric_all_fmt":
-                base_label = re.sub(r"^Total\s+", "", metric_label, flags=re.IGNORECASE)
-                tile3_label = f"Total {base_label} (All)"
-            else:
-                tile3_label = tile3_label_fmt.format(metric=metric_label)
-            base_label = re.sub(
-                r"^Total\s+", "", metric_label, flags=re.IGNORECASE
-            )  # kept for compat
+            # Tile 3 label: use the BASE column name (strip "total_" prefix) so we
+            # don't get "Ricavo totale totale" when the translated name already
+            # includes "total"/"totale"/etc.
+            _base_col = re.sub(r"^total_", "", metric_col, flags=re.IGNORECASE)
+            _base_col = re.sub(r"_total$", "", _base_col, flags=re.IGNORECASE)
+            _base_label = (
+                _translate_col(_base_col, lang) if _base_col != metric_col else metric_label
+            )
+            tile3_label = f"{_t('Total', lang)} {_base_label} ({_t('All', lang)})"
             if is_time_cat and len(rows) >= 2:
                 first_fmt = _fmt_period(str(rows[0].get(cat_col, "")))
                 last_fmt = _fmt_period(str(rows[-1].get(cat_col, "")))
@@ -2144,6 +2158,7 @@ def _cached_build_pdf(
     generated_str = f"{_now.day:02d} {_month_str} {_now.year}, {_now.strftime('%H:%M %Z')}"
 
     # ── Font selection ──────────────────────────────────────────────────────
+    # CJK candidates: explicit paths + recursive glob + fc-list discovery.
     _NOTO_CJK_PATHS = [
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
@@ -2152,13 +2167,23 @@ def _cached_build_pdf(
         "/System/Library/Fonts/STHeiti Medium.ttc",
         "/System/Library/Fonts/Hiragino Sans GB.ttc",
     ] + _glob.glob("/usr/share/fonts/**/*[Nn]oto*[Cc][Jj][Kk]*", recursive=True)
-    _DEJAVU_DIR = "/usr/share/fonts/truetype/dejavu"
+
+    # DejaVu candidates across Debian/Ubuntu/Alpine layouts.
+    _DEJAVU_REG_PATHS = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/ttf-dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    ]
+    _DEJAVU_BOLD_PATHS = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/ttf-dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+    ]
 
     # Resolve font name before instantiating _PDFReport (header() needs it).
     _font_name_resolved = "Helvetica"
     _font_map: dict[str, str] = {}
 
-    # We'll register fonts after instantiation; store paths for later.
     _cjk_path_to_use: str | None = None
     if lang in ("zh", "ja", "ko"):
         for cjk_path in _NOTO_CJK_PATHS:
@@ -2166,15 +2191,70 @@ def _cached_build_pdf(
                 _cjk_path_to_use = cjk_path
                 _font_name_resolved = "NotoSansCJK"
                 break
+        # Fallback: ask fontconfig for any CJK-capable font on the system.
+        if not _cjk_path_to_use:
+            try:
+                import subprocess as _sp
+
+                _fc = _sp.run(
+                    ["fc-list", "--format=%{file}\n"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                for _fp in _fc.stdout.strip().split("\n"):
+                    _fp = _fp.strip()
+                    if (
+                        _fp
+                        and os.path.exists(_fp)
+                        and _fp.endswith((".ttf", ".otf", ".ttc"))
+                        and any(
+                            x in _fp.lower()
+                            for x in ["noto", "cjk", "han", "wqy", "unifont", "droid"]
+                        )
+                    ):
+                        _cjk_path_to_use = _fp
+                        _font_name_resolved = "NotoSansCJK"
+                        break
+            except Exception:
+                pass
+
     if _font_name_resolved == "Helvetica":
-        dejavu_reg = f"{_DEJAVU_DIR}/DejaVuSans.ttf"
-        dejavu_bold = f"{_DEJAVU_DIR}/DejaVuSans-Bold.ttf"
-        if os.path.exists(dejavu_reg):
+        _dv_reg = next((p for p in _DEJAVU_REG_PATHS if os.path.exists(p)), None)
+        _dv_bold = next((p for p in _DEJAVU_BOLD_PATHS if os.path.exists(p)), None)
+        if _dv_reg:
             _font_name_resolved = "DejaVu"
-            _font_map["reg"] = dejavu_reg
-            _font_map["bold"] = dejavu_bold if os.path.exists(dejavu_bold) else dejavu_reg
+            _font_map["reg"] = _dv_reg
+            _font_map["bold"] = _dv_bold or _dv_reg
 
     font_name = _font_name_resolved
+    _is_cjk_font = font_name == "NotoSansCJK"
+
+    # ── Text sanitizer — prevents character-support errors on Helvetica ──────
+    # When font registration fails and we fall back to Helvetica, non-Latin-1
+    # characters (en-dash, smart quotes, CJK) cause fpdf2 to raise. This
+    # sanitizer replaces the most common offenders. For CJK text with a CJK
+    # font, no substitution is needed.
+    def _safe(text: str) -> str:
+        if _is_cjk_font:
+            return text
+        _r = {
+            "–": "-",
+            "—": "--",
+            "‘": "'",
+            "’": "'",
+            "“": '"',
+            "”": '"',
+            "…": "...",
+            "•": "-",
+            "·": ".",
+            "‒": "-",
+        }
+        for ch, rep in _r.items():
+            text = text.replace(ch, rep)
+        if font_name == "Helvetica":
+            text = text.encode("latin-1", errors="replace").decode("latin-1")
+        return text
 
     # ── FPDF subclass with enterprise header + footer on every page ─────────
     # Captures font_name, lang, generated_str from the enclosing scope.
@@ -2332,7 +2412,7 @@ def _cached_build_pdf(
                     first_fmt = _fmt_period_pdf(first_v)
                     last_fmt = _fmt_period_pdf(last_v)
                     if first_fmt and first_fmt != last_fmt:
-                        period_label = f"Period: {first_fmt} \u2013 {last_fmt}"
+                        period_label = f"{first_fmt} \u2013 {last_fmt}"
                     elif first_fmt:
                         period_label = first_fmt
                     break
@@ -2352,7 +2432,7 @@ def _cached_build_pdf(
     pdf.ln(3)
     pdf.set_font(font_name, "B", 13)
     pdf.set_text_color(15, 23, 42)
-    pdf.multi_cell(W, 7, question, align="L")
+    pdf.multi_cell(W, 7, _safe(question), align="L")
     pdf.ln(3)
 
     # ── Period coverage line ─────────────────────────────────────────────────
@@ -2443,6 +2523,7 @@ def _cached_build_pdf(
     # ── Summary (insight) — olive left-accent bar ─────────────────────────────
     pdf_insight = re.sub(r"\*{1,3}([^*\n]+)\*{1,3}", r"\1", insight)
     pdf_insight = pdf_insight.replace("\r\n", "\n").replace("\r", "\n")
+    pdf_insight = _safe(pdf_insight)
     pdf.set_font(font_name, "B", 11)
     pdf.set_text_color(100, 116, 139)
     pdf.cell(W, 5, _t("Summary", lang).upper(), new_x="LMARGIN", new_y="NEXT")
@@ -2452,57 +2533,26 @@ def _cached_build_pdf(
     pdf.set_font(font_name, "", 11)
     pdf.set_text_color(30, 41, 59)
 
-    # Measure how much vertical space the summary will need before drawing it.
-    # line_height=7mm, cell_width=W-6. Count wrapped lines per paragraph.
+    # Summary flows freely with auto page break — long insights continue on
+    # page 2 rather than being truncated. The olive accent bar is clipped at
+    # the page bottom to avoid crossing a page boundary.
     _line_h = 7.0
     _cell_w = W - 6
-    _char_per_line = max(1, int(_cell_w / (11 * 0.22)))  # approx chars at 11pt
-    _total_lines = 0
-    for _para in pdf_insight.split("\n"):
-        _para = _para.strip()
-        _total_lines += max(1, (len(_para) + _char_per_line - 1) // _char_per_line)
-    _summary_h = _total_lines * _line_h
-
-    # How much space remains on this page above the footer?
-    # Reserve 38mm for the DATA SNAPSHOT section heading + at least one row.
-    _safe_bottom = pdf.h - 18  # footer is 13mm, give 5mm buffer
-    _available = _safe_bottom - pdf.get_y() - 38  # 38mm for snapshot
-
-    # If the full summary won't fit, truncate it to leave room for the snapshot.
-    if _summary_h > _available and _available > _line_h:
-        _max_lines = max(1, int(_available / _line_h))
-        _truncated_lines: list[str] = []
-        _count = 0
-        for _para in pdf_insight.split("\n"):
-            _para = _para.strip()
-            _para_lines = max(1, (len(_para) + _char_per_line - 1) // _char_per_line)
-            if _count + _para_lines > _max_lines:
-                break
-            _truncated_lines.append(_para)
-            _count += _para_lines
-        if _truncated_lines:
-            pdf_insight = " ".join(_truncated_lines)
-        else:
-            # The first paragraph alone is longer than the available space.
-            # Truncate it at character level so at least one line of summary appears.
-            _first_para = (pdf_insight.split("\n")[0]).strip()
-            _max_chars = _max_lines * _char_per_line
-            if len(_first_para) > _max_chars:
-                _first_para = _first_para[:_max_chars].rstrip() + "\u2026"
-            pdf_insight = _first_para
-
-    # Disable auto page break for the summary block so multi_cell never
-    # triggers a page break mid-paragraph. The truncation above ensures the
-    # text fits. The accent bar rect is only valid on a single page.
-    pdf.set_auto_page_break(False)
+    pdf.set_auto_page_break(True, margin=18)
     y_before = pdf.get_y()
+    _page_before = pdf.page_no()
     pdf.set_x(pdf.l_margin + 6)
     pdf.multi_cell(_cell_w, _line_h, pdf_insight, align="L")
     y_after = pdf.get_y()
-    pdf.set_auto_page_break(True, margin=18)
 
+    # Draw the olive accent bar only on the starting page (can't span pages).
     pdf.set_fill_color(75, 83, 32)
-    pdf.rect(pdf.l_margin, y_before, 3, y_after - y_before, style="F")
+    _bar_end = (pdf.h - 18) if pdf.page_no() > _page_before else y_after
+    if _bar_end > y_before:
+        _saved_page = pdf.page_no()
+        pdf.page = _page_before
+        pdf.rect(pdf.l_margin, y_before, 3, _bar_end - y_before, style="F")
+        pdf.page = _saved_page
     pdf.set_fill_color(255, 255, 255)
 
     # ── Data Snapshot — top 5 rows compact table ──────────────────────────────
@@ -2661,7 +2711,8 @@ def _render_turn(turn: dict, form_key: str) -> None:
                 )
                 st.markdown(
                     f'<div style="background:#f0f7ff;border-radius:8px;'
-                    f'border-top:3px solid #4B5320;padding:12px 16px 10px 16px;">'
+                    f"border-top:3px solid #4B5320;padding:12px 16px 10px 16px;"
+                    f'min-height:95px;display:flex;flex-direction:column;">'
                     f'<div style="font-size:11px;color:#4B5320;font-weight:600;'
                     f'letter-spacing:0.05em;margin-bottom:4px">{metric_lbl.upper()}</div>'
                     f'<div style="font-size:22px;font-weight:700;color:#0f172a;'
