@@ -151,7 +151,7 @@ _BRAND_COLOUR = "#4B5320"  # EDP army olive (primary)
 
 # Column name hints that suggest monetary values (used to format callout labels with $).
 _MONETARY_HINTS: frozenset[str] = frozenset(
-    {"revenue", "amount", "sales", "profit", "spend", "cost", "price", "total", "income"}
+    {"revenue", "amount", "sales", "profit", "spend", "cost", "price", "income", "value", "payment", "volume", "lifetime"}
 )
 
 # Question-level keyword hints that signal a scatter / correlation chart.
@@ -338,12 +338,13 @@ def _catmull_rom_smooth(
 
 
 def _display_label(value: str) -> str:
-    """Title-case a label only if it is already all-lowercase.
+    """Title-case a label and replace underscores with spaces.
 
     Preserves mixed-case brand names (UrbanEdge, TechPlus) while capitalising
-    database-stored lowercase values (germany -> Germany, united kingdom -> United Kingdom).
+    database-stored lowercase values (germany -> Germany, bank_transfer -> Bank Transfer).
     """
-    return value.title() if value == value.lower() else value
+    cleaned = value.replace("_", " ")
+    return cleaned.title() if value == value.lower() else cleaned
 
 
 @dataclass
@@ -431,7 +432,7 @@ class ChartGenerator:
         )
 
         try:
-            png_bytes, html, chart_height = self._render(result, title, chart_type)
+            png_bytes, html, chart_height = self._render(result, title, chart_type, question)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Chart rendering failed for execution_id=%s: %s",
@@ -596,11 +597,12 @@ class ChartGenerator:
         )
 
     @staticmethod
-    def _best_metric_column(numeric_cols: list[str]) -> str:
+    def _best_metric_column(numeric_cols: list[str], question: str = "") -> str:
         """Pick the most likely metric column from a list of numeric columns.
 
-        Rank/ordinal and percentage columns are excluded first so that monetary-hint
-        matching cannot accidentally pick them.
+        Rank/ordinal and percentage columns are excluded unless the question is
+        explicitly about rates or success percentages, in which case pct columns
+        are allowed through so the chart shows the actual rate, not volume.
 
         Three-pass priority so that a revenue column always beats a customer
         count column when both are present (e.g. total_revenue vs total_customers):
@@ -615,11 +617,19 @@ class ChartGenerator:
 
         Falls back to the last non-rank/non-pct column, or the last column overall.
         """
-        non_rank = [
-            c
-            for c in numeric_cols
-            if not ChartGenerator._is_rank_col(c) and not ChartGenerator._is_pct_col(c)
-        ]
+        # For rate/percentage questions, allow pct columns as valid metrics so the
+        # chart shows the actual rate rather than falling back to a count column.
+        ql = question.lower()
+        _RATE_HINTS = {
+            "rate", "success", "percentage", "pct", "ratio", "percent",
+            "proportion", "tasso", "taux", "tasa", "taxa", "erfolgsrate",
+            "successrate", "success rate",
+        }
+        rate_question = any(h in ql for h in _RATE_HINTS)
+
+        non_rank = [c for c in numeric_cols if not ChartGenerator._is_rank_col(c)]
+        if not rate_question:
+            non_rank = [c for c in non_rank if not ChartGenerator._is_pct_col(c)]
         candidates = non_rank if non_rank else numeric_cols
 
         for col in reversed(candidates):
@@ -643,21 +653,22 @@ class ChartGenerator:
         result: QueryResult,
         title: str,
         chart_type: str,
+        question: str = "",
     ) -> tuple[bytes, str, int]:
         """Dispatch to the correct renderer and return (png_bytes, html, height)."""
         if chart_type == "line":
             return self._render_line(result, title)
         if chart_type == "bar":
-            return self._render_bar(result, title)
+            return self._render_bar(result, title, question)
         if chart_type == "scatter":
-            return self._render_scatter(result, title)
+            return self._render_scatter(result, title, question)
         if chart_type == "pie":
             return self._render_pie(result, title)
         if chart_type == "multiline":
             return self._render_multiline(result, title)
         return self._render_table(result, title)
 
-    def _render_bar(self, result: QueryResult, title: str) -> tuple[bytes, str, int]:
+    def _render_bar(self, result: QueryResult, title: str, question: str = "") -> tuple[bytes, str, int]:
         """Render a horizontal bar chart sorted descending by the metric column."""
         import matplotlib
 
@@ -666,7 +677,7 @@ class ChartGenerator:
 
         numeric_cols = self._numeric_columns(result)
         categorical_cols = [c for c in result.columns if c not in numeric_cols]
-        y_col = self._best_metric_column(numeric_cols)
+        y_col = self._best_metric_column(numeric_cols, question)
 
         # Combine first_name + last_name into a readable full-name label when both exist.
         if "first_name" in result.columns and "last_name" in result.columns:
@@ -717,7 +728,7 @@ class ChartGenerator:
         # Add padding for title, axis labels, and iframe border.
         return png_bytes, html, plotly_height + 80
 
-    def _render_scatter(self, result: QueryResult, title: str) -> tuple[bytes, str, int]:
+    def _render_scatter(self, result: QueryResult, title: str, question: str = "") -> tuple[bytes, str, int]:
         """Render a scatter plot with an optional linear trend line.
 
         The y-axis is the primary metric column (revenue-like). The x-axis is the
@@ -737,7 +748,7 @@ class ChartGenerator:
         non_rank = [c for c in numeric_cols if not self._is_rank_col(c)]
         candidates = non_rank if len(non_rank) >= 2 else numeric_cols
 
-        y_col = self._best_metric_column(candidates)
+        y_col = self._best_metric_column(candidates, question)
         x_candidates = [c for c in candidates if c != y_col]
         x_col = x_candidates[0] if x_candidates else candidates[0]
         label_col = categorical_cols[0] if categorical_cols else ""
@@ -918,32 +929,61 @@ class ChartGenerator:
         colours = _OLIVE_PALETTE[: len(metric_cols)]
 
         x_indices = list(range(len(x_labels)))
+
+        # Detect scale mismatch: if the largest and smallest series maxima differ by
+        # more than 50× the chart is unreadable on a shared axis (e.g. revenue=€150K
+        # alongside order_count=79). Use a secondary y-axis in that case.
+        col_maxima = [
+            max((abs(float(row.get(c, 0) or 0)) for row in sorted_rows_ml), default=0)
+            for c in metric_cols
+        ]
+        _min_max = min(col_maxima) if col_maxima else 0
+        _max_max = max(col_maxima) if col_maxima else 0
+        use_dual = len(metric_cols) >= 2 and _min_max > 0 and _max_max / _min_max > 50
+
+        # Assign each metric column to left or right axis.
+        if use_dual:
+            left_cols = [c for c in metric_cols if _is_monetary(c)] or [metric_cols[0]]
+            right_cols = [c for c in metric_cols if c not in left_cols]
+        else:
+            left_cols = metric_cols
+            right_cols = []
+
         fig, ax = plt.subplots(figsize=(12, 5))
+        ax2 = ax.twinx() if use_dual else None
 
         for col, colour in zip(metric_cols, colours, strict=False):
+            target_ax = ax2 if (use_dual and col in right_cols) else ax
             y_values = [float(row.get(col, 0) or 0) for row in sorted_rows_ml]
             x_smooth, y_smooth = _catmull_rom_smooth(x_indices, y_values)
-            ax.fill_between(x_smooth, y_smooth, alpha=0.06, color=colour)
-            ax.plot(
-                x_smooth,
-                y_smooth,
-                color=colour,
-                linewidth=2.5,
+            target_ax.fill_between(x_smooth, y_smooth, alpha=0.06, color=colour)
+            target_ax.plot(
+                x_smooth, y_smooth, color=colour, linewidth=2.5,
                 label=col.replace("_", " ").title(),
             )
-            ax.scatter(x_indices, y_values, color=colour, s=35, zorder=5)
+            target_ax.scatter(x_indices, y_values, color=colour, s=35, zorder=5)
 
         ax.set_xticks(x_indices)
         ax.set_xticklabels(x_labels, rotation=45, ha="right")
         ax.set_xlabel(x_title)
-        # Format y-axis with K/M if any metric is monetary.
-        _ml_monetary = any(_is_monetary(c) for c in metric_cols)
+        _left_monetary = any(_is_monetary(c) for c in left_cols)
         ax.yaxis.set_major_formatter(
-            mticker.FuncFormatter(lambda v, _p: _fmt_axis(v, _ml_monetary))
+            mticker.FuncFormatter(lambda v, _p: _fmt_axis(v, _left_monetary))
         )
-        ax.legend(loc="upper left", fontsize=9, framealpha=0.7)
         ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
+        if use_dual and ax2 is not None:
+            _right_monetary = any(_is_monetary(c) for c in right_cols)
+            ax2.yaxis.set_major_formatter(
+                mticker.FuncFormatter(lambda v, _p: _fmt_axis(v, _right_monetary))
+            )
+            ax2.spines["top"].set_visible(False)
+            # Combine legends from both axes.
+            h1, l1 = ax.get_legend_handles_labels()
+            h2, l2 = ax2.get_legend_handles_labels()
+            ax.legend(h1 + h2, l1 + l2, loc="upper left", fontsize=9, framealpha=0.7)
+        else:
+            ax.spines["right"].set_visible(False)
+            ax.legend(loc="upper left", fontsize=9, framealpha=0.7)
         ax.grid(axis="y", color="#e0e0e0", linewidth=0.7, linestyle="--")
         if title:
             ax.set_title(title, fontsize=11, pad=20)
@@ -953,7 +993,10 @@ class ChartGenerator:
         png_bytes = _fig_to_png(fig)
         plt.close(fig)
 
-        html = _plotly_multiline(x_labels, metric_cols, sorted_rows_ml, x_title, title)
+        html = _plotly_multiline(
+            x_labels, metric_cols, sorted_rows_ml, x_title, title,
+            right_cols=right_cols,
+        )
         return png_bytes, html, 480
 
     def _render_line(self, result: QueryResult, title: str) -> tuple[bytes, str, int]:
@@ -1425,14 +1468,16 @@ def _plotly_multiline(
     rows: list[dict[str, str]],
     x_title: str,
     title: str = "",
+    right_cols: list[str] | None = None,
 ) -> str:
     """Return a Plotly multi-line chart as an HTML fragment.
 
-    Each metric column becomes a separate trace with its own olive-palette colour.
-    Spline smoothing is applied. No callout annotations (too crowded with multiple lines).
+    When right_cols is non-empty the right-axis series use yaxis2 (secondary
+    right-hand axis) so large-scale and small-scale metrics are both readable.
     """
     import plotly.graph_objects as go
 
+    _right = set(right_cols or [])
     colours = _OLIVE_PALETTE[: len(metric_cols)]
     fig = go.Figure()
 
@@ -1446,19 +1491,28 @@ def _plotly_multiline(
                 name=col.replace("_", " ").title(),
                 line={"color": colour, "width": 2.5, "shape": "spline", "smoothing": 0.9},
                 marker={"size": 6, "color": colour},
+                yaxis="y2" if col in _right else "y",
                 hovertemplate=f"{col.replace('_', ' ').title()}: %{{y:,.0f}}<extra></extra>",
             )
         )
 
-    fig.update_layout(
-        title=title or None,
-        xaxis_title=x_title,
-        xaxis={"type": "category", "showgrid": True, "gridcolor": "rgba(0,0,0,0.07)"},
-        yaxis={"showgrid": True, "gridcolor": "rgba(0,0,0,0.07)"},
-        plot_bgcolor="white",
-        paper_bgcolor="white",
-        margin={"l": 60, "r": 20, "t": 50 if title else 20, "b": 60},
-        height=420,
-        legend={"orientation": "h", "y": -0.2},
-    )
+    layout: dict = {
+        "title": title or None,
+        "xaxis_title": x_title,
+        "xaxis": {"type": "category", "showgrid": True, "gridcolor": "rgba(0,0,0,0.07)"},
+        "yaxis": {"showgrid": True, "gridcolor": "rgba(0,0,0,0.07)"},
+        "plot_bgcolor": "white",
+        "paper_bgcolor": "white",
+        "margin": {"l": 60, "r": 60 if _right else 20, "t": 50 if title else 20, "b": 60},
+        "height": 420,
+        "legend": {"orientation": "h", "y": -0.2},
+    }
+    if _right:
+        layout["yaxis2"] = {
+            "overlaying": "y",
+            "side": "right",
+            "showgrid": False,
+            "title": right_cols[0].replace("_", " ").title() if right_cols else "",
+        }
+    fig.update_layout(**layout)
     return str(fig.to_html(full_html=False, include_plotlyjs="cdn"))
