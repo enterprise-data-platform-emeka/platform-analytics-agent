@@ -2279,7 +2279,10 @@ def _cached_build_pdf(
         for ch, rep in _r.items():
             text = text.replace(ch, rep)
         if font_name == "Helvetica":
-            text = text.encode("latin-1", errors="replace").decode("latin-1")
+            # Keep printable Latin-1 (U+0020–U+00FF) and the Euro sign (U+20AC),
+            # which FPDF2's built-in Helvetica glyph set supports. Replace
+            # everything else (CJK, en-dash survivors, etc.) with '?'.
+            text = "".join(ch if (0x20 <= ord(ch) <= 0xFF or ch == "€") else "?" for ch in text)
         return text
 
     # ── FPDF subclass with enterprise header + footer on every page ─────────
@@ -2305,10 +2308,10 @@ def _cached_build_pdf(
             self.set_xy(22, 13)
             self.set_font(self._fn, "", 7)
             self.set_text_color(180, 210, 230)
-            self.cell(55, 4, _t("DATA ENGINEER", self._lang))
+            self.cell(55, 4, _safe(_t("DATA ENGINEER", self._lang)))
 
             # Centre: report title
-            report_title = _t("EDP Analytics Report", self._lang)
+            report_title = _safe(_t("EDP Analytics Report", self._lang))
             self.set_font(self._fn, "B", 10)
             self.set_text_color(255, 255, 255)
             title_w = 70.0
@@ -2319,10 +2322,10 @@ def _cached_build_pdf(
             self.set_font(self._fn, "", 7)
             self.set_text_color(180, 210, 230)
             self.set_xy(self.w - 62, 7)
-            self.cell(57, 5, _t("INTERNAL | CONFIDENTIAL", self._lang), align="R")
+            self.cell(57, 5, _safe(_t("INTERNAL | CONFIDENTIAL", self._lang)), align="R")
             self.set_xy(self.w - 62, 13)
             self.set_font(self._fn, "", 6)
-            self.cell(57, 4, f"{_t('Generated:', self._lang)} {self._gen}", align="R")
+            self.cell(57, 4, _safe(f"{_t('Generated:', self._lang)} {self._gen}"), align="R")
 
             # Reset colour; content starts at y=28
             self.set_text_color(0, 0, 0)
@@ -2331,17 +2334,19 @@ def _cached_build_pdf(
         def footer(self) -> None:
             self.set_y(-13)
             col_w = self.epw / 3
-            self.set_font("Helvetica", "", 7)
+            self.set_font(self._fn, "", 7)
             self.set_text_color(148, 163, 184)
             self.set_x(self.l_margin)
-            self.cell(col_w, 5, _t("Source: Gold Layer · Athena", self._lang), align="L")
-            self.cell(col_w, 5, _t("Confidential - Internal Use Only", self._lang), align="C")
+            self.cell(col_w, 5, _safe(_t("Source: Gold Layer · Athena", self._lang)), align="L")
+            self.cell(
+                col_w, 5, _safe(_t("Confidential - Internal Use Only", self._lang)), align="C"
+            )
             _page_fmt = _t("page_fmt", self._lang)
             if _page_fmt == "page_fmt":
                 _page_str = f"Page {self.page_no()} of {{nb}}"
             else:
                 _page_str = _page_fmt.replace("{n}", str(self.page_no())).replace("{m}", "{nb}")
-            self.cell(col_w, 5, _page_str, align="R")
+            self.cell(col_w, 5, _safe(_page_str), align="R")
             self.set_text_color(0, 0, 0)
 
     pdf = _PDFReport()
@@ -2452,7 +2457,7 @@ def _cached_build_pdf(
     # ── Question ─────────────────────────────────────────────────────────────
     pdf.set_font(font_name, "B", 11)
     pdf.set_text_color(75, 83, 32)
-    pdf.cell(W, 5, _t("Question", lang).upper(), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(W, 5, _safe(_t("Question", lang)).upper(), new_x="LMARGIN", new_y="NEXT")
     pdf.set_draw_color(226, 232, 240)
     pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + W, pdf.get_y())
     pdf.ln(3)
@@ -2466,7 +2471,7 @@ def _cached_build_pdf(
         period_prefix = _t("Period:", lang)
         pdf.set_font(font_name, "", 8)
         pdf.set_text_color(100, 116, 139)
-        pdf.cell(W, 5, f"{period_prefix} {period_label}", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(W, 5, _safe(f"{period_prefix} {period_label}"), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(3)
     else:
         pdf.ln(5)
@@ -2489,12 +2494,12 @@ def _cached_build_pdf(
             pdf.set_xy(tx + 3, tile_y + 4)
             pdf.set_font(font_name, "", 7)
             pdf.set_text_color(75, 83, 32)
-            pdf.cell(tile_w - 5, 4, metric_lbl.upper(), align="L")
+            pdf.cell(tile_w - 5, 4, _safe(metric_lbl).upper(), align="L")
             # Value
             pdf.set_xy(tx + 3, tile_y + 9)
             pdf.set_font(font_name, "B", 13)
             pdf.set_text_color(15, 23, 42)
-            pdf.cell(tile_w - 5, 7, value, align="L")
+            pdf.cell(tile_w - 5, 7, _safe(value), align="L")
             # Sub-label — _safe() converts en-dash/smart-quotes to ASCII for Helvetica.
             pdf.set_xy(tx + 3, tile_y + 17)
             pdf.set_font(font_name, "", 7)
@@ -2507,7 +2512,7 @@ def _cached_build_pdf(
                 pdf.set_xy(tx + 3, tile_y + 21)
                 pdf.set_font(font_name, "B", 7)
                 pdf.set_text_color(r, g, b)
-                pdf.cell(tile_w - 5, 4, badge, align="L")
+                pdf.cell(tile_w - 5, 4, _safe(badge), align="L")
 
         pdf.set_y(tile_y + tile_h + 5)
         pdf.set_text_color(0, 0, 0)
@@ -2552,7 +2557,7 @@ def _cached_build_pdf(
     pdf_insight = _safe(pdf_insight)
     pdf.set_font(font_name, "B", 11)
     pdf.set_text_color(100, 116, 139)
-    pdf.cell(W, 5, _t("Summary", lang).upper(), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(W, 5, _safe(_t("Summary", lang)).upper(), new_x="LMARGIN", new_y="NEXT")
     pdf.set_draw_color(226, 232, 240)
     pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + W, pdf.get_y())
     pdf.ln(4)
@@ -2610,7 +2615,7 @@ def _cached_build_pdf(
         pdf.ln(7)
         pdf.set_font(font_name, "B", 11)
         pdf.set_text_color(100, 116, 139)
-        pdf.cell(W, 5, _t("DATA SNAPSHOT", lang), new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(W, 5, _safe(_t("DATA SNAPSHOT", lang)), new_x="LMARGIN", new_y="NEXT")
         pdf.set_draw_color(226, 232, 240)
         pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + W, pdf.get_y())
         pdf.ln(3)
@@ -2625,7 +2630,7 @@ def _cached_build_pdf(
         pdf.set_font(font_name, "B", 8)
         for j, sc in enumerate(snap_cols):
             pdf.set_xy(pdf.l_margin + j * col_w_s, hdr_y)
-            pdf.cell(col_w_s, row_h_s, _translate_col(sc, lang), fill=True)
+            pdf.cell(col_w_s, row_h_s, _safe(_translate_col(sc, lang)), fill=True)
         pdf.set_y(hdr_y + row_h_s)
 
         # Data rows — auto page break is off so cells never split mid-row.
@@ -2648,7 +2653,7 @@ def _cached_build_pdf(
             for j, sc in enumerate(snap_cols):
                 cell_val = _fmt_snap(str(row.get(sc, "")), sc)
                 pdf.set_xy(pdf.l_margin + j * col_w_s, row_y)
-                pdf.cell(col_w_s, row_h_s, cell_val, fill=True)
+                pdf.cell(col_w_s, row_h_s, _safe(cell_val), fill=True)
             pdf.set_y(row_y + row_h_s)
         pdf.set_auto_page_break(True, margin=18)
 

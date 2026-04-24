@@ -99,6 +99,30 @@ _PRESIGNED_URL_EXPIRY = 3600
 # Time dimension column name fragments (case-insensitive).
 _TIME_HINTS: frozenset[str] = frozenset({"year", "month", "date", "week", "quarter"})
 
+
+def _time_axis_label(cols: list[str]) -> str:
+    """Return a clean axis label for one or more time-dimension columns.
+
+    Converts generic column names like "year_month", "order_year"/"order_month"
+    into human-readable labels ("Month", "Quarter", etc.) instead of the raw
+    title-cased column name ("Year Month", "Order Year / Order Month").
+    """
+    combined = "_".join(c.lower() for c in cols)
+    if "month" in combined:
+        return "Month"
+    if "quarter" in combined:
+        return "Quarter"
+    if "week" in combined:
+        return "Week"
+    if "year" in combined:
+        return "Year"
+    if "date" in combined:
+        return "Date"
+    if "period" in combined:
+        return "Period"
+    return " / ".join(c.replace("_", " ").title() for c in cols)
+
+
 # Metric column name hints: prefer these over raw IDs when picking the y-axis for bar charts.
 _METRIC_HINTS: frozenset[str] = frozenset(
     {
@@ -943,10 +967,10 @@ class ChartGenerator:
                 )
                 for row in result.rows
             ]
-            x_title = " / ".join(tc.replace("_", " ").title() for tc in x_dim_cols[:2])
+            x_title = _time_axis_label(x_dim_cols[:2])
         else:
             row_label_pairs = [(str(row.get(x_dim_cols[0], "")), row) for row in result.rows]
-            x_title = x_dim_cols[0].replace("_", " ").title()
+            x_title = _time_axis_label([x_dim_cols[0]])
 
         row_label_pairs.sort(key=lambda p: p[0])
         raw_labels = [p[0] for p in row_label_pairs]
@@ -1088,10 +1112,10 @@ class ChartGenerator:
                 )
                 for row in result.rows
             ]
-            x_title = " / ".join(tc.replace("_", " ").title() for tc in x_dim_cols[:2])
+            x_title = _time_axis_label(x_dim_cols[:2])
         else:
             row_label_pairs = [(str(row.get(x_dim_cols[0], "")), row) for row in result.rows]
-            x_title = x_dim_cols[0].replace("_", " ").title()
+            x_title = _time_axis_label([x_dim_cols[0]])
 
         # Sort ascending by raw label (ISO YYYY-MM sorts correctly as a string).
         row_label_pairs.sort(key=lambda p: p[0])
