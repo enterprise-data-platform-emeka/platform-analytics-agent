@@ -444,7 +444,9 @@ class TestVerdictFeedback:
         client = _mock_client([(VALID_SQL, ["Table: revenue_by_country"])])
         validator = _mock_validator([None])
 
-        result = _generator(client, validator).generate(QUESTION, SYSTEM, verdict_feedback="SQL queried products instead of countries.")
+        result = _generator(client, validator).generate(
+            QUESTION, SYSTEM, verdict_feedback="SQL queried products instead of countries."
+        )
 
         assert result.sql == VALID_SQL
         assert result.attempts == 1

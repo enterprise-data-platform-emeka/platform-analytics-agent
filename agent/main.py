@@ -384,9 +384,7 @@ class AgentSession:
                 )
                 verdict, discrepancy_detail = "No", "None"
             except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "Verdict retry failed (%s) — proceeding with original SQL.", exc
-                )
+                logger.warning("Verdict retry failed (%s) — proceeding with original SQL.", exc)
 
         query_result = self._executor.execute(generated.sql)
         logger.info(

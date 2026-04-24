@@ -1947,9 +1947,7 @@ def _extract_kpi_tiles(
         # Detect companion year/month cols for integer-encoded time series
         # (e.g. order_year=2024 + order_month=4 → synthesize "2024-04-01").
         _year_col = next((c for c in cat_cols if "year" in c.lower()), None)
-        _month_col = next(
-            (c for c in cat_cols if "month" in c.lower() and c != _year_col), None
-        )
+        _month_col = next((c for c in cat_cols if "month" in c.lower() and c != _year_col), None)
 
         def _period_str(row: dict) -> str:
             """Return a YYYY-MM-01 string from split year/month cols, else the cat_col value."""

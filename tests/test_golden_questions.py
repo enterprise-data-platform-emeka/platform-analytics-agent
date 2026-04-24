@@ -281,24 +281,24 @@ def test_golden_question(
     result = golden_generator.generate(question, golden_system_prompt)
     sql_lower = result.sql.lower()
 
-    assert expected_table in sql_lower, (
-        f"Expected table '{expected_table}' not in SQL for: {question!r}\n\nSQL:\n{result.sql}"
-    )
+    assert (
+        expected_table in sql_lower
+    ), f"Expected table '{expected_table}' not in SQL for: {question!r}\n\nSQL:\n{result.sql}"
 
     for col in expected_columns:
-        assert col in sql_lower, (
-            f"Expected column '{col}' not in SQL for: {question!r}\n\nSQL:\n{result.sql}"
-        )
+        assert (
+            col in sql_lower
+        ), f"Expected column '{col}' not in SQL for: {question!r}\n\nSQL:\n{result.sql}"
 
-    assert "limit" in sql_lower, (
-        f"LIMIT clause missing from SQL for: {question!r}\n\nSQL:\n{result.sql}"
-    )
+    assert (
+        "limit" in sql_lower
+    ), f"LIMIT clause missing from SQL for: {question!r}\n\nSQL:\n{result.sql}"
 
-    assert sql_lower.lstrip().startswith("select"), (
-        f"SQL must start with SELECT for: {question!r}\n\nSQL:\n{result.sql}"
-    )
+    assert sql_lower.lstrip().startswith(
+        "select"
+    ), f"SQL must start with SELECT for: {question!r}\n\nSQL:\n{result.sql}"
 
     for kw in _FORBIDDEN_KEYWORDS:
-        assert kw not in sql_lower, (
-            f"Forbidden keyword '{kw.upper()}' found in SQL for: {question!r}\n\nSQL:\n{result.sql}"
-        )
+        assert (
+            kw not in sql_lower
+        ), f"Forbidden keyword '{kw.upper()}' found in SQL for: {question!r}\n\nSQL:\n{result.sql}"
