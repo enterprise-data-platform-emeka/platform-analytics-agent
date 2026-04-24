@@ -151,7 +151,20 @@ _BRAND_COLOUR = "#4B5320"  # EDP army olive (primary)
 
 # Column name hints that suggest monetary values (used to format callout labels with $).
 _MONETARY_HINTS: frozenset[str] = frozenset(
-    {"revenue", "amount", "sales", "profit", "spend", "cost", "price", "income", "value", "payment", "volume", "lifetime"}
+    {
+        "revenue",
+        "amount",
+        "sales",
+        "profit",
+        "spend",
+        "cost",
+        "price",
+        "income",
+        "value",
+        "payment",
+        "volume",
+        "lifetime",
+    }
 )
 
 # Question-level keyword hints that signal a scatter / correlation chart.
@@ -621,9 +634,20 @@ class ChartGenerator:
         # chart shows the actual rate rather than falling back to a count column.
         ql = question.lower()
         _RATE_HINTS = {
-            "rate", "success", "percentage", "pct", "ratio", "percent",
-            "proportion", "tasso", "taux", "tasa", "taxa", "erfolgsrate",
-            "successrate", "success rate",
+            "rate",
+            "success",
+            "percentage",
+            "pct",
+            "ratio",
+            "percent",
+            "proportion",
+            "tasso",
+            "taux",
+            "tasa",
+            "taxa",
+            "erfolgsrate",
+            "successrate",
+            "success rate",
         }
         rate_question = any(h in ql for h in _RATE_HINTS)
 
@@ -668,7 +692,9 @@ class ChartGenerator:
             return self._render_multiline(result, title)
         return self._render_table(result, title)
 
-    def _render_bar(self, result: QueryResult, title: str, question: str = "") -> tuple[bytes, str, int]:
+    def _render_bar(
+        self, result: QueryResult, title: str, question: str = ""
+    ) -> tuple[bytes, str, int]:
         """Render a horizontal bar chart sorted descending by the metric column."""
         import matplotlib
 
@@ -728,7 +754,9 @@ class ChartGenerator:
         # Add padding for title, axis labels, and iframe border.
         return png_bytes, html, plotly_height + 80
 
-    def _render_scatter(self, result: QueryResult, title: str, question: str = "") -> tuple[bytes, str, int]:
+    def _render_scatter(
+        self, result: QueryResult, title: str, question: str = ""
+    ) -> tuple[bytes, str, int]:
         """Render a scatter plot with an optional linear trend line.
 
         The y-axis is the primary metric column (revenue-like). The x-axis is the
@@ -958,7 +986,10 @@ class ChartGenerator:
             x_smooth, y_smooth = _catmull_rom_smooth(x_indices, y_values)
             target_ax.fill_between(x_smooth, y_smooth, alpha=0.06, color=colour)
             target_ax.plot(
-                x_smooth, y_smooth, color=colour, linewidth=2.5,
+                x_smooth,
+                y_smooth,
+                color=colour,
+                linewidth=2.5,
                 label=col.replace("_", " ").title(),
             )
             target_ax.scatter(x_indices, y_values, color=colour, s=35, zorder=5)
@@ -994,7 +1025,11 @@ class ChartGenerator:
         plt.close(fig)
 
         html = _plotly_multiline(
-            x_labels, metric_cols, sorted_rows_ml, x_title, title,
+            x_labels,
+            metric_cols,
+            sorted_rows_ml,
+            x_title,
+            title,
             right_cols=right_cols,
         )
         return png_bytes, html, 480
