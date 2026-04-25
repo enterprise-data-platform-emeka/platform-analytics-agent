@@ -17,13 +17,14 @@ The Gold layer holds carefully curated, business-ready aggregations. Getting val
 A user asks: "Show me monthly transaction volume for Berlin over the last 12 months."
 
 The agent:
-1. Identifies the correct Gold table from the dbt (data build tool) schema catalog
-2. Reads the partition keys from the Glue Data Catalog (Glue Catalog)
-3. Generates an Athena SQL query with a partition filter to minimise scan cost
-4. Checks the estimated bytes scanned before executing
-5. Runs the query and validates the result for obvious anomalies
-6. Produces a time-series chart
-7. Returns a plain-English insight alongside the SQL it ran and every assumption it made
+1. Classifies the question (analytical query, conversational follow-up, or chart retype)
+2. Identifies the correct Gold table from the Glue Catalog and dbt schema catalog
+3. Generates an Athena SQL query in a single Claude call with the full schema already in context
+4. Validates the SQL against hard guardrails (SELECT only, Gold DB only, LIMIT required, no DDL)
+5. Checks that the SQL actually answers the question before running it: reads the SQL blind, infers its intent, and regenerates once with correction feedback if there's a mismatch
+6. Runs the query via Athena and validates the result for obvious anomalies
+7. Produces a chart matched to the data shape (line, bar, scatter, pie, or multi-line)
+8. Returns a plain-English insight alongside the SQL it ran, every assumption it made, the scan cost, and an intent verdict
 
 If it interpreted "transactions" as completed orders only, it says so explicitly before returning the result, so the user can catch that interpretation and correct it.
 
@@ -60,13 +61,16 @@ flowchart TD
 
     subgraph AgentLoop ["Agent Reasoning Loop - ECS Fargate"]
         direction TB
-        GenerateSQL["Generate SQL + Assumptions\nClaude API - single call\nSchema already in system prompt"]
+        Classify["classify_question()\nanalytical / conversational / retype"]
+        GenerateSQL["Call 1: Generate SQL + Assumptions\nClaude API\nSchema already in system prompt"]
         ValidateSQL["validate_sql()\nsqlparse guardrails"]
+        IntentCheck["Call 2: Infer SQL intent\nClaude API - question withheld"]
+        Verdict{"Intent\nmatches?"}
         Execute["execute_query()\nAthena SDK"]
         TrackCost["cost.py\nDataScannedInBytes to USD"]
         ValidateResults["validate_results()\nsanity checks"]
         RenderChart["render_chart()\nmatplotlib + Plotly"]
-        Summarise[Generate Insight\nClaude API]
+        Summarise["Call 3: Generate Insight\nClaude API"]
     end
 
     subgraph AWS ["AWS Data Platform"]
@@ -74,7 +78,8 @@ flowchart TD
         DbtArtifacts[(dbt catalog.json\nS3 Metadata)]
         Athena[(Athena\nedp dev gold)]
         S3Gold[(S3 Gold Layer\nParquet)]
-        AuditLog[(S3 Audit Log\nQuery History)]
+        AuditLog[(S3 Audit Log\nJSON per query)]
+        EngineerLog[(S3 Engineer Log\nCSV per request)]
     end
 
     subgraph OutputBlock ["Output Package"]
@@ -84,15 +89,21 @@ flowchart TD
         Chart[Chart PNG or HTML]
         Summary[Plain-English Insight]
         CostLine[Scan Cost in USD]
+        VerdictOut[Intent Verdict + Detail]
     end
 
     LoadSchemas --> GlueCatalog
     LoadSchemas --> DbtArtifacts
     LoadSchemas -->|pre-loads into system prompt| GenerateSQL
-    Streamlit -->|POST /ask| GenerateSQL
+    Streamlit -->|POST /ask| Classify
+    Classify -->|analytical| GenerateSQL
+    Classify -->|conversational or retype| Summary
     GenerateSQL --> ValidateSQL
-    ValidateSQL -->|pass| Execute
+    ValidateSQL -->|pass| IntentCheck
     ValidateSQL -->|fail: reason sent back| GenerateSQL
+    IntentCheck --> Verdict
+    Verdict -->|mismatch: regenerate with feedback| GenerateSQL
+    Verdict -->|matches| Execute
     Execute --> Athena
     Athena -->|reads| S3Gold
     Execute --> TrackCost
@@ -101,6 +112,7 @@ flowchart TD
     RenderChart --> Summarise
     Summarise --> OutputBlock
     Summarise --> AuditLog
+    Summarise --> EngineerLog
 
     classDef box fill:#f0f4f8,stroke:#333,stroke-width:1px;
     class Startup,Input,AgentLoop,AWS,OutputBlock box;
@@ -122,7 +134,7 @@ The UI has several features beyond a simple text box:
 
 - **Multilingual interface.** UI labels, section headings, placeholder text, and button labels are translated into eight scripts: Chinese (zh), Japanese (ja), Korean (ko), Arabic (ar), Russian (ru), Greek (el), Hebrew (he), and Thai (th). For Latin-script languages (Italian, French, Spanish, English, and others), Claude detects the language from the question text and replies in that language. The translation dictionaries cover 20+ string keys so the entire page feels native to the user's language, not just the answer.
 - **Numbered Q&A cards.** Each question-answer pair is rendered as a numbered card with a border, not a chat bubble. The card shows the question, the streaming insight, the chart (or table), and a collapsible "Query details" section with SQL, assumptions, scan cost, and a query intent check.
-- **Query intent check.** After Athena runs the SQL, a second Claude call reads only the SQL (not the original question) and infers what business question it answers. This gives an unbiased cross-check: if the inferred intent doesn't match what the user asked, the assumptions list makes the divergence visible.
+- **Query intent check.** Before Athena runs, a second Claude call reads only the SQL (the question is withheld) and infers what business question the SQL is answering. The inferred intent is compared to the original question. If a genuine mismatch is detected, the SQL is regenerated once with the discrepancy as feedback before any Athena query runs, so no scan cost is spent on SQL that is already known to be wrong. The final verdict (match or mismatch with a one-line explanation) is shown as a badge in the UI and recorded in the engineer log.
 - **Chart/Table tabs.** Every result has two tabs: an interactive Plotly chart and a raw data table. The user can switch between them without re-running the query.
 - **PDF report download.** A "Download PDF" button generates a 2-page stakeholder report. Page 1 has the question, KPI tiles, the plain-English summary, and the chart. Page 2 has the plain-English methodology (assumptions rewritten without SQL, table names, or technical identifiers), plus a query intent cross-check. The PDF uses the army olive brand palette (`#4B5320`), includes a geometric E logo mark, a generation timestamp, and "Page X of Y" page numbers in the footer. CJK (Chinese, Japanese, Korean) scripts use the Noto CJK font installed in the Docker image so characters render correctly.
 - **Conversation export and import.** A sidebar button downloads the full conversation as a JSON file. A file uploader lets the user restore a previous conversation in a new session, so multi-day analysis workflows don't start from scratch.
@@ -199,38 +211,54 @@ The agent starts each ECS task by loading all Gold schemas once and embedding th
 
 If catalog.json isn't present yet (the pipeline hasn't run), it falls back to Glue-only schema and logs a warning. No crash, no partial startup.
 
-### Step 1: Generate SQL in a single Claude call
+### Step 1: Classify the question
+
+Before generating any SQL, the agent makes a lightweight Claude call to classify the question into one of three types:
+
+- **Analytical** — needs a new Athena query. Takes the full pipeline path.
+- **Conversational** — can be answered from prior conversation context alone (e.g. "what did you say last?", "translate that to French"). Goes straight to Claude with the session summary, no Athena.
+- **Retype** — the user wants the same data rendered as a different chart type (e.g. "show that as a bar chart"). Re-runs the previous SQL with a forced chart type override.
+
+Multi-turn context is also resolved here. If the user has asked previous questions in the same session, a summary of those turns is appended to the system prompt so Claude can resolve references like "what about Q4?" without needing the full history in every API call.
+
+### Step 2: Generate SQL in a single Claude call
 
 Claude reads the question against the schema already in the system prompt and returns a SELECT query plus a list of assumptions (for example, "'transactions' interpreted as completed orders only"). No tool calls needed in the common case.
 
-### Step 2: Validate
+### Step 3: Validate SQL guardrails
 
 `SQLValidator` parses the query with sqlparse and enforces hard rules: SELECT only, Gold database only, no DDL keywords anywhere, LIMIT present. If validation fails, the error reason is sent back to Claude with a correction request. Up to 3 attempts before raising `SQLValidationError` to the user. The Athena WorkGroup `bytes_scanned_cutoff_per_query` setting in Terraform is the hard cost backstop.
 
 
-### Step 3: Pre-Athena intent check and retry
+### Step 4: Pre-Athena intent check and retry
 
 Before running any Athena query, the agent checks that the generated SQL actually answers the original question. It makes a second Claude call passing only the SQL (the question is withheld) and asks Claude to infer what business question the SQL is answering. It then compares that inferred intent to the original question.
 
 If a genuine mismatch is detected (wrong metric, wrong table, wrong filter), the SQL is regenerated once with the discrepancy detail as feedback. This retry happens before touching Athena, so no query cost or scan time is spent on SQL that's already known to be wrong. The loop runs at most once per question.
 
-### Step 4: Execute and track cost
+### Step 5: Execute and track cost
 
 `AthenaExecutor` starts the query, polls until complete, and reads the result CSV from the athena-results S3 bucket. `cost.py` converts `DataScannedInBytes` from the Athena execution metadata to USD. No pre-execution cost estimation needed — Gold tables are small pre-aggregations, and the WorkGroup hard stop handles any outliers.
 
-### Step 5: Validate results
+### Step 6: Validate results
 
 `ResultValidator` checks the DataFrame for obvious anomalies: negative values in revenue columns, unexpected nulls on key columns. Zero rows is a valid result for Gold tables — an aggregation with no matching data is a legitimate answer, not a bug. Flags are surfaced in the output, never block execution.
 
-### Step 6: Chart and insight
+### Step 7: Chart and insight
 
 `ChartGenerator` selects chart type from the shape of the result and keywords in the question. Five types are supported: **line** (time + 1 metric), **multi-line** (time + 2+ metrics), **bar** (categorical + metric), **scatter** (2 numeric + categorical, correlation question), and **pie/donut** (proportion question, ≤ 8 rows). The chart is uploaded to S3 and returned as a presigned URL (Uniform Resource Locator).
 
 `InsightGenerator` makes a Claude call with the original question, SQL, result sample, and assumptions, and returns a 2-3 sentence plain-English insight.
 
-### Step 7: Audit
+### Step 8: Audit
 
-A structured JSON record is written to `s3://{bronze_bucket}/metadata/agent-audit/` containing the original question, SQL, assumptions, row count, bytes scanned, cost in USD, validation flags, and insight. The audit log is itself queryable via Athena.
+Two records are written after every analytical query:
+
+**Audit log** — a structured JSON record at `s3://{bronze_bucket}/metadata/agent-audit/` containing the original question, SQL, assumptions, row count, bytes scanned, cost in USD, validation flags, and insight. The audit log is itself queryable via Athena.
+
+**Engineer log** — a single-row CSV at `s3://{bronze_bucket}/metadata/engineer-log/date={date}/session={id}/{request_id}.csv` with 17 columns: session ID, request ID, timestamp, question, SQL executed, Claude's inferred interpretation, verdict, discrepancy detail, bytes scanned, Athena cost, response time, Athena execution ID, SQL retry count, row count returned, chart type rendered, language detected, and prompt version. One file per request so individual rows can be read without scanning the full log. The engineer log download button in the sidebar fetches and concatenates all rows for the current session.
+
+A rate limiter enforces a maximum of 10 requests per 60-second window per session and returns HTTP 429 on breach. This protects both the Claude API budget and Athena scan costs.
 
 ---
 
@@ -1084,7 +1112,7 @@ What was built:
 - **Streaming insight display.** The plain-English insight streams token-by-token as Claude generates it, so stakeholders see progress immediately instead of waiting for the full response.
 - **Status badges.** A spinner and coloured status badge show each pipeline step in real time (generating SQL, running query, generating insight).
 - **Chart/Table tabs.** Every result renders both an interactive Plotly chart and a raw data table via `st.tabs`. The user switches between them without re-running the query.
-- **Query intent check.** A third Claude call reads only the generated SQL and infers the business question it answers. This cross-check appears below the assumptions list so users can confirm the SQL matched their intent. A green tick or amber warning badge signals the verdict.
+- **Query intent check.** Before Athena runs, a second Claude call reads only the SQL (question withheld) and infers its business intent. If a mismatch with the original question is detected, the SQL is regenerated once with correction feedback before any query runs. The final verdict appears as a badge in the Details expander so stakeholders can see whether a correction was applied.
 - **Multilingual interface.** Eight script-based translation dictionaries (Chinese, Japanese, Korean, Arabic, Russian, Greek, Hebrew, Thai) plus Claude-based language detection for Latin-script languages (Italian, French, Spanish, English, and others). All UI labels, headings, placeholders, and buttons translate automatically.
 - **Conversation export and import.** A sidebar button downloads the conversation as JSON. A file uploader restores it in a later session.
 - **Session sidebar.** Displays session start time and running question count.
@@ -1099,8 +1127,8 @@ Reliability, auditability, and a professional PDF output for non-technical stake
 What was built:
 
 - **Stakeholder PDF.** A 2-page report generated by fpdf2. Page 1 has KPI tiles (key numbers pulled from the result), the plain-English insight, and the chart. Page 2 has the methodology in plain English (no SQL, no table names, no technical identifiers). Army olive brand palette (`#4B5320`), geometric E logo mark, olive accent bars, CJK font support. The PDF is safe to hand to a non-technical executive.
-- **Engineer audit log.** A 16-column CSV written to `s3://{bronze_bucket}/metadata/engineer-log/date={date}/session={session_id}/{request_id}.csv` for every request. Columns: `session_id`, `request_id`, `timestamp_utc`, `question_asked`, `sql_executed`, `claude_interpretation`, `discrepancy_detail`, `verdict`, `bytes_scanned`, `athena_cost_usd`, `response_time_seconds`, `athena_query_execution_id`, `sql_retry_count`, `row_count_returned`, `chart_type_rendered`, `language`. A "Prepare Session Log" button in the sidebar fetches and merges all session rows from S3 into a single downloadable CSV.
-- **Verdict computation.** The third Claude call now writes a `verdict` field (`Yes`/`No`) and a `discrepancy_detail` sentence to the response, audit log, and engineer log. The UI shows a green tick or amber warning badge in the Details expander.
+- **Engineer audit log.** A 17-column CSV written to `s3://{bronze_bucket}/metadata/engineer-log/date={date}/session={session_id}/{request_id}.csv` for every request. Columns: `session_id`, `request_id`, `timestamp_utc`, `question_asked`, `sql_executed`, `claude_interpretation`, `discrepancy_detail`, `verdict`, `bytes_scanned`, `athena_cost_usd`, `response_time_seconds`, `athena_query_execution_id`, `sql_retry_count`, `row_count_returned`, `chart_type_rendered`, `language`, `prompt_version`. The `prompt_version` column (e.g. `v1`) lets you filter the log by prompt version to compare verdict rates before and after a prompt change. A "Prepare Session Log" button in the sidebar fetches and merges all session rows from S3 into a single downloadable CSV.
+- **Verdict computation.** The pre-Athena intent check writes a `verdict` field (`Yes`/`No`) and a `discrepancy_detail` sentence to the response, audit log, and engineer log. If verdict is `Yes`, the SQL is regenerated once before Athena runs. The UI shows the final verdict as a badge in the Details expander.
 - **Circuit breaker.** A 30-second timeout on every Claude API call. Up to 3 attempts with 2s/5s/10s exponential backoff on transient errors (throttling, timeout). Semantic errors (table not found, permission denied) fail immediately with no retry.
 - **Rate limiter.** 10 requests per 60-second sliding window per `session_id`. Excess requests return HTTP 429 with a `retry_after_seconds` field. Implemented with `collections.deque` in-process — no Redis needed.
 - **Request UUID tracing.** Every request gets a `request_id` (UUID v4) at the top of the handler. It flows through the audit log, engineer log, and JSON export.
