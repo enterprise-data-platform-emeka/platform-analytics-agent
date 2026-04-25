@@ -171,12 +171,11 @@ sequenceDiagram
     API->>API: Validate SQL guardrails
     API->>CL: Call 2: Infer SQL intent (question withheld)
     CL-->>API: Inferred intent + verdict
-    loop If mismatch — regenerate SQL once with correction feedback
+    loop Retry once on intent mismatch
         API->>CL: Regenerate SQL with correction detail
         CL-->>API: Corrected SQL query
         API->>API: Validate SQL guardrails
     end
-    note over API: Loop runs at most once. Exits immediately when intent matches.
     API->>ATH: Run query against Gold tables
     ATH-->>API: Results — rows and columns
     API->>CL: Call 3: Generate insight
