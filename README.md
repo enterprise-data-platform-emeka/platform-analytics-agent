@@ -201,6 +201,34 @@ The stakeholder never runs a command. They open a URL, type a question, and read
 
 ---
 
+### What each component does
+
+**AWS Load Balancer (ALB)**
+
+The ALB (Application Load Balancer) is the front door to the application. Every request from a browser arrives here first. The stakeholder never connects directly to the application code — the ALB sits in front of it and decides where to send the traffic. It checks which port the request is for (port 8501 for the Streamlit web page, port 80 for the raw API) and forwards it to the right place inside the container. This is the only part of the system that has a public internet address.
+
+**Streamlit UI**
+
+Streamlit is a Python library that turns Python code into a web page. I wrote the entire interface in Python — no HTML, no JavaScript. Streamlit runs as a small web server inside the container. When a stakeholder opens the URL in their browser, Streamlit sends them the page with the text box and Submit button. When they submit a question, Streamlit forwards it to FastAPI (on the same server, so there's no network round trip) and waits for the response. When it arrives, Streamlit renders the insight, chart, KPI tiles, and SQL in the browser. Streamlit's job is display only — it holds no data and does no analysis.
+
+**Analytics Backend (FastAPI)**
+
+FastAPI is a Python web framework — a program that listens for incoming requests and responds to them. This is the reasoning engine of the application. When a question arrives from Streamlit, FastAPI orchestrates three Claude calls, validates the SQL at each step, runs the Athena query, builds the chart, writes the audit log, and packages the response. All the business logic (SQL guardrails, intent checking, retry on mismatch, chart type detection) lives here. FastAPI runs on port 8080 inside the same container as Streamlit.
+
+**Claude API**
+
+Claude is Anthropic's AI model. I call it three times for each analytical question. The first call generates the SQL query and a list of assumptions (Claude reads the question against the full schema embedded in the system prompt). The second call reads only the SQL — the original question is withheld — and infers what business question the SQL is answering. This cross-check catches cases where the SQL technically runs but answers the wrong question. The third call reads the data returned by Athena and writes the plain-English insight. Claude is stateless: each call is independent, and the relevant context is passed explicitly each time.
+
+**Amazon Athena**
+
+Athena is AWS's serverless SQL query engine. It doesn't have its own database. Instead, it reads Parquet files directly from S3 and runs SQL against them using the Glue Catalog as its schema reference. FastAPI sends Athena a SELECT query, Athena scans the relevant Gold Parquet files, and returns rows and columns. The cost is pay-per-byte-scanned: a well-partitioned query that touches one month's data costs a fraction of a cent. A query that accidentally scans the full table costs proportionally more. This is why SQL guardrails and partition filters matter here in a way they don't in a fixed-cost warehouse.
+
+**S3 Gold and Audit**
+
+S3 (Simple Storage Service) appears in the diagram for two different purposes. The Gold bucket holds the seven pre-computed Parquet mart tables — `monthly_revenue_trend`, `revenue_by_country`, and five others — that Athena queries. These are produced by dbt and refreshed every time the pipeline runs. The Audit path is a separate prefix in the Bronze bucket where FastAPI writes a JSON record after every question: the question, the SQL, the number of rows returned, the Athena scan cost in USD, the intent verdict, response time, and retry count. This log is what the engineer session download in the sidebar reads from.
+
+---
+
 ## How the reasoning loop works
 
 The agent starts each ECS task by loading all Gold schemas once and embedding them in the Claude system prompt. Claude knows every table and column before it sees the first question. This eliminates the multi-turn `list_tables` / `get_schema` tool-call round trips that text-to-SQL systems typically need.
