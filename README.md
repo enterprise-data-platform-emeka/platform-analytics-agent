@@ -32,7 +32,7 @@ If it interpreted "transactions" as completed orders only, it says so explicitly
 
 ## Why Athena specifically
 
-Amazon Athena is a serverless SQL (Structured Query Language) query engine that runs directly over S3 (Simple Storage Service) data. The cost model is pay-per-byte-scanned, not per compute hour. A query that scans the whole table because a partition filter is missing doesn't just run slowly — it costs real money and could easily hit the WorkGroup scan limit.
+Amazon Athena is a serverless SQL (Structured Query Language) query engine that runs directly over S3 (Simple Storage Service) data. The cost model is pay-per-byte-scanned, not per compute hour. A query that scans the whole table because a partition filter is missing doesn't just run slowly; it costs real money and could easily hit the WorkGroup scan limit.
 
 This is different from Databricks, BigQuery (Google's managed data warehouse), or Snowflake, which are managed warehouses with internal storage. Those platforms already have built-in NL (Natural Language) query features. Athena doesn't. Nobody ships an NL-to-SQL product that reasons about S3 partition structures and Glue Catalog metadata for cost optimisation. That's what this agent does.
 
@@ -156,7 +156,7 @@ When you type a web address into Chrome or Safari, your browser connects to a pr
 
 **Why the code calls localhost**
 
-Both Streamlit and FastAPI run inside the same ECS container. Think of a container as a small private computer with its own isolated network. When the Streamlit code calls `localhost:8080`, it means "call the program listening on port 8080 inside this container" — which is FastAPI. The stakeholder's browser never sees or uses localhost. They only ever type the ALB's DNS address. Localhost is purely internal, invisible to the outside world.
+Both Streamlit and FastAPI run inside the same ECS container. Think of a container as a small private computer with its own isolated network. When the Streamlit code calls `localhost:8080`, it means "call the program listening on port 8080 inside this container", which is FastAPI. The stakeholder's browser never sees or uses localhost. They only ever type the ALB's DNS address. Localhost is purely internal, invisible to the outside world.
 
 ```mermaid
 sequenceDiagram
@@ -177,7 +177,7 @@ sequenceDiagram
 
     S->>ALB: Types a question and clicks Submit
     ALB->>UI: Forwards the question
-    UI->>API: Sends the question internally<br/>(no network hop — same server)
+    UI->>API: Sends the question internally<br/>(no network hop: same server)
     API->>CL: Call 1: Generate SQL
     CL-->>API: SQL query
     API->>API: Validate SQL guardrails
@@ -189,7 +189,7 @@ sequenceDiagram
         API->>API: Validate SQL guardrails
     end
     API->>ATH: Run query against Gold tables
-    ATH-->>API: Results — rows and columns
+    ATH-->>API: Results: rows and columns
     API->>CL: Call 3: Generate insight
     CL-->>API: 2-3 sentence insight and chart title
     API->>S3: Write audit log
@@ -205,19 +205,19 @@ The stakeholder never runs a command. They open a URL, type a question, and read
 
 **AWS Load Balancer (ALB)**
 
-The ALB (Application Load Balancer) is the front door to the application. Every request from a browser arrives here first. The stakeholder never connects directly to the application code — the ALB sits in front of it and decides where to send the traffic. It checks which port the request is for (port 8501 for the Streamlit web page, port 80 for the raw API) and forwards it to the right place inside the container. This is the only part of the system that has a public internet address.
+The ALB (Application Load Balancer) is the front door to the application. Every request from a browser arrives here first. The stakeholder never connects directly to the application code; the ALB sits in front of it and decides where to send the traffic. It checks which port the request is for (port 8501 for the Streamlit web page, port 80 for the raw API) and forwards it to the right place inside the container. This is the only part of the system that has a public internet address.
 
 **Streamlit UI**
 
-Streamlit is a Python library that turns Python code into a web page. I wrote the entire interface in Python — no HTML, no JavaScript. Streamlit runs as a small web server inside the container. When a stakeholder opens the URL in their browser, Streamlit sends them the page with the text box and Submit button. When they submit a question, Streamlit forwards it to FastAPI (on the same server, so there's no network round trip) and waits for the response. When it arrives, Streamlit renders the insight, chart, KPI tiles, and SQL in the browser. Streamlit's job is display only — it holds no data and does no analysis.
+Streamlit is a Python library that turns Python code into a web page. I wrote the entire interface in Python: no HTML, no JavaScript. Streamlit runs as a small web server inside the container. When a stakeholder opens the URL in their browser, Streamlit sends them the page with the text box and Submit button. When they submit a question, Streamlit forwards it to FastAPI (on the same server, so there's no network round trip) and waits for the response. When it arrives, Streamlit renders the insight, chart, KPI tiles, and SQL in the browser. Streamlit's job is display only: it holds no data and does no analysis.
 
 **Analytics Backend (FastAPI)**
 
-FastAPI is a Python web framework — a program that listens for incoming requests and responds to them. This is the reasoning engine of the application. When a question arrives from Streamlit, FastAPI orchestrates three Claude calls, validates the SQL at each step, runs the Athena query, builds the chart, writes the audit log, and packages the response. All the business logic (SQL guardrails, intent checking, retry on mismatch, chart type detection) lives here. FastAPI runs on port 8080 inside the same container as Streamlit.
+FastAPI is a Python web framework, meaning a program that listens for incoming requests and responds to them. This is the reasoning engine of the application. When a question arrives from Streamlit, FastAPI orchestrates three Claude calls, validates the SQL at each step, runs the Athena query, builds the chart, writes the audit log, and packages the response. All the business logic (SQL guardrails, intent checking, retry on mismatch, chart type detection) lives here. FastAPI runs on port 8080 inside the same container as Streamlit.
 
 **Claude API**
 
-Claude is Anthropic's AI model. I call it three times for each analytical question. The first call generates the SQL query and a list of assumptions (Claude reads the question against the full schema embedded in the system prompt). The second call reads only the SQL — the original question is withheld — and infers what business question the SQL is answering. This cross-check catches cases where the SQL technically runs but answers the wrong question. The third call reads the data returned by Athena and writes the plain-English insight. Claude is stateless: each call is independent, and the relevant context is passed explicitly each time.
+Claude is Anthropic's AI model. I call it three times for each analytical question. The first call generates the SQL query and a list of assumptions (Claude reads the question against the full schema embedded in the system prompt). The second call reads only the SQL (the original question is withheld) and infers what business question the SQL is answering. This cross-check catches cases where the SQL technically runs but answers the wrong question. The third call reads the data returned by Athena and writes the plain-English insight. Claude is stateless: each call is independent, and the relevant context is passed explicitly each time.
 
 **Amazon Athena**
 
@@ -225,7 +225,7 @@ Athena is AWS's serverless SQL query engine. It doesn't have its own database. I
 
 **S3 Gold and Audit**
 
-S3 (Simple Storage Service) appears in the diagram for two different purposes. The Gold bucket holds the seven pre-computed Parquet mart tables — `monthly_revenue_trend`, `revenue_by_country`, and five others — that Athena queries. These are produced by dbt and refreshed every time the pipeline runs. The Audit path is a separate prefix in the Bronze bucket where FastAPI writes a JSON record after every question: the question, the SQL, the number of rows returned, the Athena scan cost in USD, the intent verdict, response time, and retry count. This log is what the engineer session download in the sidebar reads from.
+S3 (Simple Storage Service) appears in the diagram for two different purposes. The Gold bucket holds the seven pre-computed Parquet mart tables (`monthly_revenue_trend`, `revenue_by_country`, and five others) that Athena queries. These are produced by dbt and refreshed every time the pipeline runs. The Audit path is a separate prefix in the Bronze bucket where FastAPI writes a JSON record after every question: the question, the SQL, the number of rows returned, the Athena scan cost in USD, the intent verdict, response time, and retry count. This log is what the engineer session download in the sidebar reads from.
 
 ---
 
@@ -235,7 +235,7 @@ The agent starts each ECS task by loading all Gold schemas once and embedding th
 
 ### Startup: eager schema loading
 
-`SchemaResolver.load_all_schemas()` runs once at startup. It reads all Gold tables from Glue Catalog (column names, data types, partition keys) and overlays dbt catalog.json from S3 (column descriptions, model documentation) for every table. The result — all 7 Gold schemas, roughly 2,500 tokens — is embedded directly in the system prompt.
+`SchemaResolver.load_all_schemas()` runs once at startup. It reads all Gold tables from Glue Catalog (column names, data types, partition keys) and overlays dbt catalog.json from S3 (column descriptions, model documentation) for every table. The result (all 7 Gold schemas, roughly 2,500 tokens) is embedded directly in the system prompt.
 
 If catalog.json isn't present yet (the pipeline hasn't run), it falls back to Glue-only schema and logs a warning. No crash, no partial startup.
 
@@ -243,9 +243,9 @@ If catalog.json isn't present yet (the pipeline hasn't run), it falls back to Gl
 
 Before generating any SQL, the agent makes a lightweight Claude call to classify the question into one of three types:
 
-- **Analytical** — needs a new Athena query. Takes the full pipeline path.
-- **Conversational** — can be answered from prior conversation context alone (e.g. "what did you say last?", "translate that to French"). Goes straight to Claude with the session summary, no Athena.
-- **Retype** — the user wants the same data rendered as a different chart type (e.g. "show that as a bar chart"). Re-runs the previous SQL with a forced chart type override.
+- **Analytical**: needs a new Athena query. Takes the full pipeline path.
+- **Conversational**: can be answered from prior conversation context alone (e.g. "what did you say last?", "translate that to French"). Goes straight to Claude with the session summary, no Athena.
+- **Retype**: the user wants the same data rendered as a different chart type (e.g. "show that as a bar chart"). Re-runs the previous SQL with a forced chart type override.
 
 Multi-turn context is also resolved here. If the user has asked previous questions in the same session, a summary of those turns is appended to the system prompt so Claude can resolve references like "what about Q4?" without needing the full history in every API call.
 
@@ -266,11 +266,11 @@ If a genuine mismatch is detected (wrong metric, wrong table, wrong filter), the
 
 ### Step 5: Execute and track cost
 
-`AthenaExecutor` starts the query, polls until complete, and reads the result CSV from the athena-results S3 bucket. `cost.py` converts `DataScannedInBytes` from the Athena execution metadata to USD. No pre-execution cost estimation needed — Gold tables are small pre-aggregations, and the WorkGroup hard stop handles any outliers.
+`AthenaExecutor` starts the query, polls until complete, and reads the result CSV from the athena-results S3 bucket. `cost.py` converts `DataScannedInBytes` from the Athena execution metadata to USD. No pre-execution cost estimation needed. Gold tables are small pre-aggregations, and the WorkGroup hard stop handles any outliers.
 
 ### Step 6: Validate results
 
-`ResultValidator` checks the DataFrame for obvious anomalies: negative values in revenue columns, unexpected nulls on key columns. Zero rows is a valid result for Gold tables — an aggregation with no matching data is a legitimate answer, not a bug. Flags are surfaced in the output, never block execution.
+`ResultValidator` checks the DataFrame for obvious anomalies: negative values in revenue columns, unexpected nulls on key columns. Zero rows is a valid result for Gold tables: an aggregation with no matching data is a legitimate answer, not a bug. Flags are surfaced in the output, never block execution.
 
 ### Step 7: Chart and insight
 
@@ -282,9 +282,9 @@ If a genuine mismatch is detected (wrong metric, wrong table, wrong filter), the
 
 Two records are written after every analytical query:
 
-**Audit log** — a structured JSON record at `s3://{bronze_bucket}/metadata/agent-audit/` containing the original question, SQL, assumptions, row count, bytes scanned, cost in USD, validation flags, and insight. The audit log is itself queryable via Athena.
+**Audit log**: a structured JSON record at `s3://{bronze_bucket}/metadata/agent-audit/` containing the original question, SQL, assumptions, row count, bytes scanned, cost in USD, validation flags, and insight. The audit log is itself queryable via Athena.
 
-**Engineer log** — a single-row CSV at `s3://{bronze_bucket}/metadata/engineer-log/date={date}/session={id}/{request_id}.csv` with 17 columns: session ID, request ID, timestamp, question, SQL executed, Claude's inferred interpretation, verdict, discrepancy detail, bytes scanned, Athena cost, response time, Athena execution ID, SQL retry count, row count returned, chart type rendered, language detected, and prompt version. One file per request so individual rows can be read without scanning the full log. The engineer log download button in the sidebar fetches and concatenates all rows for the current session.
+**Engineer log**: a single-row CSV at `s3://{bronze_bucket}/metadata/engineer-log/date={date}/session={id}/{request_id}.csv` with 17 columns: session ID, request ID, timestamp, question, SQL executed, Claude's inferred interpretation, verdict, discrepancy detail, bytes scanned, Athena cost, response time, Athena execution ID, SQL retry count, row count returned, chart type rendered, language detected, and prompt version. One file per request so individual rows can be read without scanning the full log. The engineer log download button in the sidebar fetches and concatenates all rows for the current session.
 
 A rate limiter enforces a maximum of 10 requests per 60-second window per session and returns HTTP 429 on breach. This protects both the Claude API budget and Athena scan costs.
 
@@ -325,7 +325,7 @@ Understanding the boundaries matters as much as knowing what works. Some questio
 
 ### Revenue and finance
 
-**`monthly_revenue_trend`** — one row per year-month. Columns: `order_year`, `order_month`, `total_orders`, `unique_customers`, `total_revenue`, `cancelled_orders`.
+**`monthly_revenue_trend`**: one row per year-month. Columns: `order_year`, `order_month`, `total_orders`, `unique_customers`, `total_revenue`, `cancelled_orders`.
 
 - What were total sales last month?
 - Show me revenue by month for this year.
@@ -334,7 +334,7 @@ Understanding the boundaries matters as much as knowing what works. Some questio
 - How many unique customers placed an order in each month this year?
 - Is revenue trending up or down compared to the same month last year?
 
-**`revenue_by_country`** — one row per country, all-time totals for completed orders. Columns: `country`, `total_orders`, `total_customers`, `total_revenue`, `avg_order_value`.
+**`revenue_by_country`**: one row per country, all-time totals for completed orders. Columns: `country`, `total_orders`, `total_customers`, `total_revenue`, `avg_order_value`.
 
 - Which country generates the most revenue?
 - What is the average order value for customers in Germany?
@@ -342,7 +342,7 @@ Understanding the boundaries matters as much as knowing what works. Some questio
 - Rank all countries by total revenue.
 - Which country has the highest average order value?
 
-**`payment_method_performance`** — one row per payment method. Columns: `payment_method`, `total_transactions`, `successful`, `failed`, `refunded`, `success_rate_pct`, `total_processed`, `revenue_captured`.
+**`payment_method_performance`**: one row per payment method. Columns: `payment_method`, `total_transactions`, `successful`, `failed`, `refunded`, `success_rate_pct`, `total_processed`, `revenue_captured`.
 
 - Which payment method has the highest failure rate?
 - How much revenue was lost to refunds across all payment methods?
@@ -354,7 +354,7 @@ Understanding the boundaries matters as much as knowing what works. Some questio
 
 ### Products
 
-**`top_selling_products`** — one row per product. Columns: `product_id`, `product_name`, `category`, `brand`, `total_orders`, `total_units_sold`, `total_revenue`, `avg_revenue_per_unit`, `revenue_rank`.
+**`top_selling_products`**: one row per product. Columns: `product_id`, `product_name`, `category`, `brand`, `total_orders`, `total_units_sold`, `total_revenue`, `avg_revenue_per_unit`, `revenue_rank`.
 
 - What are the top 10 best-selling products by total revenue?
 - Which product has sold the most units?
@@ -362,7 +362,7 @@ Understanding the boundaries matters as much as knowing what works. Some questio
 - Which brand appears most often in the top 20 products by revenue rank?
 - Which product generates the most revenue per unit sold?
 
-**`product_category_performance`** — one row per category-brand combination. Columns: `category`, `brand`, `total_orders`, `products_in_category`, `total_units_sold`, `total_revenue`, `avg_revenue_per_unit`.
+**`product_category_performance`**: one row per category-brand combination. Columns: `category`, `brand`, `total_orders`, `products_in_category`, `total_units_sold`, `total_revenue`, `avg_revenue_per_unit`.
 
 - Which product category generates the most revenue?
 - Which brand has the highest revenue across all categories?
@@ -374,7 +374,7 @@ Understanding the boundaries matters as much as knowing what works. Some questio
 
 ### Logistics and delivery
 
-**`carrier_delivery_performance`** — one row per carrier. Columns: `carrier`, `total_shipments`, `delivered`, `failed`, `delivery_success_rate_pct`, `avg_delivery_days`, `fastest_delivery_days`, `slowest_delivery_days`.
+**`carrier_delivery_performance`**: one row per carrier. Columns: `carrier`, `total_shipments`, `delivered`, `failed`, `delivery_success_rate_pct`, `avg_delivery_days`, `fastest_delivery_days`, `slowest_delivery_days`.
 
 - Which carrier has the highest delivery success rate?
 - What is the average delivery time for DHL?
@@ -387,7 +387,7 @@ Understanding the boundaries matters as much as knowing what works. Some questio
 
 ### Customers
 
-**`customer_segments`** — one row per customer. Columns: `customer_id`, `first_name`, `last_name`, `email`, `country`, `signup_date`, `total_orders`, `lifetime_value`, `first_order_date`, `last_order_date`, `segment` (VIP / Regular / Low Value / Never Ordered), `order_frequency_band` (Loyal / Occasional / One-Time / No Orders).
+**`customer_segments`**: one row per customer. Columns: `customer_id`, `first_name`, `last_name`, `email`, `country`, `signup_date`, `total_orders`, `lifetime_value`, `first_order_date`, `last_order_date`, `segment` (VIP / Regular / Low Value / Never Ordered), `order_frequency_band` (Loyal / Occasional / One-Time / No Orders).
 
 - How many VIP customers do we have?
 - Which country has the most Loyal customers?
@@ -504,7 +504,7 @@ The platform captures CDC events from a PostgreSQL OLTP database. Only database 
 
 **No product co-purchase patterns**
 
-> "Customers who buy X also buy Y — what are the top product pairs?"
+> "Customers who buy X also buy Y: what are the top product pairs?"
 
 There's no basket analysis mart. `top_selling_products` and `product_category_performance` aggregate each product independently. Building this would require a self-join on order items at the intermediate layer, which hasn't been modelled.
 
@@ -547,7 +547,7 @@ Start with Track 1. Only move to Track 2 once Track 1 is producing correct answe
 
 **1. Store your Anthropic API key in SSM Parameter Store.**
 
-The agent fetches its API key from AWS Systems Manager (SSM) at startup. It never reads it from a file or environment variable directly — this way the key never appears in ECS task logs or Terraform state.
+The agent fetches its API key from AWS Systems Manager (SSM) at startup. It never reads it from a file or environment variable directly: this way the key never appears in ECS task logs or Terraform state.
 
 Go to the AWS console, make sure you're in `eu-central-1`, and navigate to Systems Manager > Parameter Store. Create a new parameter with these exact values:
 
@@ -603,7 +603,7 @@ Go to the GitHub repository for `platform-analytics-agent`, click Actions, and c
 
 ### Track 1: Local functional test (start here)
 
-This runs the agent Python code directly on your Mac against the real AWS dev environment. It uses your local `dev-admin` AWS profile for credentials, connects to real Athena, real Glue Catalog, and real SSM. The output is identical to what you'd see in ECS — the only difference is that the compute runs on your Mac instead of Fargate.
+This runs the agent Python code directly on your Mac against the real AWS dev environment. It uses your local `dev-admin` AWS profile for credentials, connects to real Athena, real Glue Catalog, and real SSM. The output is identical to what you'd see in ECS: the only difference is that the compute runs on your Mac instead of Fargate.
 
 **Step 1: Create your `.env` file.**
 
@@ -696,49 +696,49 @@ Detection priority when rules overlap: **scatter > multiline > line > pie > bar 
 Run each one with `python -m agent.main "question"`. They're ordered to cover different Gold tables, different chart types, and different kinds of reasoning.
 
 ```bash
-# Bar chart — top categories, single aggregation
+# Bar chart: top categories, single aggregation
 python -m agent.main "Show me total revenue by country"
 
-# Line chart — time-series, tests date reasoning
+# Line chart: time-series, tests date reasoning
 python -m agent.main "What does monthly order volume look like over the last 12 months?"
 
-# Multi-line chart — two metrics on the same time axis
+# Multi-line chart: two metrics on the same time axis
 python -m agent.main "Show me both revenue and order volume trends over the last 12 months"
 
-# Scatter chart — correlation between two numeric variables
+# Scatter chart: correlation between two numeric variables
 python -m agent.main "Is there a correlation between payment volume and revenue lost by payment method?"
 
-# Pie / Donut chart — proportion question, ≤8 categories
+# Pie / Donut chart: proportion question, ≤8 categories
 python -m agent.main "What is the revenue breakdown by payment method?"
 
-# Filtering + aggregation — tests WHERE clause generation
+# Filtering + aggregation: tests WHERE clause generation
 python -m agent.main "Which product categories are most popular in Germany?"
 
-# Count + group by — tests COUNT vs SUM disambiguation
+# Count + group by: tests COUNT vs SUM disambiguation
 python -m agent.main "How many unique customers placed orders in each country?"
 
-# Trend question — tests pattern-recognition in insight generation
+# Trend question: tests pattern-recognition in insight generation
 python -m agent.main "Is revenue growing or declining? Show me the trend."
 ```
 
 **What to look for in each response:**
 
-- The SQL should have a `WHERE` clause with a partition filter (e.g., `dt >= ...`) — this confirms partition-aware query generation is working
+- The SQL should have a `WHERE` clause with a partition filter (e.g., `dt >= ...`): this confirms partition-aware query generation is working
 - The assumptions list should explain any interpretation decisions Claude made
 - The insight should be specific to the actual numbers in the result, not generic
-- The presigned URL should be a real S3 URL — open it in a browser to see the chart
-- Bytes scanned should be small (under 10 MB for Gold tables) — confirms the partition filters are working
-- Cost should be under $0.001 per query — confirms the Gold layer's efficiency
+- The presigned URL should be a real S3 URL: open it in a browser to see the chart
+- Bytes scanned should be small (under 10 MB for Gold tables): confirms the partition filters are working
+- Cost should be under $0.001 per query: confirms the Gold layer's efficiency
 
 **Step 6: Test multi-turn follow-up.**
 
-For multi-turn follow-up (where the agent remembers the previous question), you need the HTTP endpoint. That's covered in Track 2. The CLI mode (`python -m agent.main`) is single-turn only — each invocation is independent.
+For multi-turn follow-up (where the agent remembers the previous question), you need the HTTP endpoint. That's covered in Track 2. The CLI mode (`python -m agent.main`) is single-turn only: each invocation is independent.
 
 ---
 
 ### Track 2: Test the deployed ECS service
 
-Once Track 1 passes, this confirms the Docker image running on ECS Fargate is working. The ALB (Application Load Balancer) in front of the service is internal-only — it can't be reached from your browser directly. Instead, you use `aws ecs execute-command` to open a shell inside the running container and make HTTP requests from there.
+Once Track 1 passes, this confirms the Docker image running on ECS Fargate is working. The ALB (Application Load Balancer) in front of the service is internal-only: it can't be reached from your browser directly. Instead, you use `aws ecs execute-command` to open a shell inside the running container and make HTTP requests from there.
 
 **Step 1: Confirm the ECS service has a running task.**
 
@@ -839,12 +839,12 @@ The command takes 15-30 seconds. The agent is loading schemas from Glue, generat
 
 **What you'll see in the output:**
 
-- `INSIGHT` — a 2-3 sentence plain-English answer to your question based on the actual data
-- The assumptions list — what the agent interpreted (for example, "'revenue' means total price on completed orders only")
-- `BYTES SCANNED` — how much Athena data was read (should be small for Gold tables, under 10 MB)
-- `COST USD` — the Athena query cost (should be under $0.001)
-- `CHART URL` — an S3 presigned URL. Copy it and open it in your browser to see the chart image.
-- `SESSION ID` — copy this if you want to ask a follow-up question
+- `INSIGHT`: a 2-3 sentence plain-English answer to your question based on the actual data
+- The assumptions list: what the agent interpreted (for example, "'revenue' means total price on completed orders only")
+- `BYTES SCANNED`: how much Athena data was read (should be small for Gold tables, under 10 MB)
+- `COST USD`: the Athena query cost (should be under $0.001)
+- `CHART URL`: an S3 presigned URL. Copy it and open it in your browser to see the chart image.
+- `SESSION ID`: copy this if you want to ask a follow-up question
 
 **Step 5: Ask a follow-up question (multi-turn).**
 
@@ -907,31 +907,31 @@ These six questions cover every Gold table, every chart type, and several multi-
 | 7 | "How many unique customers have placed orders in each country?" | Bar | COUNT DISTINCT, SUM vs COUNT disambiguation |
 | 8 | "Is there a seasonal pattern in order volume?" | Line | Pattern-recognition insight |
 
-For multi-turn follow-up, after question 2 ask: "Which month had the lowest volume and why do you think that is?" — the agent answers referencing the same SQL execution without re-running the query.
+For multi-turn follow-up, after question 2 ask: "Which month had the lowest volume and why do you think that is?": the agent answers referencing the same SQL execution without re-running the query.
 
 ---
 
 ### What to do if something goes wrong
 
-**"Missing required environment variables"** — You forgot to `export $(grep -v '^#' .env | xargs)` before running the command, or a variable name is misspelled in your `.env` file.
+**"Missing required environment variables"**: You forgot to `export $(grep -v '^#' .env | xargs)` before running the command, or a variable name is misspelled in your `.env` file.
 
-**"SchemaResolutionError: Glue Catalog unreachable"** — The infra isn't up, or your `dev-admin` profile doesn't have permission to call `glue:GetTables`. Confirm `terraform apply` completed successfully and the `edp_dev_gold` Glue database exists in the AWS console.
+**"SchemaResolutionError: Glue Catalog unreachable"**: The infra isn't up, or your `dev-admin` profile doesn't have permission to call `glue:GetTables`. Confirm `terraform apply` completed successfully and the `edp_dev_gold` Glue database exists in the AWS console.
 
-**"No tables found in Gold database"** — The MWAA pipeline hasn't run yet. Trigger `edp_pipeline` in the Airflow UI and wait for it to complete.
+**"No tables found in Gold database"**: The MWAA pipeline hasn't run yet. Trigger `edp_pipeline` in the Airflow UI and wait for it to complete.
 
-**"ParameterNotFound: /edp/dev/anthropic_api_key"** — You skipped the SSM prerequisite step. Run the `aws ssm put-parameter` command from the Prerequisites section.
+**"ParameterNotFound: /edp/dev/anthropic_api_key"**: You skipped the SSM prerequisite step. Run the `aws ssm put-parameter` command from the Prerequisites section.
 
-**"AccessDenied on SSM GetParameter"** — The ECS task role doesn't have permission to read this SSM path. Confirm `terraform apply` ran successfully and the `analytics-agent` module is included.
+**"AccessDenied on SSM GetParameter"**: The ECS task role doesn't have permission to read this SSM path. Confirm `terraform apply` ran successfully and the `analytics-agent` module is included.
 
-**"Athena query failed: TABLE_NOT_FOUND"** — Either the Gold Glue Catalog tables don't exist (run the MWAA pipeline) or the GLUE_GOLD_DATABASE value in `.env` is wrong (should be `edp_dev_gold` with underscores, not hyphens).
+**"Athena query failed: TABLE_NOT_FOUND"**: Either the Gold Glue Catalog tables don't exist (run the MWAA pipeline) or the GLUE_GOLD_DATABASE value in `.env` is wrong (should be `edp_dev_gold` with underscores, not hyphens).
 
-**Deploy workflow triggered but ECS task keeps stopping** — Check CloudWatch Logs at `/ecs/edp-dev-analytics-agent` for the startup error. The most common cause is a missing SSM parameter or a container startup crash.
+**Deploy workflow triggered but ECS task keeps stopping**: Check CloudWatch Logs at `/ecs/edp-dev-analytics-agent` for the startup error. The most common cause is a missing SSM parameter or a container startup crash.
 
-**"Athena query failed: Insufficient permissions on glue:GetDatabase for database/silver"** — dbt-athena embeds the dbt source name (`silver`) as the Glue database in Gold view definitions, not the full name (`edp_dev_silver`). The task role needs Glue read permissions on both `edp_dev_silver` and the literal name `silver`. This is already fixed in the Terraform module.
+**"Athena query failed: Insufficient permissions on glue:GetDatabase for database/silver"**: dbt-athena embeds the dbt source name (`silver`) as the Glue database in Gold view definitions, not the full name (`edp_dev_silver`). The task role needs Glue read permissions on both `edp_dev_silver` and the literal name `silver`. This is already fixed in the Terraform module.
 
-**"Athena query failed: PERMISSION_DENIED s3:ListBucket on edp-dev-...-silver"** — Gold views read from the underlying Silver Parquet files. The task role needs `s3:GetObject` and `s3:ListBucket` on the Silver S3 bucket. This is already fixed in the Terraform module.
+**"Athena query failed: PERMISSION_DENIED s3:ListBucket on edp-dev-...-silver"**: Gold views read from the underlying Silver Parquet files. The task role needs `s3:GetObject` and `s3:ListBucket` on the Silver S3 bucket. This is already fixed in the Terraform module.
 
-**"Athena: Unable to verify/create output bucket"** — The task role needs `s3:GetBucketLocation` on the Athena results bucket (not just `s3:GetObject`). This is already fixed in the Terraform module.
+**"Athena: Unable to verify/create output bucket"**: The task role needs `s3:GetBucketLocation` on the Athena results bucket (not just `s3:GetObject`). This is already fixed in the Terraform module.
 
 ---
 
@@ -955,7 +955,7 @@ GET  http://localhost:8080/health
 internal-edp-dev-agent-alb-753909442.eu-central-1.elb.amazonaws.com
 ```
 
-The ALB is intentionally internal-only. To reach it from outside the VPC you would need a bastion host or VPN tunnel. For dev testing, use ECS Exec as described in Track 2 above — it's simpler and doesn't require any additional infrastructure.
+The ALB is intentionally internal-only. To reach it from outside the VPC you would need a bastion host or VPN tunnel. For dev testing, use ECS Exec as described in Track 2 above: it's simpler and doesn't require any additional infrastructure.
 
 ### IAM role permissions
 
@@ -973,7 +973,7 @@ S3 (read):
   - s3:GetObject on {gold_bucket}/*
   - s3:GetObject, s3:PutObject on {athena_results_bucket}/*
 
-S3 (write — agent outputs only):
+S3 (write: agent outputs only):
   - s3:PutObject on {bronze_bucket}/metadata/agent-audit/*
   - s3:PutObject on {bronze_bucket}/metadata/engineer-log/*
   - s3:PutObject on {gold_bucket}/charts/*
@@ -994,27 +994,27 @@ SSM:
 
 Each phase has a clear deliverable. No phase starts until the previous one passes `make lint`, `make typecheck`, and `make test`.
 
-### Phase 1: Foundation — complete
+### Phase 1: Foundation: complete
 
 Project skeleton with CI from the first commit. No business logic yet.
 
 - `pyproject.toml`, `.python-version`, `requirements.txt`, `requirements-dev.txt`
-- `Makefile` — setup, lint, typecheck, test, run targets
+- `Makefile`: setup, lint, typecheck, test, run targets
 - `Dockerfile` (two-stage build, non-root user) + `docker-compose.yml`
 - `.env.example`, `.gitignore`
-- `agent/exceptions.py` — named exception hierarchy (`AgentError`, `SchemaResolutionError`, `SQLValidationError`, `CostLimitError`, `ExecutionError`, `ResultValidationError`)
-- `agent/config.py` — frozen dataclasses driven by environment variables, fail fast at startup if any required variable is missing
-- `agent/logging.py` — structured JSON logger used by every module from day one
-- `.github/workflows/ci.yml` — ruff + mypy + pytest on every push
-- `tests/conftest.py` — shared fixtures for mocked AWS clients and mocked Claude API responses
+- `agent/exceptions.py`: named exception hierarchy (`AgentError`, `SchemaResolutionError`, `SQLValidationError`, `CostLimitError`, `ExecutionError`, `ResultValidationError`)
+- `agent/config.py`: frozen dataclasses driven by environment variables, fail fast at startup if any required variable is missing
+- `agent/logging.py`: structured JSON logger used by every module from day one
+- `.github/workflows/ci.yml`: ruff + mypy + pytest on every push
+- `tests/conftest.py`: shared fixtures for mocked AWS clients and mocked Claude API responses
 
 Deliverable: `make lint`, `make typecheck`, `make test` all pass. Docker image builds cleanly. CI is green.
 
-### Phase 2: IAM and infra design — complete
+### Phase 2: IAM and infra design: complete
 
 Written before any AWS code so the executor is coded to the permission boundary, not retrofitted after.
 
-All AWS infrastructure lives in `terraform-platform-infra-live/modules/analytics-agent/` — the same repo and state file as the rest of the platform. This is intentional: the agent's IAM role references bucket names, KMS key ARN, and Glue database name that are outputs of sibling modules. Keeping everything in one state file means no manual `tfvars` to maintain, and the teardown workflow covers the agent automatically.
+All AWS infrastructure lives in `terraform-platform-infra-live/modules/analytics-agent/`: the same repo and state file as the rest of the platform. This is intentional: the agent's IAM role references bucket names, KMS key ARN, and Glue database name that are outputs of sibling modules. Keeping everything in one state file means no manual `tfvars` to maintain, and the teardown workflow covers the agent automatically.
 
 Resources: ECR repository (scan on push, lifecycle policy keeps last 10 images), ECS cluster (FARGATE, Container Insights enabled), CloudWatch log group (30-day retention, KMS-encrypted), task execution role (ECR pull + CloudWatch write only), task IAM role (scoped exactly), security group (egress port 443 only), ECS task definition (512 CPU / 1024 MB, `lifecycle.ignore_changes` so CI updates the image without Terraform re-deploying).
 
@@ -1022,23 +1022,23 @@ Task IAM role grants: Gold S3 read-only, Athena results bucket read/write, Bronz
 
 Deliverable: `terraform plan` in `terraform-platform-infra-live/environments/dev` produces the correct IAM role. All application AWS code is written inside this permission boundary.
 
-### Phase 3: Schema resolver — complete
+### Phase 3: Schema resolver: complete
 
-The Gold layer has 7 small, pre-aggregated tables with 5-10 columns each. All schemas are loaded eagerly at startup and embedded in the system prompt — Claude knows every table and column before it sees the first question. This eliminates the `list_tables` / `get_schema` tool call round trips from the common case and is the single biggest latency saving in the design.
+The Gold layer has 7 small, pre-aggregated tables with 5-10 columns each. All schemas are loaded eagerly at startup and embedded in the system prompt: Claude knows every table and column before it sees the first question. This eliminates the `list_tables` / `get_schema` tool call round trips from the common case and is the single biggest latency saving in the design.
 
-- `agent/schema.py` — `SchemaResolver` class:
-  - `load_all_schemas()` — called once at startup. Reads `catalog.json` from `s3://{bronze_bucket}/metadata/dbt/` and fetches all Gold tables from `glue_client.get_tables()`. Merges physical schema (column names, types, partition keys) with business context (column descriptions, accepted values, model docs) for every table. Returns a single dict covering all 7 Gold tables (~2,500 tokens total). This dict is embedded directly in the system prompt so Claude starts every query with full schema awareness.
-  - `get_schema(table_name)` — available as a tool for edge cases where Claude needs to re-examine one table during reasoning, but won't be called in normal operation.
+- `agent/schema.py`: `SchemaResolver` class:
+  - `load_all_schemas()`: called once at startup. Reads `catalog.json` from `s3://{bronze_bucket}/metadata/dbt/` and fetches all Gold tables from `glue_client.get_tables()`. Merges physical schema (column names, types, partition keys) with business context (column descriptions, accepted values, model docs) for every table. Returns a single dict covering all 7 Gold tables (~2,500 tokens total). This dict is embedded directly in the system prompt so Claude starts every query with full schema awareness.
+  - `get_schema(table_name)`: available as a tool for edge cases where Claude needs to re-examine one table during reasoning, but won't be called in normal operation.
   - Graceful fallback if `catalog.json` doesn't exist yet (pipeline hasn't run): falls back to Glue-only schema with a warning logged.
-- `tests/test_schema.py` — parametrized tests with full mock fixtures for both Glue and S3 responses, including the fallback path.
+- `tests/test_schema.py`: parametrized tests with full mock fixtures for both Glue and S3 responses, including the fallback path.
 
 Deliverable: `SchemaResolver.load_all_schemas()` returns the complete merged schema for all Gold tables in one call. Tested with and without `catalog.json` present.
 
-### Phase 4: SQL validator — complete
+### Phase 4: SQL validator: complete
 
 Guardrails are built before the SQL generator so no generated SQL can ever bypass them.
 
-- `agent/validator.py` — `SQLValidator`:
+- `agent/validator.py`: `SQLValidator`:
   - Parses with sqlparse
   - Rejects anything that isn't a single SELECT statement
   - Rejects any DDL keyword anywhere in the statement or any subquery (`DROP`, `DELETE`, `INSERT`, `UPDATE`, `CREATE`, `ALTER`, `TRUNCATE`)
@@ -1046,97 +1046,97 @@ Guardrails are built before the SQL generator so no generated SQL can ever bypas
   - Injects `LIMIT 1000` if missing
   - Checks that at least one partition key filter is present for large tables
   - Returns validated SQL or raises `SQLValidationError` with a reason string Claude can act on
-- `tests/test_validator.py` — parametrized, one test case per guardrail, both passing and failing inputs
+- `tests/test_validator.py`: parametrized, one test case per guardrail, both passing and failing inputs
 
 Deliverable: `SQLValidator` enforces all guardrails. No SQL can reach Athena without passing through it.
 
-### Phase 5: Prompts and Claude client — complete
+### Phase 5: Prompts and Claude client: complete
 
 The agentic loop is a first-class module, not wired ad-hoc inside `main.py`.
 
-- `agent/prompts.py` — all prompts in one place, reviewed and tuned independently of code:
+- `agent/prompts.py`: all prompts in one place, reviewed and tuned independently of code:
   - System prompt: includes the full pre-loaded Gold schema dict from Phase 3, guardrail rules, and output format expectations. Because all schemas are embedded here, Claude can answer most questions in a single non-tool-call response.
   - SQL generation prompt: question + schema context → SELECT query + assumptions list
   - Insight prompt: question + SQL + result sample → 2-3 sentence plain-English insight
   - Tool definitions: `get_schema` (for edge cases where Claude needs to re-examine one table)
-- `agent/claude_client.py` — `ClaudeClient`:
+- `agent/claude_client.py`: `ClaudeClient`:
   - For the common case (question maps clearly to one Gold table): single Claude call, no tool use needed. Claude reads the schema from the system prompt and returns SQL + assumptions directly.
   - For edge cases (ambiguous question, needs to re-examine a specific table): handles `tool_use` content blocks, dispatches `get_schema`, sends `tool_result` back, repeats until text response.
   - Retries on transient errors (throttling, timeout) with exponential backoff.
   - Hard fails immediately on semantic errors (table not found, permission denied) with no retry.
-- `tests/test_claude_client.py` — mocked Anthropic SDK responses covering single-turn (common case), tool-use fallback, and retry scenarios.
+- `tests/test_claude_client.py`: mocked Anthropic SDK responses covering single-turn (common case), tool-use fallback, and retry scenarios.
 
 Deliverable: `ClaudeClient` handles both the single-call common path and the tool-use fallback path correctly. Retry behaviour tested.
 
-### Phase 6: SQL generator with feedback loop — complete
+### Phase 6: SQL generator with feedback loop: complete
 
 Gold queries are simple: `SELECT` from one pre-aggregated table with optional `WHERE` filters. A second review pass designed for complex JOINs adds latency and tokens with no benefit here. Single-pass generation with validation feedback is the right design.
 
-- `agent/generator.py` — `SQLGenerator`:
+- `agent/generator.py`: `SQLGenerator`:
   - Calls `ClaudeClient` with the question. Claude reads the schema from the system prompt and returns a SELECT query and a list of assumptions.
   - Runs the result through `SQLValidator`.
   - If validation fails, sends the error reason back to Claude and asks for a corrected query. Up to 3 attempts before raising `SQLValidationError` to the user.
-  - No second review pass — Gold SQL is simple enough that sqlparse guardrail validation is sufficient.
+  - No second review pass: Gold SQL is simple enough that sqlparse guardrail validation is sufficient.
   - Returns validated SQL and flagged assumptions.
-- `tests/test_generator.py` — mocked `ClaudeClient`, tests the validation feedback loop, tests assumption extraction.
+- `tests/test_generator.py`: mocked `ClaudeClient`, tests the validation feedback loop, tests assumption extraction.
 
 Deliverable: `SQLGenerator` handles validation failures gracefully and recovers automatically. Single Claude call in the common case.
 
-### Phase 7: Athena executor and cost tracking — complete
+### Phase 7: Athena executor and cost tracking: complete
 
-Gold tables are small pre-aggregated tables. The worst-case scan cost for any Gold query in a dev environment is a fraction of a cent — complex pre-execution cost estimation via Glue partition enumeration is unnecessary overhead. The Athena WorkGroup `bytes_scanned_cutoff_per_query` setting (configured in the Terraform processing module) is the hard cost backstop. Actual cost is tracked post-execution from the Athena result metadata and recorded in the audit log.
+Gold tables are small pre-aggregated tables. The worst-case scan cost for any Gold query in a dev environment is a fraction of a cent: complex pre-execution cost estimation via Glue partition enumeration is unnecessary overhead. The Athena WorkGroup `bytes_scanned_cutoff_per_query` setting (configured in the Terraform processing module) is the hard cost backstop. Actual cost is tracked post-execution from the Athena result metadata and recorded in the audit log.
 
-- `agent/executor.py` — `AthenaExecutor`:
-  - `execute(sql)` — starts the Athena query, polls until complete, reads the result CSV from the S3 athena-results bucket.
+- `agent/executor.py`: `AthenaExecutor`:
+  - `execute(sql)`: starts the Athena query, polls until complete, reads the result CSV from the S3 athena-results bucket.
   - Reads `Statistics.DataScannedInBytes` from the completed query execution and converts to USD (~$5 per TB scanned).
   - Returns a pandas DataFrame, actual bytes scanned, and actual cost in USD.
   - Retries on transient Athena errors (throttling, internal service error). Fails immediately on query errors (syntax, permission) with no retry.
-- `agent/cost.py` — lightweight utility: one function that converts `DataScannedInBytes` to USD. No Glue calls, no S3 enumeration.
-- `tests/test_executor.py` — mocked Athena start/poll/result cycle, failure handling, cost calculation tested.
+- `agent/cost.py`: lightweight utility: one function that converts `DataScannedInBytes` to USD. No Glue calls, no S3 enumeration.
+- `tests/test_executor.py`: mocked Athena start/poll/result cycle, failure handling, cost calculation tested.
 
 Deliverable: Full Athena execution path works correctly. Actual cost tracked per query from execution metadata.
 
-### Phase 8: Result validator, insight generator, and audit log — complete
+### Phase 8: Result validator, insight generator, and audit log: complete
 
-- `agent/result_validator.py` — `ResultValidator`: checks numeric values within plausible bounds (negative revenue is flagged), checks for unexpected nulls on key columns. Zero rows is a valid result for Gold tables — an aggregation with no matching data is a legitimate answer, not a bug. Returns a list of flags, never blocks execution, always surfaces flags in output.
-- `agent/insight.py` — `InsightGenerator`: final Claude call that takes the original question, SQL, result DataFrame, and assumptions, and returns a 2-3 sentence plain-English insight. Uses the insight prompt from `prompts.py`. Structured output so malformed responses raise `AgentError`, not crash.
-- `agent/audit.py` — `AuditLogger`: writes a structured JSON record to `s3://{bronze_bucket}/metadata/agent-audit/` after every query. Fields: question, SQL, assumptions, row count, bytes scanned, cost in USD, validation flags, insight, timestamp. The audit log is itself queryable via Athena.
+- `agent/result_validator.py`: `ResultValidator`: checks numeric values within plausible bounds (negative revenue is flagged), checks for unexpected nulls on key columns. Zero rows is a valid result for Gold tables: an aggregation with no matching data is a legitimate answer, not a bug. Returns a list of flags, never blocks execution, always surfaces flags in output.
+- `agent/insight.py`: `InsightGenerator`: final Claude call that takes the original question, SQL, result DataFrame, and assumptions, and returns a 2-3 sentence plain-English insight. Uses the insight prompt from `prompts.py`. Structured output so malformed responses raise `AgentError`, not crash.
+- `agent/audit.py`: `AuditLogger`: writes a structured JSON record to `s3://{bronze_bucket}/metadata/agent-audit/` after every query. Fields: question, SQL, assumptions, row count, bytes scanned, cost in USD, validation flags, insight, timestamp. The audit log is itself queryable via Athena.
 - `tests/test_result_validator.py`, `tests/test_insight.py`
 
-### Phase 9: CLI entry point and end-to-end integration — complete
+### Phase 9: CLI entry point and end-to-end integration: complete
 
-- `agent/main.py` — orchestrates the complete reasoning chain: load schemas → generate SQL → validate → execute → validate results → generate insight → audit log → return output. Handles errors at each stage with clear user-facing messages. CLI entry point: `python -m agent.main "question"`.
-- `tests/test_integration.py` — marked `@pytest.mark.integration`, runs against the real AWS dev environment, not mocks. Run manually before deploy, not in CI.
+- `agent/main.py`: orchestrates the complete reasoning chain: load schemas → generate SQL → validate → execute → validate results → generate insight → audit log → return output. Handles errors at each stage with clear user-facing messages. CLI entry point: `python -m agent.main "question"`.
+- `tests/test_integration.py`: marked `@pytest.mark.integration`, runs against the real AWS dev environment, not mocks. Run manually before deploy, not in CI.
 
 Deliverable: `python -m agent.main "Show total orders by country"` returns SQL, result table, flagged assumptions, and a 2-sentence insight against live Athena data in under 25 seconds.
 
-### Phase 10: Charts — complete
+### Phase 10: Charts: complete
 
-- `agent/charts.py` — `ChartGenerator`:
+- `agent/charts.py`: `ChartGenerator`:
   - Detects chart type from data shape and question keywords (five types supported)
   - Uploads PNG to `s3://{gold_bucket}/charts/`, returns presigned URL (valid 1 hour)
   - Plotly interactive HTML version returned in the HTTP endpoint response
   - See the chart type reference below for which question phrasing triggers which chart
 
-### Phase 11: FastAPI HTTP endpoint and session state — complete
+### Phase 11: FastAPI HTTP endpoint and session state: complete
 
-- FastAPI route added to `agent/main.py` — POST `/ask` accepts `{"question": "...", "session_id": "..."}`, returns full JSON response: insight, assumptions, validation flags, execution ID, bytes scanned, cost in USD, session ID, chart type, presigned chart URL, interactive HTML chart
-- `agent/session.py` — `SessionStore` with TTL eviction (1 hour default). `Conversation.context_summary()` returns the last 5 turns formatted for Claude, enabling multi-turn follow-ups
-- GET `/health` returns `{"status": "ok"}` — used by the ALB target group health check
+- FastAPI route added to `agent/main.py`: POST `/ask` accepts `{"question": "...", "session_id": "..."}`, returns full JSON response: insight, assumptions, validation flags, execution ID, bytes scanned, cost in USD, session ID, chart type, presigned chart URL, interactive HTML chart
+- `agent/session.py`: `SessionStore` with TTL eviction (1 hour default). `Conversation.context_summary()` returns the last 5 turns formatted for Claude, enabling multi-turn follow-ups
+- GET `/health` returns `{"status": "ok"}`: used by the ALB target group health check
 
-### Phase 12: Deploy pipeline and ECS infra — complete
+### Phase 12: Deploy pipeline and ECS infra: complete
 
 - `terraform-platform-infra-live/modules/analytics-agent/main.tf` extended with: internal ALB in private subnets, ALB security group (port 80), ECS security group (port 8080 from ALB only), target group with `/health` check, ECS service with rolling deploy and `lifecycle.ignore_changes`
-- `.github/workflows/ci.yml` — quality gate (ruff, mypy) + unit tests + Docker build check
-- `.github/workflows/deploy.yml` — OIDC (OpenID Connect) authentication, ECR push, ECS task definition update, rolling deploy with stability wait
+- `.github/workflows/ci.yml`: quality gate (ruff, mypy) + unit tests + Docker build check
+- `.github/workflows/deploy.yml`: OIDC (OpenID Connect) authentication, ECR push, ECS task definition update, rolling deploy with stability wait
 
-### Phase 13: Streamlit UI — complete
+### Phase 13: Streamlit UI: complete
 
 A Streamlit browser app (`ui/app.py`) that wraps the FastAPI backend so non-technical stakeholders can query the agent without touching a command line.
 
 What was built:
 
-- `ui/app.py` — numbered Q&A cards (not chat bubbles), session state for multi-turn follow-ups, bordered card layout
+- `ui/app.py`: numbered Q&A cards (not chat bubbles), session state for multi-turn follow-ups, bordered card layout
 - **Streaming insight display.** The plain-English insight streams token-by-token as Claude generates it, so stakeholders see progress immediately instead of waiting for the full response.
 - **Status badges.** A spinner and coloured status badge show each pipeline step in real time (generating SQL, running query, generating insight).
 - **Chart/Table tabs.** Every result renders both an interactive Plotly chart and a raw data table via `st.tabs`. The user switches between them without re-running the query.
@@ -1148,7 +1148,7 @@ What was built:
 - The internet-facing ALB has separate listeners: port 80 routes to FastAPI, port 8501 routes to Streamlit.
 - Deployed automatically via the existing CI/deploy pipeline on every push to `main`.
 
-### Phase 14: enterprise hardening and stakeholder PDF — complete
+### Phase 14: enterprise hardening and stakeholder PDF: complete
 
 Reliability, auditability, and a professional PDF output for non-technical stakeholders.
 
@@ -1158,7 +1158,7 @@ What was built:
 - **Engineer audit log.** A 17-column CSV written to `s3://{bronze_bucket}/metadata/engineer-log/date={date}/session={session_id}/{request_id}.csv` for every request. Columns: `session_id`, `request_id`, `timestamp_utc`, `question_asked`, `sql_executed`, `claude_interpretation`, `discrepancy_detail`, `verdict`, `bytes_scanned`, `athena_cost_usd`, `response_time_seconds`, `athena_query_execution_id`, `sql_retry_count`, `row_count_returned`, `chart_type_rendered`, `language`, `prompt_version`. The `prompt_version` column (e.g. `v1`) lets you filter the log by prompt version to compare verdict rates before and after a prompt change. A "Prepare Session Log" button in the sidebar fetches and merges all session rows from S3 into a single downloadable CSV.
 - **Verdict computation.** The pre-Athena intent check writes a `verdict` field (`Yes`/`No`) and a `discrepancy_detail` sentence to the response, audit log, and engineer log. If verdict is `Yes`, the SQL is regenerated once before Athena runs. The UI shows the final verdict as a badge in the Details expander.
 - **Circuit breaker.** A 30-second timeout on every Claude API call. Up to 3 attempts with 2s/5s/10s exponential backoff on transient errors (throttling, timeout). Semantic errors (table not found, permission denied) fail immediately with no retry.
-- **Rate limiter.** 10 requests per 60-second sliding window per `session_id`. Excess requests return HTTP 429 with a `retry_after_seconds` field. Implemented with `collections.deque` in-process — no Redis needed.
+- **Rate limiter.** 10 requests per 60-second sliding window per `session_id`. Excess requests return HTTP 429 with a `retry_after_seconds` field. Implemented with `collections.deque` in-process: no Redis needed.
 - **Request UUID tracing.** Every request gets a `request_id` (UUID v4) at the top of the handler. It flows through the audit log, engineer log, and JSON export.
 
 ---
@@ -1185,9 +1185,9 @@ The Gold layer is pre-aggregated. Each table directly answers a specific busines
 
 | Component | Input tokens | Output tokens |
 |---|---|---|
-| System prompt with all Gold schemas | ~2,500 | — |
-| User question | ~30 | — |
-| SQL + assumptions | — | ~200 |
+| System prompt with all Gold schemas | ~2,500 |: |
+| User question | ~30 |: |
+| SQL + assumptions |: | ~200 |
 | Insight prompt + question + result sample | ~700 | ~150 |
 | Verdict (infer question from SQL, compare) | ~250 | ~60 |
 | **Total per question** | **~3,480** | **~410** |
@@ -1267,7 +1267,7 @@ Chart: [interactive Plotly line chart rendered inline]
 | boto3 | AWS SDK: Athena, Glue Catalog, S3, SSM |
 | sqlparse | SQL parsing and validation |
 | FastAPI | HTTP endpoint for the agent API |
-| Streamlit | Python library that turns Python code into a browser-accessible web page — the stakeholder UI |
+| Streamlit | Python library that turns Python code into a browser-accessible web page: the stakeholder UI |
 | matplotlib | Static chart PNG generation |
 | Plotly | Interactive chart HTML generation |
 | fpdf2 | PDF report generation (2-page layout, CJK font support) |
@@ -1303,7 +1303,7 @@ platform-analytics-agent/
 │   ├── charts.py               ← matplotlib PNG and Plotly HTML chart generation
 │   ├── session.py              ← SessionStore + Conversation: multi-turn context management
 │   └── audit.py                ← structured JSON audit log writer to S3
-│   (no infra/ directory — all AWS infrastructure lives in terraform-platform-infra-live)
+│   (no infra/ directory: all AWS infrastructure lives in terraform-platform-infra-live)
 ├── tests/                      ← pytest unit and integration tests
 │   ├── conftest.py             ← shared fixtures: mocked boto3 clients, mocked Claude responses
 │   ├── test_config.py
@@ -1343,7 +1343,7 @@ Two tools make this possible.
 
 **unittest.mock** replaces any Python function with a fake version. When the code calls the Claude API to generate SQL, mock substitutes that function with one that instantly returns a hardcoded string like `SELECT * FROM revenue_by_country LIMIT 10`. No HTTP request, no API key needed.
 
-There are no CSV test data files because the agent doesn't read CSV files — it reads AWS API responses and Claude API responses. Mocking those responses directly is more accurate than representing them as CSV, and the mocks stay in sync with the code automatically.
+There are no CSV test data files because the agent doesn't read CSV files: it reads AWS API responses and Claude API responses. Mocking those responses directly is more accurate than representing them as CSV, and the mocks stay in sync with the code automatically.
 
 ```mermaid
 flowchart TD
@@ -1356,8 +1356,8 @@ flowchart TD
     D --> G
     E --> G
     F --> G
-    G -->|No — fix the failure| H[Pipeline stops here\nDeploy workflow is blocked]
-    G -->|Yes — safe to deploy| I[Deploy workflow triggers\nBuilds and pushes Docker image to ECR\nUpdates ECS task definition\nECS rolling deploy — old tasks replaced\nwith new ones one at a time]
+    G -->|No: fix the failure| H[Pipeline stops here\nDeploy workflow is blocked]
+    G -->|Yes: safe to deploy| I[Deploy workflow triggers\nBuilds and pushes Docker image to ECR\nUpdates ECS task definition\nECS rolling deploy: old tasks replaced\nwith new ones one at a time]
 ```
 
 Integration tests also exist but are not part of the standard CI run. They are marked `@pytest.mark.integration` and only run when explicitly triggered with real AWS credentials against the deployed dev environment. They validate the full pipeline end-to-end: real Glue schema loading, real Athena query, real Claude API call.
