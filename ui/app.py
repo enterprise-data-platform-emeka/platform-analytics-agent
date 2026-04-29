@@ -2717,45 +2717,47 @@ def _render_turn(turn: dict, form_key: str) -> None:
     lang = _detect_language(turn["question"])
     is_analytical = bool(turn.get("sql"))
 
-    # Insight card — capped at 3 visible lines.
+    # Insight card — full text, no clamping.
     escaped = html_lib.escape(turn["insight"]).replace("\n", "<br>")
     st.markdown(
-        f'<div class="insight-card" style="display:-webkit-box;-webkit-line-clamp:3;'
-        f'-webkit-box-orient:vertical;overflow:hidden;">{escaped}</div>',
+        f'<div class="insight-card">{escaped}</div>',
         unsafe_allow_html=True,
     )
 
-    # KPI tiles — mirror the PDF layout so stakeholders see the same numbers inline.
+    # KPI tiles — single flex row so all cards stretch to equal height automatically.
+    # Using st.columns would put each card in a separate Streamlit container,
+    # preventing cross-card height equalisation. One st.markdown with a flex
+    # wrapper gives display:flex align-items:stretch for free.
     kpi_tiles = _extract_kpi_tiles(turn.get("columns", []), turn.get("rows", []), lang)
     if kpi_tiles:
-        st.markdown('<div style="margin:12px 0 4px 0"></div>', unsafe_allow_html=True)
-        # Single tile gets a capped width so it doesn't span the full card.
         n_tiles = len(kpi_tiles)
-        tile_cols = st.columns(n_tiles) if n_tiles > 1 else st.columns([1, 2])
-        _tile_col_list = tile_cols[:n_tiles] if n_tiles > 1 else [tile_cols[0]]
-        for tcol, (metric_lbl, value, sub_lbl, badge) in zip(
-            _tile_col_list, kpi_tiles, strict=False
-        ):
-            with tcol:
-                badge_color = "#16a34a" if badge.startswith("+") else "#dc2626"
-                badge_html = (
-                    f'<div style="color:{badge_color};font-size:12px;font-weight:600;'
-                    f'margin-top:2px">{badge}</div>'
-                    if badge
-                    else ""
-                )
-                st.markdown(
-                    f'<div style="background:#f0f7ff;border-radius:8px;'
-                    f"border-top:3px solid #4B5320;padding:12px 16px 10px 16px;"
-                    f'min-height:95px;display:flex;flex-direction:column;">'
-                    f'<div style="font-size:11px;color:#4B5320;font-weight:600;'
-                    f'letter-spacing:0.05em;margin-bottom:4px">{metric_lbl.upper()}</div>'
-                    f'<div style="font-size:22px;font-weight:700;color:#0f172a;'
-                    f'line-height:1.1">{value}</div>'
-                    f'<div style="font-size:12px;color:#64748b;margin-top:3px">{sub_lbl}</div>'
-                    f"{badge_html}</div>",
-                    unsafe_allow_html=True,
-                )
+        # Single tile: cap width to ~33% so it doesn't span the full card width.
+        wrapper_style = (
+            'display:flex;gap:12px;margin:12px 0 4px 0;align-items:stretch;'
+            + ('max-width:34%;' if n_tiles == 1 else '')
+        )
+        tiles_html = f'<div style="{wrapper_style}">'
+        for metric_lbl, value, sub_lbl, badge in kpi_tiles:
+            badge_color = "#16a34a" if badge.startswith("+") else "#dc2626"
+            badge_html = (
+                f'<div style="color:{badge_color};font-size:12px;font-weight:600;'
+                f'margin-top:4px">{badge}</div>'
+                if badge
+                else ""
+            )
+            tiles_html += (
+                f'<div style="flex:1;background:#f0f7ff;border-radius:8px;'
+                f'border-top:3px solid #4B5320;padding:12px 16px 10px 16px;'
+                f'display:flex;flex-direction:column;">'
+                f'<div style="font-size:11px;color:#4B5320;font-weight:600;'
+                f'letter-spacing:0.05em;margin-bottom:4px">{metric_lbl.upper()}</div>'
+                f'<div style="font-size:22px;font-weight:700;color:#0f172a;'
+                f'line-height:1.1">{value}</div>'
+                f'<div style="font-size:12px;color:#64748b;margin-top:3px">{sub_lbl}</div>'
+                f'{badge_html}</div>'
+            )
+        tiles_html += '</div>'
+        st.markdown(tiles_html, unsafe_allow_html=True)
 
     # Validation flags
     for flag in turn.get("validation_flags", []):
