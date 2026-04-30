@@ -61,6 +61,7 @@ from agent.generator import SQLGenerator
 from agent.insight import InsightGenerator, InsightResponse
 from agent.logging import configure_logging
 from agent.prompts import PROMPT_VERSION, build_system_prompt
+from agent.report import ReportInput, build_pdf_report
 from agent.result_validator import validate
 from agent.schema import SchemaResolver
 from agent.session import Conversation, SessionStore, Turn
@@ -562,7 +563,7 @@ def _write_engineer_log(
 
 try:
     from fastapi import FastAPI, HTTPException
-    from pydantic import BaseModel
+    from pydantic import BaseModel, Field
 
     app = FastAPI(
         title="EDP Analytics Agent",
@@ -729,6 +730,65 @@ try:
         to_email: str
         question: str
         pdf_b64: str  # complete PDF built by the UI, base64-encoded
+
+    class PdfReportRequest(BaseModel):
+        question: str
+        insight: str
+        assumptions: list[str] = Field(default_factory=list)
+        validation_flags: list[str] = Field(default_factory=list)
+        png_b64: str | None = None
+        columns: list[str] = Field(default_factory=list)
+        rows: list[dict[str, str]] = Field(default_factory=list)
+        chart_type: str = "none"
+        cost_usd: float = 0.0
+        bytes_scanned: int = 0
+        sql: str = ""
+        inferred_question: str = ""
+        verdict: str = "No"
+        discrepancy_detail: str = "None"
+        request_id: str = ""
+
+    @app.post("/report/pdf")
+    async def build_report_pdf(body: PdfReportRequest) -> dict[str, str]:
+        """Build a branded PDF report from a completed /ask response.
+
+        This endpoint lets non-Streamlit clients, including Slack, attach the
+        same stakeholder report artifact without duplicating report code.
+        """
+        if not body.question.strip():
+            raise HTTPException(status_code=400, detail="question must not be empty")
+        if not body.insight.strip():
+            raise HTTPException(status_code=400, detail="insight must not be empty")
+
+        try:
+            pdf_bytes = build_pdf_report(
+                ReportInput(
+                    question=body.question,
+                    insight=body.insight,
+                    assumptions=body.assumptions,
+                    validation_flags=body.validation_flags,
+                    png_b64=body.png_b64,
+                    columns=body.columns,
+                    rows=body.rows,
+                    chart_type=body.chart_type,
+                    cost_usd=body.cost_usd,
+                    bytes_scanned=body.bytes_scanned,
+                    sql=body.sql,
+                    inferred_question=body.inferred_question,
+                    verdict=body.verdict,
+                    discrepancy_detail=body.discrepancy_detail,
+                    request_id=body.request_id,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("PDF report generation failed: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail=f"PDF generation failed: {exc}") from exc
+
+        return {
+            "filename": "edp_analytics_report.pdf",
+            "mime_type": "application/pdf",
+            "pdf_b64": base64.b64encode(pdf_bytes).decode("utf-8"),
+        }
 
     @app.post("/send-report")
     async def send_report(body: SendReportRequest) -> dict[str, str]:
