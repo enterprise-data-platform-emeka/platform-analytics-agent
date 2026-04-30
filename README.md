@@ -144,19 +144,17 @@ The UI has several features beyond a simple text box:
 
 ### How the browser interface works
 
-You don't need any web development experience to understand this. Here's what actually happens, step by step.
-
 **What Streamlit is**
 
-Streamlit is a Python library. You write Python code and Streamlit turns it into a web page with a text box, buttons, and charts. There's no HTML, CSS, or JavaScript involved. The entire UI is Python, which fits naturally into a project where everything else is already Python.
+Streamlit is a Python library. I write Python code and Streamlit turns it into a web page with a text box, buttons, and charts. There's no HTML, CSS, or JavaScript involved. The entire UI is Python, which fits naturally into a project where everything else is already Python.
 
 **What "running on a server" means**
 
-When you type a web address into Chrome or Safari, your browser connects to a program that is listening for incoming connections. That program is called a server. In this project, Streamlit is that server. When a stakeholder opens `http://alb-url:8501`, their browser connects to the Streamlit program running inside the ECS container in AWS. Streamlit sends the web page back to their browser. This is no different from visiting any website: there's always a server somewhere that sends you the page.
+When a browser opens a web address, it connects to a program that is listening for incoming connections. That program is called a server. In this project, Streamlit is that server. When a stakeholder opens `http://alb-url:8501`, their browser connects to the Streamlit program running inside the ECS container in AWS. Streamlit sends the web page back to the browser. This is no different from visiting any website: there's always a server somewhere that sends the page.
 
 **Why the code calls localhost**
 
-Both Streamlit and FastAPI run inside the same ECS container. Think of a container as a small private computer with its own isolated network. When the Streamlit code calls `localhost:8080`, it means "call the program listening on port 8080 inside this container", which is FastAPI. The stakeholder's browser never sees or uses localhost. They only ever type the ALB's DNS address. Localhost is purely internal, invisible to the outside world.
+Both Streamlit and FastAPI run inside the same ECS container. A container is a small private computer with its own isolated network. When the Streamlit code calls `localhost:8080`, it means "call the program listening on port 8080 inside this container", which is FastAPI. The stakeholder's browser never sees or uses localhost. They only ever type the ALB's DNS address. Localhost is purely internal, invisible to the outside world.
 
 ```mermaid
 sequenceDiagram
@@ -315,7 +313,7 @@ The agent reads this path at query time, never from a local cache. When a dbt mo
 
 ---
 
-## What you can ask
+## What the agent can answer
 
 The agent queries the Gold layer. There are 7 mart tables, each designed to answer a specific category of business question. The questions below are grounded in the exact columns those tables expose.
 
@@ -512,13 +510,13 @@ There's no basket analysis mart. `top_selling_products` and `product_category_pe
 
 ## End-to-end testing
 
-This section explains exactly where you type your question and what to do step by step. There are two ways to ask the agent a question.
+This section covers how to test the agent end-to-end. There are two ways to ask it a question.
 
 ---
 
-### Quick-start checklist (do this when you come back tomorrow)
+### Quick-start checklist
 
-Run these in order. Each one takes about a minute. If any step fails, the numbered troubleshooting items below will tell you exactly what to do.
+Run these in order. Each one takes about a minute. If any step fails, the numbered troubleshooting items below explain exactly what to do.
 
 ```
 [ ] 1. Buy Anthropic API credits at console.anthropic.com > Plans & Billing
@@ -531,13 +529,13 @@ Run these in order. Each one takes about a minute. If any step fails, the number
 [ ] 6. Destroy when done:  cd terraform-platform-infra-live && make destroy dev
 ```
 
-Step 4 is where you type your question. The agent runs on your Mac, talks to AWS, and prints the answer directly in your terminal. If you only have a few minutes, steps 1-4 are all you need.
+Step 4 runs the agent locally against real AWS services and prints the answer in the terminal. Steps 1-4 are all that's needed for a quick functional test.
 
 ---
 
-**Track 1 (recommended, start here):** You type your question in your Mac terminal. The agent code runs on your Mac but connects to the real AWS dev environment (real Athena, real Glue, real S3). No ECS needed. This is the fastest way to iterate and confirms all AWS integrations are working.
+**Track 1 (recommended, start here):** The agent code runs locally but connects to the real AWS dev environment (real Athena, real Glue, real S3). No ECS needed. This is the fastest way to iterate and confirms all AWS integrations are working.
 
-**Track 2:** The agent is deployed to ECS Fargate. You shell into the running container using the AWS CLI and make HTTP requests to the agent's FastAPI server from inside the container. This confirms the deployed Docker image and ECS service are healthy.
+**Track 2:** The agent is deployed to ECS Fargate. I shell into the running container using the AWS CLI and make HTTP requests to the FastAPI server from inside the container. This confirms the deployed Docker image and ECS service are healthy.
 
 Start with Track 1. Only move to Track 2 once Track 1 is producing correct answers.
 
@@ -545,22 +543,22 @@ Start with Track 1. Only move to Track 2 once Track 1 is producing correct answe
 
 ### Prerequisites (do these once before the first test)
 
-**1. Store your Anthropic API key in SSM Parameter Store.**
+**1. Store the Anthropic API key in SSM Parameter Store.**
 
 The agent fetches its API key from AWS Systems Manager (SSM) at startup. It never reads it from a file or environment variable directly: this way the key never appears in ECS task logs or Terraform state.
 
-Go to the AWS console, make sure you're in `eu-central-1`, and navigate to Systems Manager > Parameter Store. Create a new parameter with these exact values:
+In the AWS console, making sure the region is `eu-central-1`, navigate to Systems Manager > Parameter Store. Create a new parameter with these exact values:
 
 | Field | Value |
 |---|---|
 | Name | `/edp/dev/anthropic_api_key` |
 | Type | `SecureString` |
-| Value | Your Anthropic API key (starts with `sk-ant-`) |
+| Value | Anthropic API key (starts with `sk-ant-`) |
 | KMS key | Use the default `aws/ssm` key |
 
-You only need to do this once. The parameter survives `terraform destroy` because it's not managed by Terraform.
+This only needs to be done once. The parameter survives `terraform destroy` because it's not managed by Terraform.
 
-Alternatively, do it from the terminal:
+Alternatively, from the terminal:
 
 ```bash
 aws ssm put-parameter \
@@ -583,7 +581,7 @@ aws ssm get-parameter \
 
 **2. Confirm the MWAA pipeline has run and Gold data exists.**
 
-The agent queries the Gold Athena tables. If the pipeline hasn't run yet, every query will return zero rows (or a table-not-found error if the Glue Catalog is empty). Log into the Airflow UI for your MWAA environment (`edp-dev-mwaa`) and confirm `edp_pipeline` has at least one successful DAG run. If it hasn't, trigger it manually and wait for it to complete (about 6-8 minutes).
+The agent queries the Gold Athena tables. If the pipeline hasn't run yet, every query returns zero rows (or a table-not-found error if the Glue Catalog is empty). Log into the Airflow UI for the MWAA environment (`edp-dev-mwaa`) and confirm `edp_pipeline` has at least one successful DAG run. If it hasn't, trigger it manually and wait for it to complete (about 6-8 minutes).
 
 You can also confirm Gold data exists by running a quick Athena query in the AWS console:
 
@@ -595,17 +593,17 @@ If this returns a count greater than zero, the Gold layer is ready.
 
 **3. Confirm the deploy workflow completed.**
 
-When you pushed the latest code changes to `main`, GitHub Actions ran the CI workflow first (lint, type check, unit tests, Docker build). Once CI passed, the Deploy workflow triggered automatically and built the Docker image, pushed it to ECR (Elastic Container Registry), and updated the ECS task definition.
+When the latest code changes are pushed to `main`, GitHub Actions runs the CI workflow first (lint, type check, unit tests, Docker build). Once CI passes, the Deploy workflow triggers automatically and builds the Docker image, pushes it to ECR (Elastic Container Registry), and updates the ECS task definition.
 
-Go to the GitHub repository for `platform-analytics-agent`, click Actions, and confirm both the CI and Deploy workflows have a green tick for your latest push. If Deploy is still running, wait for it to finish before testing Track 2.
+In the GitHub repository for `platform-analytics-agent`, click Actions and confirm both the CI and Deploy workflows have a green tick for the latest push. If Deploy is still running, wait for it to finish before testing Track 2.
 
 ---
 
 ### Track 1: Local functional test (start here)
 
-This runs the agent Python code directly on your Mac against the real AWS dev environment. It uses your local `dev-admin` AWS profile for credentials, connects to real Athena, real Glue Catalog, and real SSM. The output is identical to what you'd see in ECS: the only difference is that the compute runs on your Mac instead of Fargate.
+This runs the agent Python code directly against the real AWS dev environment. It uses the local `dev-admin` AWS profile for credentials, connects to real Athena, real Glue Catalog, and real SSM. The output is identical to what ECS produces: the only difference is that the compute runs locally instead of on Fargate.
 
-**Step 1: Create your `.env` file.**
+**Step 1: Create the `.env` file.**
 
 Copy `.env.example` to `.env`:
 
@@ -614,13 +612,13 @@ cd platform-analytics-agent
 cp .env.example .env
 ```
 
-Open `.env` and fill in the values. The only things you need to change are the bucket names and your AWS account ID. You can find your account ID by running:
+Open `.env` and fill in the values. The only things to change are the bucket names and the AWS account ID. Find the account ID by running:
 
 ```bash
 aws sts get-caller-identity --profile dev-admin --query Account --output text
 ```
 
-Update `.env` with your account ID substituted in:
+Update `.env` with the account ID substituted in:
 
 ```
 AWS_REGION=eu-central-1
@@ -642,7 +640,7 @@ MAX_ROWS=1000
 source .venv/bin/activate
 ```
 
-If you haven't run `make setup` yet:
+If `make setup` hasn't been run yet:
 
 ```bash
 make setup
@@ -651,19 +649,19 @@ source .venv/bin/activate
 
 **Step 3: Load the `.env` file.**
 
-The agent reads these values from environment variables, not from the `.env` file directly. Load them into your shell session:
+The agent reads these values from environment variables, not from the `.env` file directly. Load them into the shell session:
 
 ```bash
 export $(grep -v '^#' .env | xargs)
 ```
 
-**Step 4: Ask your first question.**
+**Step 4: Ask a first question.**
 
 ```bash
 python -m agent.main "Which country has the highest total revenue?"
 ```
 
-The agent takes 12-20 seconds to respond. On the first run there's an additional few seconds for schema loading (Glue Catalog + dbt catalog.json from S3). What you'll see printed:
+The agent takes 12-20 seconds to respond. On the first run there's an additional few seconds for schema loading (Glue Catalog + dbt catalog.json from S3). What the agent prints:
 
 - The SQL it generated
 - Every assumption it made ("'revenue' interpreted as the `total_price` column on completed orders")
@@ -721,7 +719,7 @@ python -m agent.main "How many unique customers placed orders in each country?"
 python -m agent.main "Is revenue growing or declining? Show me the trend."
 ```
 
-**What to look for in each response:**
+**What each response should show:**
 
 - The SQL should have a `WHERE` clause with a partition filter (e.g., `dt >= ...`): this confirms partition-aware query generation is working
 - The assumptions list should explain any interpretation decisions Claude made
@@ -732,13 +730,13 @@ python -m agent.main "Is revenue growing or declining? Show me the trend."
 
 **Step 6: Test multi-turn follow-up.**
 
-For multi-turn follow-up (where the agent remembers the previous question), you need the HTTP endpoint. That's covered in Track 2. The CLI mode (`python -m agent.main`) is single-turn only: each invocation is independent.
+For multi-turn follow-up (where the agent remembers the previous question), the HTTP endpoint is required. That's covered in Track 2. The CLI mode (`python -m agent.main`) is single-turn only: each invocation is independent.
 
 ---
 
 ### Track 2: Test the deployed ECS service
 
-Once Track 1 passes, this confirms the Docker image running on ECS Fargate is working. The ALB (Application Load Balancer) in front of the service is internal-only: it can't be reached from your browser directly. Instead, you use `aws ecs execute-command` to open a shell inside the running container and make HTTP requests from there.
+Once Track 1 passes, this confirms the Docker image running on ECS Fargate is working. The ALB (Application Load Balancer) in front of the service is internal-only: it can't be reached directly from a browser. Instead, I use `aws ecs execute-command` to open a shell inside the running container and make HTTP requests from there.
 
 **Step 1: Confirm the ECS service has a running task.**
 
@@ -752,7 +750,7 @@ aws ecs describe-services \
   --output json
 ```
 
-You want `running: 1`. If it shows `running: 0`, wait a minute and run it again. If it stays at zero, check the CloudWatch logs (Step 3).
+The expected result is `running: 1`. If it shows `running: 0`, wait a minute and run it again. If it stays at zero, check the CloudWatch logs (Step 3).
 
 **Step 2: Get the running task ID.**
 
@@ -791,15 +789,15 @@ aws ecs execute-command \
 
 Expected output: `{"status":"ok"}`
 
-If you get `SessionManagerPlugin is not found`, install it first:
+If `SessionManagerPlugin is not found`, install it first:
 
 ```bash
 brew install --cask session-manager-plugin
 ```
 
-**Step 4: Ask your first question to the ECS-deployed agent.**
+**Step 4: Ask a question to the ECS-deployed agent.**
 
-This is where you type your question. Replace `TASK_ID` with your task ID and replace the question text with anything you want to ask.
+Replace `TASK_ID` with the task ID from Step 2 and replace the question text as needed.
 
 ```bash
 aws ecs execute-command \
@@ -837,18 +835,18 @@ print('SESSION ID:', data['session_id'])
 
 The command takes 15-30 seconds. The agent is loading schemas from Glue, generating SQL with Claude, running the Athena query, and producing the insight.
 
-**What you'll see in the output:**
+**Output:**
 
-- `INSIGHT`: a 2-3 sentence plain-English answer to your question based on the actual data
+- `INSIGHT`: a 2-3 sentence plain-English answer based on the actual data
 - The assumptions list: what the agent interpreted (for example, "'revenue' means total price on completed orders only")
 - `BYTES SCANNED`: how much Athena data was read (should be small for Gold tables, under 10 MB)
 - `COST USD`: the Athena query cost (should be under $0.001)
-- `CHART URL`: an S3 presigned URL. Copy it and open it in your browser to see the chart image.
-- `SESSION ID`: copy this if you want to ask a follow-up question
+- `CHART URL`: an S3 presigned URL. Open it in a browser to see the chart image.
+- `SESSION ID`: copy this for follow-up questions
 
 **Step 5: Ask a follow-up question (multi-turn).**
 
-Copy the `SESSION ID` from Step 4 and paste it into this command as `YOUR_SESSION_ID`. The agent will remember the previous question and answer.
+Copy the `SESSION ID` from Step 4 and paste it in as `YOUR_SESSION_ID`. The agent remembers the previous question and answer.
 
 ```bash
 aws ecs execute-command \
@@ -913,13 +911,13 @@ For multi-turn follow-up, after question 2 ask: "Which month had the lowest volu
 
 ### What to do if something goes wrong
 
-**"Missing required environment variables"**: You forgot to `export $(grep -v '^#' .env | xargs)` before running the command, or a variable name is misspelled in your `.env` file.
+**"Missing required environment variables"**: The `export $(grep -v '^#' .env | xargs)` step was skipped, or a variable name is misspelled in `.env`.
 
-**"SchemaResolutionError: Glue Catalog unreachable"**: The infra isn't up, or your `dev-admin` profile doesn't have permission to call `glue:GetTables`. Confirm `terraform apply` completed successfully and the `edp_dev_gold` Glue database exists in the AWS console.
+**"SchemaResolutionError: Glue Catalog unreachable"**: The infra isn't up, or the `dev-admin` profile doesn't have permission to call `glue:GetTables`. Confirm `terraform apply` completed successfully and the `edp_dev_gold` Glue database exists in the AWS console.
 
 **"No tables found in Gold database"**: The MWAA pipeline hasn't run yet. Trigger `edp_pipeline` in the Airflow UI and wait for it to complete.
 
-**"ParameterNotFound: /edp/dev/anthropic_api_key"**: You skipped the SSM prerequisite step. Run the `aws ssm put-parameter` command from the Prerequisites section.
+**"ParameterNotFound: /edp/dev/anthropic_api_key"**: The SSM prerequisite step was skipped. Run the `aws ssm put-parameter` command from the Prerequisites section.
 
 **"AccessDenied on SSM GetParameter"**: The ECS task role doesn't have permission to read this SSM path. Confirm `terraform apply` ran successfully and the `analytics-agent` module is included.
 
@@ -955,7 +953,7 @@ GET  http://localhost:8080/health
 internal-edp-dev-agent-alb-753909442.eu-central-1.elb.amazonaws.com
 ```
 
-The ALB is intentionally internal-only. To reach it from outside the VPC you would need a bastion host or VPN tunnel. For dev testing, use ECS Exec as described in Track 2 above: it's simpler and doesn't require any additional infrastructure.
+The ALB is intentionally internal-only. Reaching it from outside the VPC requires a bastion host or VPN tunnel. For dev testing, ECS Exec as described in Track 2 is simpler and requires no additional infrastructure.
 
 ### IAM role permissions
 
@@ -1155,7 +1153,7 @@ Reliability, auditability, and a professional PDF output for non-technical stake
 What was built:
 
 - **Stakeholder PDF.** A 2-page report generated by fpdf2. Page 1 has KPI tiles (key numbers pulled from the result), the plain-English insight, and the chart. Page 2 has the methodology in plain English (no SQL, no table names, no technical identifiers). Army olive brand palette (`#4B5320`), geometric E logo mark, olive accent bars, CJK font support. The PDF is safe to hand to a non-technical executive.
-- **Engineer audit log.** A 17-column CSV written to `s3://{bronze_bucket}/metadata/engineer-log/date={date}/session={session_id}/{request_id}.csv` for every request. Columns: `session_id`, `request_id`, `timestamp_utc`, `question_asked`, `sql_executed`, `claude_interpretation`, `discrepancy_detail`, `verdict`, `bytes_scanned`, `athena_cost_usd`, `response_time_seconds`, `athena_query_execution_id`, `sql_retry_count`, `row_count_returned`, `chart_type_rendered`, `language`, `prompt_version`. The `prompt_version` column (e.g. `v1`) lets you filter the log by prompt version to compare verdict rates before and after a prompt change. A "Prepare Session Log" button in the sidebar fetches and merges all session rows from S3 into a single downloadable CSV.
+- **Engineer audit log.** A 17-column CSV written to `s3://{bronze_bucket}/metadata/engineer-log/date={date}/session={session_id}/{request_id}.csv` for every request. Columns: `session_id`, `request_id`, `timestamp_utc`, `question_asked`, `sql_executed`, `claude_interpretation`, `discrepancy_detail`, `verdict`, `bytes_scanned`, `athena_cost_usd`, `response_time_seconds`, `athena_query_execution_id`, `sql_retry_count`, `row_count_returned`, `chart_type_rendered`, `language`, `prompt_version`. The `prompt_version` column (e.g. `v1`) lets me filter the log by prompt version to compare verdict rates before and after a prompt change. A "Prepare Session Log" button in the sidebar fetches and merges all session rows from S3 into a single downloadable CSV.
 - **Verdict computation.** The pre-Athena intent check writes a `verdict` field (`Yes`/`No`) and a `discrepancy_detail` sentence to the response, audit log, and engineer log. If verdict is `Yes`, the SQL is regenerated once before Athena runs. The UI shows the final verdict as a badge in the Details expander.
 - **Circuit breaker.** A 30-second timeout on every Claude API call. Up to 3 attempts with 2s/5s/10s exponential backoff on transient errors (throttling, timeout). Semantic errors (table not found, permission denied) fail immediately with no retry.
 - **Rate limiter.** 10 requests per 60-second sliding window per `session_id`. Excess requests return HTTP 429 with a `retry_after_seconds` field. Implemented with `collections.deque` in-process: no Redis needed.
