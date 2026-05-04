@@ -1389,3 +1389,41 @@ This is the last component of the platform. The full pipeline is: PostgreSQL →
 ---
 
 **Full platform overview:** [platform-docs](https://github.com/enterprise-data-platform-emeka/platform-docs) has the complete build guide, architecture diagrams, design decisions, and step-by-step instructions for deploying the entire platform from scratch.
+
+---
+
+## Enterprise qualities
+
+### Resilience
+
+Two overlapping safeguards protect the platform from Claude API instability and runaway usage.
+
+**E3: Circuit breaker.** Every Claude API call in `agent/claude_client.py` has a hard 30-second timeout. If the call times out or hits a transient error (rate limit, connection reset), the client retries up to three times with 2s, 5s, and 10s backoff. Permanent errors (authentication failures, malformed requests) propagate immediately without retry. If all attempts fail, the endpoint returns a clean error message to the user. The ECS container never hangs waiting for an unresponsive API.
+
+**E4: Rate limiting.** `agent/main.py` enforces 10 requests per 60-second sliding window per `session_id`. Requests over the limit return HTTP 429 (Too Many Requests) with a message explaining when the next request will be accepted. The limiter uses an in-memory dictionary keyed by session ID, which is sufficient for a single-container deployment. At approximately $0.016 per question (Claude API plus Athena scan), uncontrolled request volume is the only runtime cost that can grow unexpectedly.
+
+---
+
+### Observability
+
+**O3: Request tracing.** Every `/ask` request generates a UUID (Universally Unique Identifier) at the top of the handler in `agent/main.py`. That `request_id` appears in:
+
+- The structured engineer log CSV written to `s3://{bronze}/metadata/engineer-log/date=.../session=.../{request_id}.csv`
+- The audit log entry written to `s3://{bronze}/metadata/agent-audit/`
+- All print statements inside the request handler
+
+When a question returns a wrong answer, I can search for the request ID across FastAPI logs, the S3 audit trail, and Athena query history to see exactly what happened at each step without guessing.
+
+---
+
+### Security
+
+- **SQL guardrails:** generated SQL is checked before execution. SELECT only, Gold database only, LIMIT always injected if absent, DDL keywords (`DROP`, `CREATE`, `INSERT`, `UPDATE`, `DELETE`, `ALTER`) rejected. A SQL injection attempt cannot escape these constraints.
+- **IAM read-only:** the ECS task role has `athena:StartQueryExecution` and `s3:GetObject` on Gold only, plus write access to the audit log and Athena results paths. It cannot read Silver or Bronze, and cannot write anywhere except those two paths.
+- **No credentials in the image:** AWS credentials come from the ECS task IAM role via the instance metadata service. The Docker image contains no keys, tokens, or secrets.
+
+---
+
+### Scalability
+
+**Not yet implemented: Request queuing (S2).** The `/ask` endpoint currently handles requests synchronously. A question holds a FastAPI worker thread open for the 5-15 seconds it takes Claude and Athena to respond. Under concurrent load, worker threads fill up and new requests receive connection errors rather than queuing. An SQS (Simple Queue Service) queue in front of `/ask` would accept the request immediately, return a job ID, and let the Streamlit UI poll for the result. Traffic spikes would produce a short queue backlog rather than dropped requests.
