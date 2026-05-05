@@ -200,6 +200,68 @@ The stakeholder never runs a command. They open a URL, type a question, and read
 
 ---
 
+### How the Slack interface works
+
+Slack uses the same analytics backend as the browser UI, but it enters through a
+different front door. The browser path is:
+
+```text
+Stakeholder -> AWS Load Balancer -> Streamlit UI -> FastAPI
+```
+
+The Slack path is:
+
+```text
+Stakeholder -> Slack -> Slack MCP Gateway -> FastAPI
+```
+
+Both paths reach the same FastAPI `/ask` endpoint, so both get the same SQL
+guardrails, intent check, Athena execution, chart logic, PDF report generation,
+and S3 audit logging.
+
+```mermaid
+flowchart LR
+    User["Stakeholder in Slack"]
+    Slack["Slack Workspace\nmessage or app mention"]
+    Gateway["Slack MCP Gateway\nECS Fargate + Socket Mode"]
+    API["Analytics Backend\nFastAPI"]
+    Claude["Claude API"]
+    Athena["Amazon Athena"]
+    Gold["S3 Gold\nbusiness mart tables"]
+    Audit["S3 Audit\nrequest log + reports"]
+
+    User --> Slack --> Gateway --> API
+    API --> Claude
+    API --> Athena --> Gold
+    API --> Audit
+    API --> Gateway --> Slack --> User
+```
+
+What each part achieves:
+
+1. **Stakeholder in Slack** keeps the experience where business users already
+   work. They ask a question in plain English instead of opening AWS or writing
+   SQL.
+2. **Slack Workspace** receives the message and sends it to the Slack app. Slack
+   is the chat system, not the analytics engine.
+3. **Slack MCP Gateway** translates between Slack events and the analytics API.
+   It handles app mentions, direct messages, Slack formatting, file uploads,
+   and thread replies.
+4. **Analytics Backend (FastAPI)** does the actual reasoning work. It generates
+   SQL, validates it, checks intent, runs Athena, builds charts, and writes logs.
+5. **Claude API** helps with language tasks: SQL generation, SQL intent
+   cross-checking, and the final written insight.
+6. **Amazon Athena** executes the validated SELECT query against the Gold data.
+7. **S3 Gold** stores the curated business tables produced by dbt. This is the
+   only data layer the agent queries.
+8. **S3 Audit** records what happened so an engineer can later inspect the
+   question, SQL, assumptions, scan cost, request ID, and report output.
+
+Slack is therefore an access layer, not a second analytics implementation. If a
+guardrail improves in FastAPI, both Streamlit and Slack benefit.
+
+---
+
 ### What each component does
 
 **AWS Load Balancer (ALB)**
