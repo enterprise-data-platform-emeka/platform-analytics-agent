@@ -2768,9 +2768,8 @@ def _render_turn(turn: dict, form_key: str) -> None:
     if kpi_tiles:
         n_tiles = len(kpi_tiles)
         # Single tile: cap width to ~33% so it doesn't span the full card width.
-        wrapper_style = (
-            'display:flex;gap:12px;margin:12px 0 4px 0;align-items:stretch;'
-            + ('max-width:34%;' if n_tiles == 1 else '')
+        wrapper_style = "display:flex;gap:12px;margin:12px 0 4px 0;align-items:stretch;" + (
+            "max-width:34%;" if n_tiles == 1 else ""
         )
         tiles_html = f'<div style="{wrapper_style}">'
         for metric_lbl, value, sub_lbl, badge in kpi_tiles:
@@ -2783,16 +2782,16 @@ def _render_turn(turn: dict, form_key: str) -> None:
             )
             tiles_html += (
                 f'<div style="flex:1;background:#f0f7ff;border-radius:8px;'
-                f'border-top:3px solid #4B5320;padding:12px 16px 10px 16px;'
+                f"border-top:3px solid #4B5320;padding:12px 16px 10px 16px;"
                 f'display:flex;flex-direction:column;">'
                 f'<div style="font-size:11px;color:#4B5320;font-weight:600;'
                 f'letter-spacing:0.05em;margin-bottom:4px">{metric_lbl.upper()}</div>'
                 f'<div style="font-size:22px;font-weight:700;color:#0f172a;'
                 f'line-height:1.1">{value}</div>'
                 f'<div style="font-size:12px;color:#64748b;margin-top:3px">{sub_lbl}</div>'
-                f'{badge_html}</div>'
+                f"{badge_html}</div>"
             )
-        tiles_html += '</div>'
+        tiles_html += "</div>"
         st.markdown(tiles_html, unsafe_allow_html=True)
 
     # Validation flags

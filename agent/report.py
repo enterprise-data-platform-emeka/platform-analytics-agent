@@ -47,6 +47,7 @@ _DEJAVU_BOLD_PATHS = [
 
 def _resolve_font() -> tuple[str, str | None, str | None]:
     import os
+
     reg = next((p for p in _DEJAVU_REG_PATHS if os.path.exists(p)), None)
     bold = next((p for p in _DEJAVU_BOLD_PATHS if os.path.exists(p)), None)
     if reg:
@@ -60,25 +61,27 @@ def _resolve_font() -> tuple[str, str | None, str | None]:
 
 # Unicode escapes keep the source file free of ambiguous smart-quote characters.
 _COMMON_REPLACEMENTS: dict[str, str] = {
-    "–": "-",    # en dash
-    "—": "--",   # em dash
-    "‘": "'",    # left single quotation mark
-    "’": "'",    # right single quotation mark
-    "“": '"',    # left double quotation mark
-    "”": '"',    # right double quotation mark
+    "–": "-",  # en dash
+    "—": "--",  # em dash
+    "‘": "'",  # left single quotation mark
+    "’": "'",  # right single quotation mark
+    "“": '"',  # left double quotation mark
+    "”": '"',  # right double quotation mark
     "…": "...",  # horizontal ellipsis
-    "•": "-",    # bullet
-    "·": ".",    # middle dot
+    "•": "-",  # bullet
+    "·": ".",  # middle dot
 }
 
 
 def _make_safe(font_name: str):  # type: ignore[return]
     """Return a text sanitizer matched to the active font."""
     if font_name != "Helvetica":
+
         def _safe_unicode(value: str) -> str:
             for src, dest in _COMMON_REPLACEMENTS.items():
                 value = value.replace(src, dest)
             return value
+
         return _safe_unicode
 
     def _safe_latin(value: str) -> str:
@@ -86,12 +89,14 @@ def _make_safe(font_name: str):  # type: ignore[return]
             value = value.replace(src, dest)
         value = value.replace("€", "EUR")  # euro sign -> EUR for Helvetica
         return "".join(ch if 0x20 <= ord(ch) <= 0xFF else "?" for ch in value)
+
     return _safe_latin
 
 
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+
 
 def build_pdf_report(report: ReportInput) -> bytes:
     """Build a single-page branded stakeholder PDF report.
@@ -107,13 +112,25 @@ def build_pdf_report(report: ReportInput) -> bytes:
 
     try:
         import zoneinfo
+
         _tz = zoneinfo.ZoneInfo("Europe/Berlin")
         _now = datetime.now(_tz)
-        _months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        _months = [
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+        ]
         generated = (
-            f"{_now.day:02d} {_months[_now.month - 1]} {_now.year},"
-            f" {_now.strftime('%H:%M %Z')}"
+            f"{_now.day:02d} {_months[_now.month - 1]} {_now.year}," f" {_now.strftime('%H:%M %Z')}"
         )
     except Exception:
         generated = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
@@ -203,6 +220,7 @@ def build_pdf_report(report: ReportInput) -> bytes:
 # Logo mark
 # ---------------------------------------------------------------------------
 
+
 def _draw_logo(pdf: Any, x: float, y: float, size: float) -> None:
     pdf.set_fill_color(75, 83, 32)
     pdf.rect(x, y, size, size, style="F")
@@ -229,16 +247,54 @@ def _draw_logo(pdf: Any, x: float, y: float, size: float) -> None:
 # ---------------------------------------------------------------------------
 
 _TIME_HINTS = {"year", "month", "date", "week", "quarter", "period"}
-_KPI_PRIORITY = {"revenue", "amount", "sales", "profit", "income", "spend", "price", "value", "payment"}
-_KPI_ANY = {"revenue", "total", "amount", "sales", "profit", "sum", "value", "orders", "avg", "average"}
+_KPI_PRIORITY = {
+    "revenue",
+    "amount",
+    "sales",
+    "profit",
+    "income",
+    "spend",
+    "price",
+    "value",
+    "payment",
+}
+_KPI_ANY = {
+    "revenue",
+    "total",
+    "amount",
+    "sales",
+    "profit",
+    "sum",
+    "value",
+    "orders",
+    "avg",
+    "average",
+}
 _KPI_COUNTS = {"count", "customers", "users", "visitors", "quantity", "qty"}
-_RANK_EXACT = frozenset({"rank", "position", "pos", "row_num", "row_number", "rn", "ntile", "dense_rank"})
-_MON_HINTS = {"revenue", "amount", "sales", "profit", "spend", "cost", "price", "income", "value", "payment", "volume", "lifetime"}
+_RANK_EXACT = frozenset(
+    {"rank", "position", "pos", "row_num", "row_number", "rn", "ntile", "dense_rank"}
+)
+_MON_HINTS = {
+    "revenue",
+    "amount",
+    "sales",
+    "profit",
+    "spend",
+    "cost",
+    "price",
+    "income",
+    "value",
+    "payment",
+    "volume",
+    "lifetime",
+}
 
 
 def _is_rank_col(col: str) -> bool:
     cl = col.lower()
-    return cl in _RANK_EXACT or cl.endswith("_rank") or cl.endswith("_position") or cl.endswith("_pos")
+    return (
+        cl in _RANK_EXACT or cl.endswith("_rank") or cl.endswith("_position") or cl.endswith("_pos")
+    )
 
 
 def _pick_metric(cols: list[str]) -> str:
@@ -272,8 +328,7 @@ def _fmt_val(val: str, col: str = "") -> str:
 
 
 def _fmt_period(val: str) -> str:
-    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     m = re.match(r"^(\d{4})-(\d{2})(?:-\d{2})?$", str(val).strip())
     if m:
         mo = int(m.group(2)) - 1
@@ -373,7 +428,11 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
             return _period_value(row, cat_col, _year_col, _month_col)
 
         is_time_cat = any(hint in cat_col.lower() for hint in _TIME_HINTS)
-        ordered_rows = sorted(rows, key=lambda row: _period_sort_value(_period_str(row))) if is_time_cat else rows
+        ordered_rows = (
+            sorted(rows, key=lambda row: _period_sort_value(_period_str(row)))
+            if is_time_cat
+            else rows
+        )
         display_row = ordered_rows[-1] if is_time_cat else rows[0]
 
         if is_time_cat:
@@ -453,6 +512,7 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
 # Drawing helpers
 # ---------------------------------------------------------------------------
 
+
 def _section(pdf: Any, title: str, font_name: str) -> None:
     pdf.set_font(font_name, "B", 11)
     pdf.set_text_color(75, 83, 32)
@@ -524,7 +584,9 @@ def _draw_chart(pdf: Any, report: ReportInput) -> None:
 
     if natural_h > max_h:
         embed_w = pdf.epw * (max_h / natural_h)
-        pdf.image(io.BytesIO(png_bytes), x=pdf.l_margin + (pdf.epw - embed_w) / 2, w=embed_w, h=max_h)
+        pdf.image(
+            io.BytesIO(png_bytes), x=pdf.l_margin + (pdf.epw - embed_w) / 2, w=embed_w, h=max_h
+        )
     else:
         pdf.image(io.BytesIO(png_bytes), x=pdf.l_margin, w=pdf.epw)
 
@@ -586,6 +648,7 @@ def _draw_snapshot(pdf: Any, report: ReportInput, font_name: str, safe: Any) -> 
 # ---------------------------------------------------------------------------
 # Text helpers
 # ---------------------------------------------------------------------------
+
 
 def _strip_markdown(value: str) -> str:
     return re.sub(r"\*{1,3}([^*\n]+)\*{1,3}", r"\1", value).replace("\r", "")
