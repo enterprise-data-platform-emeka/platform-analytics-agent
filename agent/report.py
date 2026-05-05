@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import io
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -73,7 +74,7 @@ _COMMON_REPLACEMENTS: dict[str, str] = {
 }
 
 
-def _make_safe(font_name: str):  # type: ignore[return]
+def _make_safe(font_name: str) -> Callable[[str], str]:
     """Return a text sanitizer matched to the active font."""
     if font_name != "Helvetica":
 
@@ -360,7 +361,9 @@ def _period_sort_value(value: str) -> tuple[int, str]:
     return (1, raw)
 
 
-def _period_value(row: dict, cat_col: str, year_col: str | None, month_col: str | None) -> str:
+def _period_value(
+    row: dict[str, str], cat_col: str, year_col: str | None, month_col: str | None
+) -> str:
     """Return a YYYY-MM-01 string from split year/month cols, else cat_col."""
     if year_col and month_col:
         y = str(row.get(year_col, "") or "")
@@ -370,7 +373,7 @@ def _period_value(row: dict, cat_col: str, year_col: str | None, month_col: str 
     return str(row.get(cat_col, ""))
 
 
-def _detect_period(columns: list[str], rows: list[dict]) -> str:
+def _detect_period(columns: list[str], rows: list[dict[str, str]]) -> str:
     if not rows:
         return ""
     time_cols = [col for col in columns if any(h in col.lower() for h in _TIME_HINTS)]
@@ -396,7 +399,9 @@ def _detect_period(columns: list[str], rows: list[dict]) -> str:
     return ""
 
 
-def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, str, str, str]]:
+def _extract_kpi_tiles(
+    columns: list[str], rows: list[dict[str, str]]
+) -> list[tuple[str, str, str, str]]:
     """Return up to 3 (label, value, sub_label, badge) KPI tuples."""
     if not rows or not columns:
         return []
@@ -424,7 +429,7 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
         _year_col = next((c for c in cat_cols if "year" in c.lower()), None)
         _month_col = next((c for c in cat_cols if "month" in c.lower() and c != _year_col), None)
 
-        def _period_str(row: dict) -> str:
+        def _period_str(row: dict[str, str]) -> str:
             return _period_value(row, cat_col, _year_col, _month_col)
 
         is_time_cat = any(hint in cat_col.lower() for hint in _TIME_HINTS)
