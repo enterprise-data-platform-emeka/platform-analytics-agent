@@ -182,7 +182,7 @@ sequenceDiagram
     API->>CL: Call 1: Generate SQL
     CL-->>API: SQL query
     API->>API: Validate SQL guardrails
-    API->>CL: Call 2: Infer SQL intent (SQL only; question withheld except language hint)
+    API->>CL: Call 2: Infer SQL intent (SQL only, question withheld except language hint)
     CL-->>API: Inferred SQL intent
     API->>CL: Call 3: Compare original question vs inferred intent
     CL-->>API: Yes/No mismatch verdict + discrepancy detail
@@ -244,7 +244,7 @@ sequenceDiagram
     API->>CL: Call 1: Generate SQL
     CL-->>API: SQL query + assumptions
     API->>API: Validate SQL guardrails
-    API->>CL: Call 2: Infer SQL intent (SQL only; question withheld except language hint)
+    API->>CL: Call 2: Infer SQL intent (SQL only, question withheld except language hint)
     CL-->>API: Inferred SQL intent
     API->>CL: Call 3: Compare original question vs inferred intent
     CL-->>API: Yes/No mismatch verdict + discrepancy detail
