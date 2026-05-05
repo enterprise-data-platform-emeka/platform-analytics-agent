@@ -138,7 +138,7 @@ def build_pdf_report(report: ReportInput) -> bytes:
 
     _fn = font_name
 
-    class PDFReport(FPDF):
+    class PDFReport(FPDF):  # type: ignore[misc, unused-ignore]
         def header(self) -> None:
             self.set_fill_color(75, 83, 32)
             self.rect(0, 0, self.w, 25, style="F")
