@@ -296,20 +296,48 @@ def _fmt_snap(val: str, col: str) -> str:
         return cleaned.title() if s == s.lower() else cleaned
 
 
+def _period_sort_value(value: str) -> tuple[int, str]:
+    """Return a stable sort key for YYYY-MM-ish values."""
+    raw = str(value).strip()
+    m = re.match(r"^(\d{4})-(\d{1,2})(?:-\d{1,2})?$", raw)
+    if m:
+        return (0, f"{int(m.group(1)):04d}-{int(m.group(2)):02d}")
+    return (1, raw)
+
+
+def _period_value(row: dict, cat_col: str, year_col: str | None, month_col: str | None) -> str:
+    """Return a YYYY-MM-01 string from split year/month cols, else cat_col."""
+    if year_col and month_col:
+        y = str(row.get(year_col, "") or "")
+        mo = str(row.get(month_col, "") or "")
+        if y.isdigit() and mo.isdigit():
+            return f"{y}-{mo.zfill(2)}-01"
+    return str(row.get(cat_col, ""))
+
+
 def _detect_period(columns: list[str], rows: list[dict]) -> str:
     if not rows:
         return ""
-    for col in columns:
-        if any(h in col.lower() for h in _TIME_HINTS):
-            first_v = str(rows[0].get(col, "")).strip()
-            last_v = str(rows[-1].get(col, "")).strip()
-            if re.match(r"^\d{4}", first_v):
-                first_fmt = _fmt_period(first_v)
-                last_fmt = _fmt_period(last_v)
-                if first_fmt and first_fmt != last_fmt:
-                    return f"{first_fmt} - {last_fmt}"
-                elif first_fmt:
-                    return first_fmt
+    time_cols = [col for col in columns if any(h in col.lower() for h in _TIME_HINTS)]
+    year_col = next((c for c in time_cols if "year" in c.lower()), None)
+    month_col = next((c for c in time_cols if "month" in c.lower() and c != year_col), None)
+
+    for col in time_cols:
+        values = [
+            _period_value(row, col, year_col, month_col)
+            for row in rows
+            if str(_period_value(row, col, year_col, month_col)).strip()
+        ]
+        date_values = [value for value in values if re.match(r"^\d{4}", str(value).strip())]
+        if not date_values:
+            continue
+        ordered = sorted(date_values, key=_period_sort_value)
+        first_fmt = _fmt_period(ordered[0])
+        last_fmt = _fmt_period(ordered[-1])
+        if first_fmt and first_fmt != last_fmt:
+            return f"{first_fmt} - {last_fmt}"
+        if first_fmt:
+            return first_fmt
     return ""
 
 
@@ -342,15 +370,11 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
         _month_col = next((c for c in cat_cols if "month" in c.lower() and c != _year_col), None)
 
         def _period_str(row: dict) -> str:
-            if _year_col and _month_col:
-                y = str(row.get(_year_col, "") or "")
-                mo = str(row.get(_month_col, "") or "")
-                if y.isdigit() and mo.isdigit():
-                    return f"{y}-{mo.zfill(2)}-01"
-            return str(row.get(cat_col, ""))
+            return _period_value(row, cat_col, _year_col, _month_col)
 
         is_time_cat = any(hint in cat_col.lower() for hint in _TIME_HINTS)
-        display_row = rows[-1] if is_time_cat else rows[0]
+        ordered_rows = sorted(rows, key=lambda row: _period_sort_value(_period_str(row))) if is_time_cat else rows
+        display_row = ordered_rows[-1] if is_time_cat else rows[0]
 
         if is_time_cat:
             top_cat = _fmt_period(_period_str(display_row))
@@ -362,10 +386,10 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
         top_val = _fmt_val(str(display_row.get(metric_col, "")), col=metric_col)
 
         badge = ""
-        if is_time_cat and len(rows) >= 2:
+        if is_time_cat and len(ordered_rows) >= 2:
             try:
-                cur = float(str(rows[-1].get(metric_col, 0) or 0).replace(",", ""))
-                prv = float(str(rows[-2].get(metric_col, 0) or 0).replace(",", ""))
+                cur = float(str(ordered_rows[-1].get(metric_col, 0) or 0).replace(",", ""))
+                prv = float(str(ordered_rows[-2].get(metric_col, 0) or 0).replace(",", ""))
                 if prv != 0:
                     pct = (cur - prv) / abs(prv) * 100
                     sign = "+" if pct >= 0 else ""
@@ -406,9 +430,9 @@ def _extract_kpi_tiles(columns: list[str], rows: list[dict]) -> list[tuple[str, 
             _base_col = re.sub(r"_total$", "", _base_col, flags=re.IGNORECASE)
             _base_label = _label(_base_col) if _base_col != metric_col else metric_label
             tile3_label = f"Total {_base_label} (All)"
-            if is_time_cat and len(rows) >= 2:
-                first_fmt = _fmt_period(_period_str(rows[0]))
-                last_fmt = _fmt_period(_period_str(rows[-1]))
+            if is_time_cat and len(ordered_rows) >= 2:
+                first_fmt = _fmt_period(_period_str(ordered_rows[0]))
+                last_fmt = _fmt_period(_period_str(ordered_rows[-1]))
                 tile3_sub = f"{first_fmt} - {last_fmt}"
             else:
                 tile3_sub = "All Entries"

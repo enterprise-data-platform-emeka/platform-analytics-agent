@@ -1881,6 +1881,13 @@ def _extract_kpi_tiles(
                 return f"{_months[mo]} {m.group(1)}"
         return val
 
+    def _period_sort_value(value: str) -> tuple[int, str]:
+        raw = str(value).strip()
+        m = re.match(r"^(\d{4})-(\d{1,2})(?:-\d{1,2})?$", raw)
+        if m:
+            return (0, f"{int(m.group(1)):04d}-{int(m.group(2)):02d}")
+        return (1, raw)
+
     # Priority hints for picking the primary KPI metric — mirrors charts.py logic.
     _kpi_priority = {
         "revenue",
@@ -1959,9 +1966,14 @@ def _extract_kpi_tiles(
             return str(row.get(cat_col, ""))
 
         is_time_cat = any(hint in cat_col.lower() for hint in _time_col_hints)
+        ordered_rows = (
+            sorted(rows, key=lambda row: _period_sort_value(_period_str(row)))
+            if is_time_cat
+            else rows
+        )
         # For time-series results, tile 0 shows the most-recent period (last row)
         # so the MoM badge is consistent with the value displayed.
-        display_row = rows[-1] if is_time_cat else rows[0]
+        display_row = ordered_rows[-1] if is_time_cat else rows[0]
         if is_time_cat:
             top_cat = _fmt_period(_period_str(display_row))
         else:
@@ -1973,10 +1985,10 @@ def _extract_kpi_tiles(
 
         # MoM badge: most-recent vs prior period for time-series results.
         badge = ""
-        if is_time_cat and len(rows) >= 2:
+        if is_time_cat and len(ordered_rows) >= 2:
             try:
-                cur = float(str(rows[-1].get(metric_col, 0) or 0).replace(",", ""))
-                prv = float(str(rows[-2].get(metric_col, 0) or 0).replace(",", ""))
+                cur = float(str(ordered_rows[-1].get(metric_col, 0) or 0).replace(",", ""))
+                prv = float(str(ordered_rows[-2].get(metric_col, 0) or 0).replace(",", ""))
                 if prv != 0:
                     pct = (cur - prv) / abs(prv) * 100
                     sign = "+" if pct >= 0 else ""
@@ -2028,9 +2040,9 @@ def _extract_kpi_tiles(
                 _translate_col(_base_col, lang) if _base_col != metric_col else metric_label
             )
             tile3_label = f"{_t('Total', lang)} {_base_label} ({_t('All', lang)})"
-            if is_time_cat and len(rows) >= 2:
-                first_fmt = _fmt_period(_period_str(rows[0]))
-                last_fmt = _fmt_period(_period_str(rows[-1]))
+            if is_time_cat and len(ordered_rows) >= 2:
+                first_fmt = _fmt_period(_period_str(ordered_rows[0]))
+                last_fmt = _fmt_period(_period_str(ordered_rows[-1]))
                 tile3_sub = f"{first_fmt} \u2013 {last_fmt}"
             else:
                 tile3_sub = _t("All Entries", lang)
@@ -2403,6 +2415,23 @@ def _cached_build_pdf(
                 return f"{_PDF_MONTHS[mo]} {m.group(1)}"
         return val
 
+    def _period_sort_value_pdf(value: str) -> tuple[int, str]:
+        raw = str(value).strip()
+        m = re.match(r"^(\d{4})-(\d{1,2})(?:-\d{1,2})?$", raw)
+        if m:
+            return (0, f"{int(m.group(1)):04d}-{int(m.group(2)):02d}")
+        return (1, raw)
+
+    def _period_value_pdf(row: dict, cat_col: str) -> str:
+        year_col = next((c for c in columns if "year" in c.lower()), None)
+        month_col = next((c for c in columns if "month" in c.lower() and c != year_col), None)
+        if year_col and month_col:
+            y = str(row.get(year_col, "") or "")
+            mo = str(row.get(month_col, "") or "")
+            if y.isdigit() and mo.isdigit():
+                return f"{y}-{mo.zfill(2)}-01"
+        return str(row.get(cat_col, ""))
+
     def _is_mon_col(col: str) -> bool:
         return any(h in col.lower() for h in _PDF_MON_HINTS)
 
@@ -2435,17 +2464,24 @@ def _cached_build_pdf(
     # Detect period range from any time-dimension column.
     period_label = ""
     if rows:
-        for _col in _pdf_cat:
+        for _col in columns:
             if any(h in _col.lower() for h in _PDF_TIME_HINTS):
-                first_v = str(rows[0].get(_col, "")).strip()
-                last_v = str(rows[-1].get(_col, "")).strip()
-                if re.match(r"^\d{4}", first_v):
-                    first_fmt = _fmt_period_pdf(first_v)
-                    last_fmt = _fmt_period_pdf(last_v)
-                    if first_fmt and first_fmt != last_fmt:
-                        period_label = f"{first_fmt} \u2013 {last_fmt}"
-                    elif first_fmt:
-                        period_label = first_fmt
+                values = [
+                    _period_value_pdf(row, _col)
+                    for row in rows
+                    if str(_period_value_pdf(row, _col)).strip()
+                ]
+                date_values = [value for value in values if re.match(r"^\d{4}", value.strip())]
+                if not date_values:
+                    continue
+                ordered = sorted(date_values, key=_period_sort_value_pdf)
+                first_fmt = _fmt_period_pdf(ordered[0])
+                last_fmt = _fmt_period_pdf(ordered[-1])
+                if first_fmt and first_fmt != last_fmt:
+                    period_label = f"{first_fmt} \u2013 {last_fmt}"
+                elif first_fmt:
+                    period_label = first_fmt
+                if period_label:
                     break
 
     # ════════════════════════════════════════════════════════════════════════

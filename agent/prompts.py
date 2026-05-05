@@ -204,10 +204,14 @@ date literals, CURRENT_DATE for today's date. Do not use MySQL-specific function
 CONCAT(CAST(order_year AS VARCHAR), '-', LPAD(CAST(order_month AS VARCHAR), 2, '0'), '-01'). \
 Never use bare CAST(order_month AS VARCHAR) directly in CONCAT for dates — it produces \
 non-zero-padded values like '2025-3-01' which break DATE comparisons.
-6. These are pre-aggregated Gold tables, not raw transaction tables. \
+6. For relative month windows on monthly_revenue_trend such as "last 12 months" \
+or "last year", anchor the window to the latest available order_year/order_month in \
+monthly_revenue_trend, not CURRENT_DATE. Include the latest available month plus the \
+previous N-1 months, and ORDER BY order_year, order_month ascending for trend results.
+7. These are pre-aggregated Gold tables, not raw transaction tables. \
 There is no raw orders, customers, or payments table — use the Gold aggregations directly.
-7. State every assumption you make about how the question maps to the data.
-8. Do NOT add extra metric columns the user did not ask for. If the question asks for \
+8. State every assumption you make about how the question maps to the data.
+9. Do NOT add extra metric columns the user did not ask for. If the question asks for \
 revenue, return revenue only — do not also return order count, unique customers, or any \
 other metric. If the question asks for a count, return the count only. \
 Do NOT add percentage or share columns unless explicitly requested. \
