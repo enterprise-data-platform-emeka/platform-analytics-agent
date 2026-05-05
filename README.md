@@ -64,13 +64,14 @@ flowchart TD
         Classify["classify_question()\nanalytical / conversational / retype"]
         GenerateSQL["Call 1: Generate SQL + Assumptions\nClaude API\nSchema already in system prompt"]
         ValidateSQL["validate_sql()\nsqlparse guardrails"]
-        IntentCheck["Call 2: Infer SQL intent\nClaude API - question withheld"]
-        Verdict{"Intent\nmatches?"}
+        IntentCheck["Call 2: Infer SQL intent\nClaude API - SQL only\nquestion withheld except language hint"]
+        VerdictCheck["Call 3: Compare original question\nvs inferred SQL intent\nClaude API verdict"]
+        Verdict{"Verdict says\nmismatch?"}
         Execute["execute_query()\nAthena SDK"]
         TrackCost["cost.py\nDataScannedInBytes to USD"]
         ValidateResults["validate_results()\nsanity checks"]
         RenderChart["render_chart()\nmatplotlib + Plotly"]
-        Summarise["Call 3: Generate Insight\nClaude API"]
+        Summarise["Call 4: Generate Insight\nClaude API"]
     end
 
     subgraph AWS ["AWS Data Platform"]
@@ -101,7 +102,8 @@ flowchart TD
     GenerateSQL --> ValidateSQL
     ValidateSQL -->|pass| IntentCheck
     ValidateSQL -->|fail: reason sent back| GenerateSQL
-    IntentCheck --> Verdict
+    IntentCheck --> VerdictCheck
+    VerdictCheck --> Verdict
     Verdict -->|mismatch: regenerate with feedback| GenerateSQL
     Verdict -->|matches| Execute
     Execute --> Athena
@@ -134,7 +136,7 @@ The UI has several features beyond a simple text box:
 
 - **Multilingual interface.** UI labels, section headings, placeholder text, and button labels are translated into eight scripts: Chinese (zh), Japanese (ja), Korean (ko), Arabic (ar), Russian (ru), Greek (el), Hebrew (he), and Thai (th). For Latin-script languages (Italian, French, Spanish, English, and others), Claude detects the language from the question text and replies in that language. The translation dictionaries cover 20+ string keys so the entire page feels native to the user's language, not just the answer.
 - **Numbered Q&A cards.** Each question-answer pair is rendered as a numbered card with a border, not a chat bubble. The card shows the question, the streaming insight, the chart (or table), and a collapsible "Query details" section with SQL, assumptions, scan cost, and a query intent check.
-- **Query intent check.** Before Athena runs, a second Claude call reads only the SQL (the question is withheld) and infers what business question the SQL is answering. The inferred intent is compared to the original question. If a genuine mismatch is detected, the SQL is regenerated once with the discrepancy as feedback before any Athena query runs, so no scan cost is spent on SQL that is already known to be wrong. The final verdict (match or mismatch with a one-line explanation) is shown as a badge in the UI and recorded in the engineer log.
+- **Query intent check.** Before Athena runs, Claude first reads only the SQL and infers what business question the SQL is answering. The original question is withheld from that call except for a small language hint. A separate Claude verdict call then compares the original question with the inferred SQL intent and returns a `Yes`/`No` mismatch verdict. If a genuine mismatch is detected, FastAPI regenerates the SQL once with the discrepancy as feedback before any Athena query runs, so no scan cost is spent on SQL that is already known to be wrong. The final verdict is shown as a badge in the UI and recorded in the engineer log.
 - **Chart/Table tabs.** Every result has two tabs: an interactive Plotly chart and a raw data table. The user can switch between them without re-running the query.
 - **PDF report download.** A "Download PDF" button generates a 2-page stakeholder report. Page 1 has the question, KPI tiles, the plain-English summary, and the chart. Page 2 has the plain-English methodology (assumptions rewritten without SQL, table names, or technical identifiers), plus a query intent cross-check. The PDF uses the army olive brand palette (`#4B5320`), includes a geometric E logo mark, a generation timestamp, and "Page X of Y" page numbers in the footer. CJK (Chinese, Japanese, Korean) scripts use the Noto CJK font installed in the Docker image so characters render correctly.
 - **Backend PDF report endpoint.** Non-browser clients such as the Slack MCP gateway can call `POST /report/pdf` with a completed `/ask` response and receive the branded PDF as base64. This keeps Slack report delivery on the same backend contract instead of rebuilding report logic in the gateway.
@@ -180,16 +182,20 @@ sequenceDiagram
     API->>CL: Call 1: Generate SQL
     CL-->>API: SQL query
     API->>API: Validate SQL guardrails
-    API->>CL: Call 2: Infer SQL intent (question withheld)
-    CL-->>API: Inferred intent + verdict
+    API->>CL: Call 2: Infer SQL intent<br/>(SQL only; question withheld except language hint)
+    CL-->>API: Inferred SQL intent
+    API->>CL: Call 3: Compare original question vs inferred intent
+    CL-->>API: Yes/No mismatch verdict + discrepancy detail
     loop Retry once on intent mismatch
         API->>CL: Regenerate SQL with correction detail
         CL-->>API: Corrected SQL query
-        API->>API: Validate SQL guardrails
+        API->>API: Validate corrected SQL guardrails
+        API->>CL: Re-infer corrected SQL intent for audit
+        CL-->>API: Corrected inferred SQL intent
     end
     API->>ATH: Run query against Gold tables
     ATH-->>API: Results: rows and columns
-    API->>CL: Call 3: Generate insight
+    API->>CL: Call 4: Generate insight
     CL-->>API: 2-3 sentence insight and chart title
     API->>S3: Write audit log
     API-->>UI: Returns insight, chart, cost, and verdict
@@ -238,17 +244,21 @@ sequenceDiagram
     API->>CL: Call 1: Generate SQL
     CL-->>API: SQL query + assumptions
     API->>API: Validate SQL guardrails
-    API->>CL: Call 2: Infer SQL intent (question withheld)
-    CL-->>API: Inferred intent + verdict
+    API->>CL: Call 2: Infer SQL intent<br/>(SQL only; question withheld except language hint)
+    CL-->>API: Inferred SQL intent
+    API->>CL: Call 3: Compare original question vs inferred intent
+    CL-->>API: Yes/No mismatch verdict + discrepancy detail
     loop Retry once on intent mismatch
         API->>CL: Regenerate SQL with correction detail
         CL-->>API: Corrected SQL query
-        API->>API: Validate SQL guardrails
+        API->>API: Validate corrected SQL guardrails
+        API->>CL: Re-infer corrected SQL intent for audit
+        CL-->>API: Corrected inferred SQL intent
     end
     API->>ATH: Run query against Gold tables
     ATH->>S3: Reads curated Gold data
     ATH-->>API: Results: rows and columns
-    API->>CL: Call 3: Generate insight
+    API->>CL: Call 4: Generate insight
     CL-->>API: 2-3 sentence insight and chart title
     API->>S3: Write audit log and chart/report artifacts
     API-->>Gateway: Returns insight, chart, cost, SQL, and verdict
@@ -347,7 +357,7 @@ Claude reads the question against the schema already in the system prompt and re
 
 ### Step 4: Pre-Athena intent check and retry
 
-Before running any Athena query, the agent checks that the generated SQL actually answers the original question. It makes a second Claude call passing only the SQL (the question is withheld) and asks Claude to infer what business question the SQL is answering. It then compares that inferred intent to the original question.
+Before running any Athena query, the agent checks that the generated SQL actually answers the original question. It makes a second Claude call passing only the SQL and asks Claude to infer what business question the SQL is answering. The original question is structurally withheld from this intent-inference call, except for a small language hint so the response uses the user's language. Then the agent makes a separate Claude verdict call with both the original question and the inferred SQL intent, and Claude returns a `Yes`/`No` mismatch verdict plus a one-sentence discrepancy detail.
 
 If a genuine mismatch is detected (wrong metric, wrong table, wrong filter), the SQL is regenerated once with the discrepancy detail as feedback. This retry happens before touching Athena, so no query cost or scan time is spent on SQL that's already known to be wrong. The loop runs at most once per question.
 
@@ -1227,7 +1237,7 @@ What was built:
 - **Streaming insight display.** The plain-English insight streams token-by-token as Claude generates it, so stakeholders see progress immediately instead of waiting for the full response.
 - **Status badges.** A spinner and coloured status badge show each pipeline step in real time (generating SQL, running query, generating insight).
 - **Chart/Table tabs.** Every result renders both an interactive Plotly chart and a raw data table via `st.tabs`. The user switches between them without re-running the query.
-- **Query intent check.** Before Athena runs, a second Claude call reads only the SQL (question withheld) and infers its business intent. If a mismatch with the original question is detected, the SQL is regenerated once with correction feedback before any query runs. The final verdict appears as a badge in the Details expander so stakeholders can see whether a correction was applied.
+- **Query intent check.** Before Athena runs, Claude first reads only the SQL and infers its business intent. The original question is withheld from that call except for a language hint. A separate Claude verdict call compares the original question with the inferred SQL intent. If a mismatch is detected, FastAPI regenerates the SQL once with correction feedback before any query runs. The final verdict appears as a badge in the Details expander so stakeholders can see whether a correction was applied.
 - **Multilingual interface.** Eight script-based translation dictionaries (Chinese, Japanese, Korean, Arabic, Russian, Greek, Hebrew, Thai) plus Claude-based language detection for Latin-script languages (Italian, French, Spanish, English, and others). All UI labels, headings, placeholders, and buttons translate automatically.
 - **Conversation export and import.** A sidebar button downloads the conversation as JSON. A file uploader restores it in a later session.
 - **Session sidebar.** Displays session start time and running question count.
@@ -1260,10 +1270,11 @@ The Gold layer is pre-aggregated. Each table directly answers a specific busines
 |---|---|
 | Claude call 1: schema already in prompt, generate SQL + assumptions | 6-10s |
 | SQL validation (local, sqlparse) | <0.1s |
+| Claude call 2: infer business intent from SQL only | 1-2s |
+| Claude call 3: compare original question vs inferred SQL intent | 1-2s |
 | Athena execution on small Gold table | <2s |
 | Result validation (local, pandas) | <0.1s |
-| Claude call 2: insight generation | 3-5s |
-| Claude call 3: verdict (infer question from SQL, compare to original) | 2-3s |
+| Claude call 4: insight generation | 3-5s |
 | Chart generation + S3 upload | 1-2s |
 | Audit log + engineer log write | 0.3s |
 | **Typical total** | **15-23 seconds** |
