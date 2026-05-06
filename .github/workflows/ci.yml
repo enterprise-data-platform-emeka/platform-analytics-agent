@@ -11,15 +11,29 @@ name: CI
 on:
   push:
     branches: ["main"]
-    paths-ignore:
-      - "README.md"
-      - "DEVELOPMENT.md"
-      - "docs/**"
+    paths:
+      - "agent/**"
+      - "ui/**"
+      - "tests/**"
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "entrypoint.sh"
+      - "Makefile"
+      - "requirements*.txt"
+      - "pyproject.toml"
+      - ".github/workflows/**"
   pull_request:
-    paths-ignore:
-      - "README.md"
-      - "DEVELOPMENT.md"
-      - "docs/**"
+    paths:
+      - "agent/**"
+      - "ui/**"
+      - "tests/**"
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "entrypoint.sh"
+      - "Makefile"
+      - "requirements*.txt"
+      - "pyproject.toml"
+      - ".github/workflows/**"
 
 jobs:
   quality:

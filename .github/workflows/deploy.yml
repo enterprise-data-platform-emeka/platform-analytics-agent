@@ -28,17 +28,11 @@ name: Deploy
 #   Environments: dev, staging, prod (created by terraform-github-setup)
 #
 # Triggers:
-#   - workflow_run (CI passes on main) -> auto deploys to dev
-#   - workflow_dispatch                -> manually deploys to staging or prod
+#   - workflow_dispatch -> manually deploys to the selected environment
 #
-# Promotion path: dev (auto) -> staging (manual) -> prod (manual)
+# Promotion path: dev (manual) -> staging (manual) -> prod (manual)
 
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
-    branches: [main]
-
   workflow_dispatch:
     inputs:
       environment:
@@ -52,10 +46,6 @@ jobs:
     name: Deploy to ${{ inputs.environment || 'dev' }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment || 'dev' }}
-
-    # When triggered by workflow_run, only proceed if CI actually passed.
-    # workflow_dispatch bypasses this check — manual deploys are intentional.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     permissions:
       # id-token: write is required for OIDC authentication to AWS.
