@@ -1898,7 +1898,8 @@ html, body, [class*="css"] {
     border-color: #4B5320 !important;
     box-shadow: 0 0 0 3px rgba(75,83,32,0.12) !important;
 }
-[data-testid="stForm"] .stButton > button {
+[data-testid="stForm"] .stButton > button,
+[data-testid="stFormSubmitButton"] > button {
     height: 48px !important;
     min-height: 48px !important;
     padding-top: 0 !important;
@@ -1906,6 +1907,8 @@ html, body, [class*="css"] {
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
+    width: 100% !important;
+    margin-top: 4px !important;
 }
 
 /* ── Divider ─────────────────────────────────────────────────────────────── */
@@ -3796,17 +3799,6 @@ with bar_logs:
                     key="top_download_log",
                     use_container_width=True,
                 )
-
-# ── Empty state — example questions ──────────────────────────────────────────
-if not st.session_state.history:
-    st.markdown(f"#### {_t('Try asking:', 'en')}")
-    example_questions = _load_examples()
-    col_a, col_b = st.columns(2)
-    for i, eq in enumerate(example_questions):
-        target_col = col_a if i % 2 == 0 else col_b
-        if target_col.button(eq, key=f"ex_{i}", use_container_width=True):
-            st.session_state.pending_question = eq
-            st.rerun()
 
 # ── Conversation history ──────────────────────────────────────────────────────
 # #1: Each turn is a numbered card, not a chat bubble.
