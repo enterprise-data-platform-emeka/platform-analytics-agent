@@ -1876,20 +1876,28 @@ html, body, [class*="css"] {
 }
 
 /* ── Chat input — match main content width ───────────────────────────────── */
-/* margin:auto doesn't centre position:fixed elements. The correct approach   */
-/* is to calculate left = (50vw - half-content-width) so the element sits     */
-/* over the same horizontal band as stMainBlockContainer (max-width 1160px).  */
-section[data-testid="stBottom"] {
-    left: max(2rem, calc(50vw - 580px)) !important;
+/* Streamlit has changed the fixed-bottom wrapper name across releases, so we */
+/* constrain both the known wrappers and the input itself. */
+section[data-testid="stBottom"],
+div[data-testid="stBottom"],
+[data-testid="stBottomBlockContainer"],
+.stChatFloatingInputContainer {
+    left: 50% !important;
     right: auto !important;
     width: min(1160px, calc(100vw - 4rem)) !important;
-    max-width: none !important;
+    max-width: 1160px !important;
+    transform: translateX(-50%) !important;
     margin: 0 !important;
-    padding: 0 !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
     box-sizing: border-box !important;
 }
 
 [data-testid="stChatInput"] {
+    width: min(1160px, calc(100vw - 4rem)) !important;
+    max-width: 1160px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
     border: 2px solid #cbd5e1 !important;
     border-radius: 10px !important;
     transition: border-color 0.15s !important;
@@ -1906,6 +1914,13 @@ hr { border-color: #e2e8f0 !important; }
     [data-testid="stMainBlockContainer"] {
         padding-left: 1rem;
         padding-right: 1rem;
+    }
+    section[data-testid="stBottom"],
+    div[data-testid="stBottom"],
+    [data-testid="stBottomBlockContainer"],
+    .stChatFloatingInputContainer,
+    [data-testid="stChatInput"] {
+        width: calc(100vw - 2rem) !important;
     }
     .edp-header {
         flex-wrap: wrap;
