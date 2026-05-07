@@ -1876,18 +1876,18 @@ html, body, [class*="css"] {
 }
 
 /* ── Chat input — constrain to same width as main content ───────────────── */
-/* stBottom is fixed-position full-width; centre its inner content to match   */
-/* the 1160px stMainBlockContainer so the input doesn't bleed edge-to-edge.  */
+/* stBottom is position:fixed full-viewport. Setting left:0/right:0 +         */
+/* max-width + margin:auto is the standard CSS pattern to centre a fixed      */
+/* element within the viewport, matching stMainBlockContainer's 1160px width. */
 section[data-testid="stBottom"] {
-    display: flex !important;
-    justify-content: center !important;
-    padding: 0 !important;
-}
-section[data-testid="stBottom"] > div {
+    left: 0 !important;
+    right: 0 !important;
     max-width: 1160px !important;
-    width: 100% !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
     padding-left: 2rem !important;
     padding-right: 2rem !important;
+    width: 100% !important;
     box-sizing: border-box !important;
 }
 
