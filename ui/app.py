@@ -2076,8 +2076,20 @@ def _threshold_filter_options(columns: list[str], rows: list[dict]) -> dict[str,
         cl = c.lower()
         return cl in _rank_exact or any(cl.endswith(s) for s in _rank_suffixes)
 
-    _metric_priority = ("revenue", "amount", "sales", "profit", "income", "spend",
-                        "value", "payment", "count", "total", "orders", "customers")
+    _metric_priority = (
+        "revenue",
+        "amount",
+        "sales",
+        "profit",
+        "income",
+        "spend",
+        "value",
+        "payment",
+        "count",
+        "total",
+        "orders",
+        "customers",
+    )
 
     numeric_candidates: list[tuple[int, str, float, float]] = []
     for col in columns:
@@ -2464,7 +2476,9 @@ def _extract_kpi_tiles(
                 for row in reversed(ordered_rows):
                     v = row.get(mc)
                     if v is not None and str(v).strip().lower() not in ("", "none", "null"):
-                        tiles.append((mc_label, _fmt(str(v), col=mc), _fmt_period(_period_str(row)), ""))
+                        tiles.append(
+                            (mc_label, _fmt(str(v), col=mc), _fmt_period(_period_str(row)), "")
+                        )
                         break
             return tiles
 
