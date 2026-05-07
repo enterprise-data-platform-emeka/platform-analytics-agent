@@ -1875,7 +1875,22 @@ html, body, [class*="css"] {
     color: #4B5320 !important;
 }
 
-/* ── Chat input ──────────────────────────────────────────────────────────── */
+/* ── Chat input — constrain to same width as main content ───────────────── */
+/* stBottom is fixed-position full-width; centre its inner content to match   */
+/* the 1160px stMainBlockContainer so the input doesn't bleed edge-to-edge.  */
+section[data-testid="stBottom"] {
+    display: flex !important;
+    justify-content: center !important;
+    padding: 0 !important;
+}
+section[data-testid="stBottom"] > div {
+    max-width: 1160px !important;
+    width: 100% !important;
+    padding-left: 2rem !important;
+    padding-right: 2rem !important;
+    box-sizing: border-box !important;
+}
+
 [data-testid="stChatInput"] {
     border: 2px solid #cbd5e1 !important;
     border-radius: 10px !important;
