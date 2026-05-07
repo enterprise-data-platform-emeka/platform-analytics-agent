@@ -1898,6 +1898,15 @@ html, body, [class*="css"] {
     border-color: #4B5320 !important;
     box-shadow: 0 0 0 3px rgba(75,83,32,0.12) !important;
 }
+[data-testid="stForm"] .stButton > button {
+    height: 48px !important;
+    min-height: 48px !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
 
 /* ── Divider ─────────────────────────────────────────────────────────────── */
 hr { border-color: #e2e8f0 !important; }
