@@ -11,9 +11,23 @@ set -e
 
 echo "Starting FastAPI backend on port 8080..."
 uvicorn agent.main:app --host 0.0.0.0 --port 8080 &
+FASTAPI_PID=$!
 
 echo "Waiting for FastAPI to be ready..."
+STARTED_AT=$(date +%s)
+STARTUP_TIMEOUT_SECONDS=${STARTUP_TIMEOUT_SECONDS:-180}
 until python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" > /dev/null 2>&1; do
+    if ! kill -0 "$FASTAPI_PID" > /dev/null 2>&1; then
+        echo "FastAPI exited before becoming healthy."
+        wait "$FASTAPI_PID"
+    fi
+    NOW=$(date +%s)
+    if [ $((NOW - STARTED_AT)) -ge "$STARTUP_TIMEOUT_SECONDS" ]; then
+        echo "FastAPI did not become healthy within ${STARTUP_TIMEOUT_SECONDS}s."
+        kill "$FASTAPI_PID" > /dev/null 2>&1 || true
+        wait "$FASTAPI_PID" || true
+        exit 1
+    fi
     sleep 1
 done
 echo "FastAPI is ready."
