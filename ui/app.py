@@ -3959,3 +3959,4 @@ if question:
             }
             _render_turn(turn, form_key="current", turn_number=n)
             st.session_state.history.append(turn)
+            st.rerun()
