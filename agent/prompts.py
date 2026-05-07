@@ -204,10 +204,15 @@ date literals, CURRENT_DATE for today's date. Do not use MySQL-specific function
 CONCAT(CAST(order_year AS VARCHAR), '-', LPAD(CAST(order_month AS VARCHAR), 2, '0'), '-01'). \
 Never use bare CAST(order_month AS VARCHAR) directly in CONCAT for dates — it produces \
 non-zero-padded values like '2025-3-01' which break DATE comparisons.
-6. For relative month windows on monthly_revenue_trend such as "last 12 months" \
-or "last year", anchor the window to the latest available order_year/order_month in \
-monthly_revenue_trend, not CURRENT_DATE. Include the latest available month plus the \
-previous N-1 months, and ORDER BY order_year, order_month ascending for trend results.
+6. For relative month windows such as "last 12 months" or "last year", anchor the window \
+to the latest available month in the table, not CURRENT_DATE. Find the latest month by \
+taking MAX of the full date expression — never compute MAX(order_year) and MAX(order_month) \
+independently, as they return the highest year and highest month number across all rows, not \
+the year and month of the latest row. Use this pattern: \
+WITH latest AS (SELECT MAX(DATE(CONCAT(CAST(order_year AS VARCHAR), '-', \
+LPAD(CAST(order_month AS VARCHAR), 2, '0'), '-01'))) AS max_date FROM <table>), \
+then filter rows WHERE DATE(CONCAT(...)) BETWEEN DATE_ADD('month', -(N-1), max_date) \
+AND max_date. ORDER BY order_year, order_month ASC for trend results.
 7. These are pre-aggregated Gold tables, not raw transaction tables. \
 There is no raw orders, customers, or payments table — use the Gold aggregations directly.
 8. State every assumption you make about how the question maps to the data.
