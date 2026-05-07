@@ -67,6 +67,7 @@ def test_time_series_kpis_use_latest_and_prior_chronologically() -> None:
 def test_sql_prompt_anchors_relative_month_windows_to_latest_available_month() -> None:
     prompt = build_system_prompt(schemas={}, gold_database="edp_dev_gold")
 
-    assert "anchor the window to the latest available order_year/order_month" in prompt
+    assert "anchor the window to the latest available month in the table" in prompt
     assert "not CURRENT_DATE" in prompt
-    assert "ORDER BY order_year, order_month ascending" in prompt
+    assert "never compute MAX(order_year) and MAX(order_month) independently" in prompt
+    assert "ORDER BY order_year, order_month ASC" in prompt
