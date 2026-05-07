@@ -231,7 +231,7 @@ _PIE_HINTS: frozenset[str] = frozenset(
 # Olive-family colour palette for multi-series charts (pie slices, multi-line traces).
 _OLIVE_PALETTE: list[str] = [
     "#4B5320",  # brand olive (darkest)
-    "#6B7A3F",
+    "#94A3B8",  # muted slate — clear contrast for 2-series comparisons
     "#8B9A5B",
     "#A8BA7A",
     "#C8D4A8",

@@ -2060,44 +2060,59 @@ def _time_filter_options(columns: list[str], rows: list[dict]) -> dict[str, Any]
     return None
 
 
-def _category_filter_options(columns: list[str], rows: list[dict]) -> dict[str, Any] | None:
-    """Return one category filter when a result has a natural categorical dimension."""
+def _threshold_filter_options(columns: list[str], rows: list[dict]) -> dict[str, Any] | None:
+    """Return a numeric minimum-threshold filter for bar/ranking results.
+
+    Lets the user filter to rows where the primary metric exceeds a chosen value,
+    which is more actionable than picking a category already visible in the chart.
+    """
     if len(rows) < 2:
         return None
 
-    def _looks_numeric(value: Any) -> bool:
-        try:
-            float(str(value).replace(",", "").replace("€", "").replace("$", ""))
-            return True
-        except (TypeError, ValueError):
-            return False
+    _rank_suffixes = ("_rank", "_position", "_pos")
+    _rank_exact = frozenset({"rank", "position", "pos", "row_num", "row_number", "rn"})
 
-    candidates: list[tuple[int, str, list[str]]] = []
+    def _is_rank(c: str) -> bool:
+        cl = c.lower()
+        return cl in _rank_exact or any(cl.endswith(s) for s in _rank_suffixes)
+
+    _metric_priority = ("revenue", "amount", "sales", "profit", "income", "spend",
+                        "value", "payment", "count", "total", "orders", "customers")
+
+    numeric_candidates: list[tuple[int, str, float, float]] = []
     for col in columns:
         col_l = col.lower()
-        if any(hint in col_l for hint in _FILTER_TIME_HINTS):
+        if any(hint in col_l for hint in _FILTER_TIME_HINTS) or _is_rank(col):
             continue
-        values = [str(row.get(col, "") or "").strip() for row in rows]
-        values = [v for v in values if v]
-        unique_values = sorted(set(values))
-        if not (2 <= len(unique_values) <= 30):
+        float_vals: list[float] = []
+        for row in rows:
+            raw = str(row.get(col, "") or "").strip()
+            if not raw or raw.lower() in ("none", "null"):
+                continue
+            try:
+                float_vals.append(float(raw.replace(",", "").replace("€", "").replace("$", "")))
+            except (ValueError, TypeError):
+                pass
+        if len(float_vals) < 2:
             continue
-        if values and sum(1 for v in values if _looks_numeric(v)) / len(values) > 0.5:
+        mn, mx = min(float_vals), max(float_vals)
+        if mn == mx:
             continue
         priority = next(
-            (idx for idx, hint in enumerate(_FILTER_CATEGORY_PRIORITY) if hint in col_l),
-            len(_FILTER_CATEGORY_PRIORITY),
+            (i for i, hint in enumerate(_metric_priority) if hint in col_l),
+            len(_metric_priority),
         )
-        candidates.append((priority, col, unique_values))
+        numeric_candidates.append((priority, col, mn, mx))
 
-    if not candidates:
+    if not numeric_candidates:
         return None
-    _, col, values = sorted(candidates, key=lambda item: (item[0], columns.index(item[1])))[0]
+    _, col, mn, mx = sorted(numeric_candidates, key=lambda x: (x[0], columns.index(x[1])))[0]
     return {
-        "kind": "category",
+        "kind": "threshold",
         "column": col,
         "label": _pretty_col_label(col),
-        "options": values,
+        "min": mn,
+        "max": mx,
     }
 
 
@@ -2109,7 +2124,7 @@ def _result_filter_options(turn: dict) -> dict[str, Any] | None:
     rows = turn.get("rows", []) or []
     if not columns or not rows:
         return None
-    return _time_filter_options(columns, rows) or _category_filter_options(columns, rows)
+    return _time_filter_options(columns, rows) or _threshold_filter_options(columns, rows)
 
 
 def _filter_followup_question(turn: dict, filter_info: dict[str, Any], selection: Any) -> str:
@@ -2126,12 +2141,13 @@ def _filter_followup_question(turn: dict, filter_info: dict[str, Any], selection
             f"Original question: {original}"
         )
 
-    value = str(selection)
     label = str(filter_info["label"])
+    threshold = float(selection)
     return (
-        "Re-run this original analytics question with the same metric, grouping, sorting, "
-        f"and chart style, but filter the result to {label} = {value}. Do not base the "
-        f"filter on a later conversation turn. Original question: {original}"
+        "Re-run this original analytics question with the same grouping, sorting, "
+        f"and chart style, but only include rows where {label} is at least "
+        f"{threshold:,.0f}. Do not base the filter on a later conversation turn. "
+        f"Original question: {original}"
     )
 
 
@@ -2140,7 +2156,7 @@ def _filter_context_label(filter_info: dict[str, Any], selection: Any) -> str:
     if filter_info["kind"] == "time":
         start_item, end_item = selection
         return f"{start_item[1]} through {end_item[1]}"
-    return f"{filter_info['label']} = {selection}"
+    return f"{filter_info['label']} ≥ {float(selection):,.0f}"
 
 
 def _latest_period_label(columns: list[str], rows: list[dict]) -> str:
@@ -2221,6 +2237,7 @@ def _render_refinement_filter(turn: dict, form_key: str, turn_number: int | None
                     key=f"filter_end_{form_key}",
                 )
             with c3:
+                st.markdown('<div style="height:28px"></div>', unsafe_allow_html=True)
                 submitted = st.form_submit_button("Apply", use_container_width=True)
         if submitted:
             start_idx = labels.index(start_label)
@@ -2244,23 +2261,32 @@ def _render_refinement_filter(turn: dict, form_key: str, turn_number: int | None
             st.rerun()
         return
 
-    values = filter_info["options"]
-    with st.form(f"filter_category_{form_key}"):
-        c1, c2 = st.columns([2, 0.8])
+    mn, mx = filter_info["min"], filter_info["max"]
+    step = max(1.0, round((mx - mn) / 100, 2))
+    with st.form(f"filter_threshold_{form_key}"):
+        c1, c2 = st.columns([2.5, 0.8])
         with c1:
-            selected = st.selectbox(filter_info["label"], values, key=f"filter_value_{form_key}")
+            threshold = st.slider(
+                f"Minimum {filter_info['label']}",
+                min_value=float(mn),
+                max_value=float(mx),
+                value=float(mn),
+                step=float(step),
+                key=f"filter_threshold_{form_key}",
+            )
         with c2:
+            st.markdown('<div style="height:28px"></div>', unsafe_allow_html=True)
             submitted = st.form_submit_button("Apply", use_container_width=True)
     if submitted:
         st.session_state.pending_question = _filter_followup_question(
             turn,
             filter_info,
-            selected,
+            threshold,
         )
         st.session_state.pending_filter_context = {
             "source_turn": turn_number,
             "source_question": turn.get("question", ""),
-            "filter_label": _filter_context_label(filter_info, selected),
+            "filter_label": _filter_context_label(filter_info, threshold),
         }
         st.rerun()
 
@@ -2293,6 +2319,13 @@ def _extract_kpi_tiles(
             cat_cols.append(col)
             continue
         raw = str(rows[0].get(col, "") or "")
+        # Scan past leading NULLs (e.g. LEFT JOIN comparisons with sparse current-year data).
+        if not raw or raw.lower() in ("none", "null"):
+            for _r in rows:
+                _cand = str(_r.get(col, "") or "").strip()
+                if _cand and _cand.lower() not in ("none", "null"):
+                    raw = _cand
+                    break
         try:
             float(raw.replace(",", "").replace("$", ""))
             numeric_cols.append(col)
@@ -2423,6 +2456,18 @@ def _extract_kpi_tiles(
             if is_time_cat
             else rows
         )
+        # Multi-metric time series (e.g. year-over-year comparison): one tile per metric
+        # showing each metric's latest non-null value. Skip the normal single-metric path.
+        if is_time_cat and len(numeric_cols) > 1:
+            for mc in numeric_cols[:3]:
+                mc_label = _translate_col(mc, lang)
+                for row in reversed(ordered_rows):
+                    v = row.get(mc)
+                    if v is not None and str(v).strip().lower() not in ("", "none", "null"):
+                        tiles.append((mc_label, _fmt(str(v), col=mc), _fmt_period(_period_str(row)), ""))
+                        break
+            return tiles
+
         # For time-series results, tile 0 shows the most-recent period (last row)
         # so the MoM badge is consistent with the value displayed.
         display_row = ordered_rows[-1] if is_time_cat else rows[0]
@@ -3212,8 +3257,6 @@ def _render_turn(turn: dict, form_key: str, turn_number: int | None = None) -> N
         unsafe_allow_html=True,
     )
 
-    _render_source_and_governance(turn)
-
     _render_refinement_filter(turn, form_key=form_key, turn_number=turn_number)
 
     # KPI tiles — single flex row so all cards stretch to equal height automatically.
@@ -3268,6 +3311,8 @@ def _render_turn(turn: dict, form_key: str, turn_number: int | None = None) -> N
                 st.markdown(_branded_table_html(df), unsafe_allow_html=True)
         else:
             components.html(turn["html_chart"], height=chart_h + 20, scrolling=False)
+
+    _render_source_and_governance(turn)
 
     # #2: One row of action buttons. Download is a direct button; email toggles
     # an inline form via session state so the user doesn't need to hunt for it.
