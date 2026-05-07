@@ -1884,9 +1884,15 @@ html, body, [class*="css"] {
 [data-testid="stTextInput"] input {
     border: 2px solid #cbd5e1 !important;
     border-radius: 10px !important;
-    min-height: 56px !important;
+    height: 48px !important;
+    line-height: 48px !important;
+    box-sizing: border-box !important;
     font-size: 15px !important;
     transition: border-color 0.15s !important;
+}
+[data-testid="stTextInput"] [data-baseweb="input"] {
+    min-height: 48px !important;
+    overflow: visible !important;
 }
 [data-testid="stTextInput"] input:focus {
     border-color: #4B5320 !important;
