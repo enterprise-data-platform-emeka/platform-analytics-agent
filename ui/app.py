@@ -1875,34 +1875,20 @@ html, body, [class*="css"] {
     color: #4B5320 !important;
 }
 
-/* ── Chat input — match main content width ───────────────────────────────── */
-/* Streamlit has changed the fixed-bottom wrapper name across releases, so we */
-/* constrain both the known wrappers and the input itself. */
-section[data-testid="stBottom"],
-div[data-testid="stBottom"],
-[data-testid="stBottomBlockContainer"],
-.stChatFloatingInputContainer {
-    left: 50% !important;
-    right: auto !important;
-    width: min(1160px, calc(100vw - 4rem)) !important;
-    max-width: 1160px !important;
-    transform: translateX(-50%) !important;
-    margin: 0 !important;
-    padding-left: 0 !important;
-    padding-right: 0 !important;
-    box-sizing: border-box !important;
+/* ── Question form ───────────────────────────────────────────────────────── */
+[data-testid="stForm"] {
+    border: none !important;
+    padding: 0 !important;
+    background: transparent !important;
 }
-
-[data-testid="stChatInput"] {
-    width: min(1160px, calc(100vw - 4rem)) !important;
-    max-width: 1160px !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
+[data-testid="stTextInput"] input {
     border: 2px solid #cbd5e1 !important;
     border-radius: 10px !important;
+    min-height: 56px !important;
+    font-size: 15px !important;
     transition: border-color 0.15s !important;
 }
-[data-testid="stChatInput"]:focus-within {
+[data-testid="stTextInput"] input:focus {
     border-color: #4B5320 !important;
     box-shadow: 0 0 0 3px rgba(75,83,32,0.12) !important;
 }
@@ -1914,13 +1900,6 @@ hr { border-color: #e2e8f0 !important; }
     [data-testid="stMainBlockContainer"] {
         padding-left: 1rem;
         padding-right: 1rem;
-    }
-    section[data-testid="stBottom"],
-    div[data-testid="stBottom"],
-    [data-testid="stBottomBlockContainer"],
-    .stChatFloatingInputContainer,
-    [data-testid="stChatInput"] {
-        width: calc(100vw - 2rem) !important;
     }
     .edp-header {
         flex-wrap: wrap;
@@ -3820,8 +3799,21 @@ for idx, turn in enumerate(st.session_state.history):
     _render_card(turn, turn_number=idx + 1, form_key=str(idx))
 
 # ── Question input ────────────────────────────────────────────────────────────
-chat_question = st.chat_input("Ask a question about your data...")
-question = chat_question or st.session_state.pending_question
+typed_question = ""
+with st.form("question_form", clear_on_submit=True):
+    input_col, submit_col = st.columns([10, 1])
+    with input_col:
+        typed_question = st.text_input(
+            "Ask a question about your data",
+            placeholder="Ask a question about your data...",
+            label_visibility="collapsed",
+        )
+    with submit_col:
+        submitted_question = st.form_submit_button("Ask", use_container_width=True)
+
+question = (
+    typed_question.strip() if submitted_question else ""
+) or st.session_state.pending_question
 filter_context = (
     st.session_state.pending_filter_context if st.session_state.pending_question else None
 )
