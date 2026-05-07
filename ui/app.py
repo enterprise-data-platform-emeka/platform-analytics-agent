@@ -1494,6 +1494,7 @@ st.set_page_config(
     page_title="EDP Analytics Agent",
     page_icon="📊",
     layout="centered",
+    initial_sidebar_state="expanded",
 )
 
 # ── Custom CSS ────────────────────────────────────────────────────────────────
@@ -1501,11 +1502,29 @@ st.markdown(
     """
 <style>
 /* ── Reset Streamlit chrome ─────────────────────────────────────────────── */
-header[data-testid="stHeader"]  { display: none !important; }
+header[data-testid="stHeader"]  {
+    background: transparent !important;
+    box-shadow: none !important;
+}
 [data-testid="stToolbar"]        { display: none !important; }
 [data-testid="stDecoration"]     { display: none !important; }
 #MainMenu                        { display: none !important; }
 footer                           { display: none !important; }
+
+/* Keep Streamlit's sidebar restore control visible even when the sidebar is collapsed. */
+[data-testid="stSidebarCollapsedControl"] {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    position: fixed !important;
+    top: 10px !important;
+    left: 10px !important;
+    z-index: 999999 !important;
+    background: #ffffff !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 8px !important;
+    box-shadow: 0 2px 8px rgba(15,23,42,0.12) !important;
+}
 
 /* ── Global typography ──────────────────────────────────────────────────── */
 html, body, [class*="css"] {
@@ -1667,6 +1686,29 @@ html, body, [class*="css"] {
     margin: 6px 0;
 }
 
+/* ── Answer refinement filter ────────────────────────────────────────────── */
+.refine-panel {
+    background: #ffffff;
+    border: 1px solid #d9dfc4;
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin: 4px 0 14px 0;
+}
+.refine-title {
+    color: #4B5320;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+.refine-caption {
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.4;
+    margin-bottom: 8px;
+}
+
 /* ── Tabs ────────────────────────────────────────────────────────────────── */
 .stTabs [data-baseweb="tab-list"] {
     border-bottom: 2px solid #e2e8f0 !important;
@@ -1811,6 +1853,252 @@ def _clean_insight_stream(text: str) -> str:
     text = re.sub(r"<[^>]*$", "", text)
     text = re.sub(r"<[^>]+>", "", text)
     return text.strip()
+
+
+_FILTER_TIME_HINTS = ("date", "month", "week", "quarter", "year", "period")
+_FILTER_CATEGORY_PRIORITY = (
+    "country",
+    "product",
+    "category",
+    "brand",
+    "carrier",
+    "payment_method",
+    "payment",
+    "customer",
+    "region",
+    "status",
+    "method",
+)
+
+
+def _pretty_col_label(col: str) -> str:
+    """Return a stakeholder-friendly label for a result column."""
+    return re.sub(r"\s+", " ", col.replace("_", " ")).strip().title()
+
+
+def _parse_period_value(value: Any) -> tuple[tuple[int, str], str] | None:
+    """Parse common Athena period values into a stable sort key and label."""
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+
+    m = re.match(r"^(\d{4})-(\d{1,2})(?:-\d{1,2})?$", raw)
+    if m:
+        year = int(m.group(1))
+        month = int(m.group(2))
+        if 1 <= month <= 12:
+            label = datetime(year, month, 1).strftime("%b %Y")
+            return ((year, f"{month:02d}"), label)
+
+    m = re.match(r"^(\d{4})[-\s]?Q([1-4])$", raw, flags=re.IGNORECASE)
+    if m:
+        year = int(m.group(1))
+        quarter = int(m.group(2))
+        return ((year, f"Q{quarter}"), f"Q{quarter} {year}")
+
+    m = re.match(r"^(\d{4})$", raw)
+    if m:
+        year = int(m.group(1))
+        return ((year, "00"), str(year))
+
+    return None
+
+
+def _time_filter_options(columns: list[str], rows: list[dict]) -> dict[str, Any] | None:
+    """Return period range options when a result has a usable time dimension."""
+    if len(rows) < 2:
+        return None
+
+    lower_cols = {c.lower(): c for c in columns}
+    year_col = next((c for c in columns if "year" in c.lower()), None)
+    month_col = next((c for c in columns if "month" in c.lower() and c != year_col), None)
+    if year_col and month_col:
+        parsed: list[tuple[tuple[int, str], str, str, str]] = []
+        for row in rows:
+            year = str(row.get(year_col, "") or "").strip()
+            month = str(row.get(month_col, "") or "").strip()
+            if year.isdigit() and month.isdigit():
+                parsed_value = _parse_period_value(f"{year}-{month.zfill(2)}")
+                if parsed_value:
+                    sort_key, label = parsed_value
+                    parsed.append((sort_key, label, f"{year}-{month.zfill(2)}", "period"))
+        if len(parsed) >= 2:
+            seen: dict[str, tuple[tuple[int, str], str, str, str]] = {}
+            for item in parsed:
+                seen[item[2]] = item
+            options = sorted(seen.values(), key=lambda item: item[0])
+            return {
+                "kind": "time",
+                "column": "period",
+                "label": "Period",
+                "options": options,
+            }
+
+    for col in columns:
+        if not any(hint in col.lower() for hint in _FILTER_TIME_HINTS):
+            continue
+        parsed = []
+        for row in rows:
+            raw = str(row.get(col, "") or "").strip()
+            parsed_value = _parse_period_value(raw)
+            if parsed_value:
+                sort_key, label = parsed_value
+                parsed.append((sort_key, label, raw, col))
+        if len(parsed) >= 2:
+            seen = {}
+            for item in parsed:
+                seen[item[2]] = item
+            options = sorted(seen.values(), key=lambda item: item[0])
+            return {
+                "kind": "time",
+                "column": col,
+                "label": _pretty_col_label(col),
+                "options": options,
+            }
+
+    # Avoid a linter false-positive if future edits use the lower-case lookup.
+    _ = lower_cols
+    return None
+
+
+def _category_filter_options(columns: list[str], rows: list[dict]) -> dict[str, Any] | None:
+    """Return one category filter when a result has a natural categorical dimension."""
+    if len(rows) < 2:
+        return None
+
+    def _looks_numeric(value: Any) -> bool:
+        try:
+            float(str(value).replace(",", "").replace("€", "").replace("$", ""))
+            return True
+        except (TypeError, ValueError):
+            return False
+
+    candidates: list[tuple[int, str, list[str]]] = []
+    for col in columns:
+        col_l = col.lower()
+        if any(hint in col_l for hint in _FILTER_TIME_HINTS):
+            continue
+        values = [str(row.get(col, "") or "").strip() for row in rows]
+        values = [v for v in values if v]
+        unique_values = sorted(set(values))
+        if not (2 <= len(unique_values) <= 30):
+            continue
+        if values and sum(1 for v in values if _looks_numeric(v)) / len(values) > 0.5:
+            continue
+        priority = next(
+            (idx for idx, hint in enumerate(_FILTER_CATEGORY_PRIORITY) if hint in col_l),
+            len(_FILTER_CATEGORY_PRIORITY),
+        )
+        candidates.append((priority, col, unique_values))
+
+    if not candidates:
+        return None
+    _, col, values = sorted(candidates, key=lambda item: (item[0], columns.index(item[1])))[0]
+    return {
+        "kind": "category",
+        "column": col,
+        "label": _pretty_col_label(col),
+        "options": values,
+    }
+
+
+def _result_filter_options(turn: dict) -> dict[str, Any] | None:
+    """Pick exactly one useful refinement filter for an analytical result."""
+    if not turn.get("sql"):
+        return None
+    columns = turn.get("columns", []) or []
+    rows = turn.get("rows", []) or []
+    if not columns or not rows:
+        return None
+    return _time_filter_options(columns, rows) or _category_filter_options(columns, rows)
+
+
+def _filter_followup_question(turn: dict, filter_info: dict[str, Any], selection: Any) -> str:
+    """Build a follow-up question that asks FastAPI to regenerate the filtered result."""
+    original = str(turn.get("question", "")).strip()
+    if filter_info["kind"] == "time":
+        start_item, end_item = selection
+        start_label = start_item[1]
+        end_label = end_item[1]
+        return (
+            "Re-run this original analytics question with the same metric, grouping, sorting, "
+            f"and chart style, but restrict the result to the period from {start_label} "
+            f"through {end_label}. Do not base the filter on a later conversation turn. "
+            f"Original question: {original}"
+        )
+
+    value = str(selection)
+    label = str(filter_info["label"])
+    return (
+        "Re-run this original analytics question with the same metric, grouping, sorting, "
+        f"and chart style, but filter the result to {label} = {value}. Do not base the "
+        f"filter on a later conversation turn. Original question: {original}"
+    )
+
+
+def _render_refinement_filter(turn: dict, form_key: str) -> None:
+    """Render one optional filter and queue a governed follow-up when applied."""
+    filter_info = _result_filter_options(turn)
+    if not filter_info:
+        return
+
+    st.markdown(
+        """
+<div class="refine-panel">
+  <div class="refine-title">Refine Answer</div>
+  <div class="refine-caption">
+    Apply one filter by asking the agent to regenerate the full answer, so the summary,
+    KPIs, chart, SQL, PDF, and logs stay aligned.
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    if filter_info["kind"] == "time":
+        options = filter_info["options"]
+        labels = [item[1] for item in options]
+        with st.form(f"filter_time_{form_key}"):
+            c1, c2, c3 = st.columns([1, 1, 0.8])
+            with c1:
+                start_label = st.selectbox("From", labels, index=0, key=f"filter_start_{form_key}")
+            with c2:
+                end_label = st.selectbox(
+                    "To",
+                    labels,
+                    index=len(labels) - 1,
+                    key=f"filter_end_{form_key}",
+                )
+            with c3:
+                submitted = st.form_submit_button("Apply", use_container_width=True)
+        if submitted:
+            start_idx = labels.index(start_label)
+            end_idx = labels.index(end_label)
+            if start_idx > end_idx:
+                st.warning("Choose a start period that is before or equal to the end period.")
+                return
+            st.session_state.pending_question = _filter_followup_question(
+                turn,
+                filter_info,
+                (options[start_idx], options[end_idx]),
+            )
+            st.rerun()
+        return
+
+    values = filter_info["options"]
+    with st.form(f"filter_category_{form_key}"):
+        c1, c2 = st.columns([2, 0.8])
+        with c1:
+            selected = st.selectbox(filter_info["label"], values, key=f"filter_value_{form_key}")
+        with c2:
+            submitted = st.form_submit_button("Apply", use_container_width=True)
+    if submitted:
+        st.session_state.pending_question = _filter_followup_question(
+            turn,
+            filter_info,
+            selected,
+        )
+        st.rerun()
 
 
 # ---------------------------------------------------------------------------
@@ -2759,6 +3047,8 @@ def _render_turn(turn: dict, form_key: str) -> None:
         f'<div class="insight-card">{escaped}</div>',
         unsafe_allow_html=True,
     )
+
+    _render_refinement_filter(turn, form_key=form_key)
 
     # KPI tiles — single flex row so all cards stretch to equal height automatically.
     # Using st.columns would put each card in a separate Streamlit container,
