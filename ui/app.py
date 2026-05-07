@@ -1584,6 +1584,11 @@ html, body, [class*="css"] {
     border-radius: 20px;
     white-space: nowrap;
 }
+.session-action-row {
+    display: flex;
+    justify-content: flex-end;
+    margin: -14px 0 18px 0;
+}
 
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] {
@@ -3257,19 +3262,22 @@ def _load_examples() -> list[str]:
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
-with st.sidebar:
-    sl = _session_language()
+def _render_session_tools(sl: str, key_prefix: str, *, dark: bool = False) -> None:
+    """Render session/history/log controls in either sidebar or main-page menu."""
     n = len(st.session_state.history)
+    label_color = "rgba(255,255,255,0.6)" if dark else "#4B5320"
+    text_color = "rgba(255,255,255,0.75)" if dark else "#64748b"
+    strong_color = "#ffffff" if dark else "#0f172a"
     st.markdown(
         f"""
 <div style="padding:6px 0 18px 0;">
-  <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.6);text-transform:uppercase;
+  <div style="font-size:11px;font-weight:700;color:{label_color};text-transform:uppercase;
               letter-spacing:0.12em;margin-bottom:12px;">Session</div>
-  <div style="font-size:13px;color:rgba(255,255,255,0.75);margin-bottom:4px;">
-    Started at <strong style="color:#ffffff">{st.session_state.session_start}</strong>
+  <div style="font-size:13px;color:{text_color};margin-bottom:4px;">
+    Started at <strong style="color:{strong_color}">{st.session_state.session_start}</strong>
   </div>
-  <div style="font-size:13px;color:rgba(255,255,255,0.75);">
-    <strong style="color:#ffffff">{n}</strong> question{"s" if n != 1 else ""} answered
+  <div style="font-size:13px;color:{text_color};">
+    <strong style="color:{strong_color}">{n}</strong> question{"s" if n != 1 else ""} answered
   </div>
 </div>
 """,
@@ -3280,19 +3288,28 @@ with st.sidebar:
     # session" would previously clear everything with no way to recover.
     st.divider()
     if not st.session_state.confirm_clear:
-        if st.button(_t("Start new session", sl), use_container_width=True):
+        if st.button(
+            _t("Start new session", sl), key=f"{key_prefix}_new", use_container_width=True
+        ):
             st.session_state.confirm_clear = True
             st.rerun()
     else:
         st.warning(_t("This will clear all questions. Are you sure?", sl))
         col_yes, col_no = st.columns(2)
-        if col_yes.button(_t("Yes, clear", sl), type="primary", use_container_width=True):
+        if col_yes.button(
+            _t("Yes, clear", sl),
+            key=f"{key_prefix}_yes_clear",
+            type="primary",
+            use_container_width=True,
+        ):
             st.session_state.session_id = None
             st.session_state.history = []
             st.session_state.confirm_clear = False
             st.session_state.session_start = datetime.now(_BERLIN).strftime("%H:%M")
             st.rerun()
-        if col_no.button(_t("Cancel", sl), use_container_width=True):
+        if col_no.button(
+            _t("Cancel", sl), key=f"{key_prefix}_cancel_clear", use_container_width=True
+        ):
             st.session_state.confirm_clear = False
             st.rerun()
 
@@ -3319,6 +3336,7 @@ with st.sidebar:
             data=json.dumps(export_data, indent=2, ensure_ascii=False),
             file_name="edp_conversation.json",
             mime="application/json",
+            key=f"{key_prefix}_export",
             use_container_width=True,
         )
 
@@ -3334,7 +3352,11 @@ with st.sidebar:
 
             if st.session_state.get("_log_csv") is None:
                 # Phase 1: fetch button
-                if st.button(_t("Prepare Session Log (CSV)", sl), use_container_width=True):
+                if st.button(
+                    _t("Prepare Session Log (CSV)", sl),
+                    key=f"{key_prefix}_prepare_log",
+                    use_container_width=True,
+                ):
                     try:
                         r = requests.get(
                             f"{BACKEND_URL}/engineer-log",
@@ -3359,11 +3381,14 @@ with st.sidebar:
                         data=st.session_state["_log_csv"].encode("utf-8"),
                         file_name=f"edp_engineer_log_{st.session_state.session_id[:8]}.csv",
                         mime="text/csv",
+                        key=f"{key_prefix}_download_log",
                         use_container_width=True,
                     )
                 else:
                     st.caption(_t("No log entries yet for this session.", sl))
-                if st.button(_t("Refresh log", sl), use_container_width=True):
+                if st.button(
+                    _t("Refresh log", sl), key=f"{key_prefix}_refresh_log", use_container_width=True
+                ):
                     st.session_state["_log_csv"] = None
                     st.rerun()
 
@@ -3377,7 +3402,7 @@ with st.sidebar:
     # Import conversation
     st.divider()
     uploaded = st.file_uploader(
-        _t("Import conversation (JSON)", sl), type="json", key="import_file"
+        _t("Import conversation (JSON)", sl), type="json", key=f"{key_prefix}_import_file"
     )
     if uploaded is not None:
         try:
@@ -3411,6 +3436,10 @@ with st.sidebar:
         except Exception as exc:  # noqa: BLE001
             st.error(f"{_t('Import failed:', sl)} {exc}")
 
+
+with st.sidebar:
+    _render_session_tools(_session_language(), "sidebar", dark=True)
+
 # ── Page header ───────────────────────────────────────────────────────────────
 hl = _session_language()
 _subtitle = html_lib.escape(
@@ -3433,6 +3462,11 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+
+_menu_spacer, menu_right = st.columns([3.2, 1])
+with menu_right:
+    with st.popover("Session", use_container_width=True):
+        _render_session_tools(hl, "main_menu")
 
 # ── Empty state — example questions ──────────────────────────────────────────
 if not st.session_state.history:
