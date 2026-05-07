@@ -8,7 +8,14 @@ import pytest
 from agent.charts import ChartOutput
 from agent.exceptions import AgentError, ConfigurationError, SQLGenerationError
 from agent.insight import InsightResponse
-from agent.main import AgentSession, AskResult, _cli_main
+from agent.main import (
+    AgentSession,
+    AskResult,
+    _cli_main,
+    _month_period_count,
+    _relative_month_window_feedback,
+    _requested_month_window,
+)
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -157,6 +164,44 @@ class TestAgentSessionConstruction:
 # ── AgentSession.ask() ─────────────────────────────────────────────────────────
 
 
+class TestRelativeMonthWindowGuard:
+    def test_requested_month_window_detects_last_months(self) -> None:
+        assert _requested_month_window("monthly revenue trend for the last 12 months") == 12
+        assert _requested_month_window("show the past year of revenue") == 12
+        assert _requested_month_window("show revenue by country") is None
+
+    def test_month_period_count_reads_year_month_columns(self) -> None:
+        rows = [
+            {"order_year": "2025", "order_month": "12"},
+            {"order_year": "2026", "order_month": "1"},
+            {"order_year": "2026", "order_month": "1"},
+        ]
+        assert _month_period_count(["order_year", "order_month"], rows) == 2
+
+    def test_relative_month_window_feedback_flags_partial_result(self) -> None:
+        rows = [{"order_year": "2026", "order_month": str(month)} for month in range(1, 6)]
+        feedback = _relative_month_window_feedback(
+            "What's the monthly revenue trend for the last 12 months?",
+            "SELECT * FROM monthly_revenue_trend WHERE order_year = 2026 LIMIT 100",
+            ["order_year", "order_month"],
+            rows,
+        )
+        assert "last 12 months" in feedback
+        assert "only 5" in feedback
+
+    def test_relative_month_window_feedback_accepts_full_result(self) -> None:
+        rows = [{"order_year": "2025", "order_month": str(month)} for month in range(1, 13)]
+        assert (
+            _relative_month_window_feedback(
+                "monthly revenue trend for the last 12 months",
+                "SELECT * FROM monthly_revenue_trend LIMIT 100",
+                ["order_year", "order_month"],
+                rows,
+            )
+            == ""
+        )
+
+
 class TestAgentSessionAsk:
     def test_ask_returns_ask_result(self) -> None:
         patches = _patch_session_deps()
@@ -278,6 +323,64 @@ class TestAgentSessionAsk:
             session = AgentSession()
             session.ask("Any question")
             mock_executor.execute.assert_called_once_with(expected_sql)
+        finally:
+            _stop_patches(patches)
+
+    def test_ask_retries_when_last_12_months_returns_partial_month_window(self) -> None:
+        from agent.executor import QueryResult
+        from agent.generator import GeneratedSQL
+
+        first_sql = "SELECT * FROM monthly_revenue_trend WHERE order_year = 2026 LIMIT 100"
+        retry_sql = "SELECT * FROM monthly_revenue_trend /* anchored 12 months */ LIMIT 100"
+        mock_generator = MagicMock()
+        mock_generator.generate.side_effect = [
+            GeneratedSQL(sql=first_sql, assumptions=[], attempts=1),
+            GeneratedSQL(sql=retry_sql, assumptions=[], attempts=1),
+        ]
+        partial_result = QueryResult(
+            execution_id="exec-partial",
+            columns=["order_year", "order_month"],
+            rows=[{"order_year": "2026", "order_month": str(month)} for month in range(1, 6)],
+            bytes_scanned=1024,
+            cost_usd=0.0,
+        )
+        full_result = QueryResult(
+            execution_id="exec-full",
+            columns=["order_year", "order_month"],
+            rows=[{"order_year": "2025", "order_month": str(month)} for month in range(1, 13)],
+            bytes_scanned=2048,
+            cost_usd=0.0,
+        )
+        mock_executor = MagicMock()
+        mock_executor.execute.side_effect = [partial_result, full_result]
+        mock_insight_gen = MagicMock()
+        mock_insight_gen.generate.return_value = _make_response()
+        mock_chart_gen = MagicMock()
+        mock_chart_gen.generate.return_value = _make_chart()
+
+        mock_client = MagicMock()
+        mock_client.infer_question_from_sql.return_value = ""
+        patches = [
+            patch("agent.main.configure_logging"),
+            patch("agent.main.SchemaResolver"),
+            patch("agent.main.build_system_prompt", return_value="<sp>"),
+            patch("agent.main.ClaudeClient", return_value=mock_client),
+            patch("agent.main.SQLValidator"),
+            patch("agent.main.AuditLogger"),
+            patch("agent.main.SQLGenerator", return_value=mock_generator),
+            patch("agent.main.AthenaExecutor", return_value=mock_executor),
+            patch("agent.main.InsightGenerator", return_value=mock_insight_gen),
+            patch("agent.main.ChartGenerator", return_value=mock_chart_gen),
+        ]
+        _start_patches(patches)
+        try:
+            session = AgentSession()
+            result = session.ask("What's the monthly revenue trend for the last 12 months?")
+            assert result.sql == retry_sql
+            assert result.row_count == 12
+            assert result.sql_retry_count == 1
+            assert mock_generator.generate.call_count == 2
+            assert mock_executor.execute.call_count == 2
         finally:
             _stop_patches(patches)
 

@@ -1489,11 +1489,10 @@ def _t_restored(n: int, lang: str) -> str:
 
 
 # ── Page config ───────────────────────────────────────────────────────────────
-# #7: layout="centered" — no CSS max-width hack needed.
 st.set_page_config(
     page_title="EDP Analytics Agent",
     page_icon="📊",
-    layout="centered",
+    layout="wide",
     initial_sidebar_state="expanded",
 )
 
@@ -1510,6 +1509,12 @@ header[data-testid="stHeader"]  {
 [data-testid="stDecoration"]     { display: none !important; }
 #MainMenu                        { display: none !important; }
 footer                           { display: none !important; }
+
+[data-testid="stMainBlockContainer"] {
+    max-width: 1160px;
+    padding-left: 2rem;
+    padding-right: 2rem;
+}
 
 /* Keep Streamlit's sidebar restore control visible even when the sidebar is collapsed. */
 [data-testid="stSidebarCollapsedControl"] {
@@ -1589,6 +1594,28 @@ html, body, [class*="css"] {
     justify-content: flex-end;
     margin: -14px 0 18px 0;
 }
+.enterprise-action-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid #d7ddc1;
+    background: #fbfcf8;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin: -10px 0 18px 0;
+}
+.enterprise-action-title {
+    color: #4B5320;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+.enterprise-action-meta {
+    color: #64748b;
+    font-size: 12px;
+}
 
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] {
@@ -1667,6 +1694,23 @@ html, body, [class*="css"] {
     margin: 8px 0 0 0;
     line-height: 1.4;
 }
+.filtered-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #eef6ff;
+    color: #1e3a5f;
+    border: 1px solid #cfe0f4;
+    border-radius: 999px;
+    padding: 4px 9px;
+    margin-top: 8px;
+    font-size: 12px;
+    font-weight: 600;
+}
+.filtered-link span {
+    color: #64748b;
+    font-weight: 500;
+}
 
 /* ── Insight card ────────────────────────────────────────────────────────── */
 .insight-card {
@@ -1712,6 +1756,36 @@ html, body, [class*="css"] {
     font-size: 12px;
     line-height: 1.4;
     margin-bottom: 8px;
+}
+.source-strip,
+.governance-strip {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin: 10px 0 14px 0;
+}
+.source-item,
+.governance-item {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #ffffff;
+    padding: 8px 10px;
+    min-width: 0;
+}
+.source-item strong,
+.governance-item strong {
+    display: block;
+    color: #4B5320;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin-bottom: 2px;
+}
+.source-item span,
+.governance-item span {
+    color: #1e293b;
+    font-size: 12px;
+    overflow-wrap: anywhere;
 }
 
 /* ── Tabs ────────────────────────────────────────────────────────────────── */
@@ -1814,6 +1888,24 @@ html, body, [class*="css"] {
 
 /* ── Divider ─────────────────────────────────────────────────────────────── */
 hr { border-color: #e2e8f0 !important; }
+
+@media (max-width: 760px) {
+    [data-testid="stMainBlockContainer"] {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+    .edp-header {
+        flex-wrap: wrap;
+        padding: 18px;
+    }
+    .edp-header-badge {
+        margin-left: 0;
+    }
+    .source-strip,
+    .governance-strip {
+        grid-template-columns: 1fr 1fr;
+    }
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -1826,6 +1918,8 @@ if "history" not in st.session_state:
     st.session_state.history = []
 if "pending_question" not in st.session_state:
     st.session_state.pending_question = None
+if "pending_filter_context" not in st.session_state:
+    st.session_state.pending_filter_context = None
 if "confirm_clear" not in st.session_state:
     st.session_state.confirm_clear = False
 # #12: Track when this session started for display in sidebar.
@@ -2041,7 +2135,59 @@ def _filter_followup_question(turn: dict, filter_info: dict[str, Any], selection
     )
 
 
-def _render_refinement_filter(turn: dict, form_key: str) -> None:
+def _filter_context_label(filter_info: dict[str, Any], selection: Any) -> str:
+    """Return a compact label for the visible filtered-answer badge."""
+    if filter_info["kind"] == "time":
+        start_item, end_item = selection
+        return f"{start_item[1]} through {end_item[1]}"
+    return f"{filter_info['label']} = {selection}"
+
+
+def _latest_period_label(columns: list[str], rows: list[dict]) -> str:
+    """Return latest readable period from result rows, or a neutral fallback."""
+    filter_info = _time_filter_options(columns, rows)
+    if filter_info and filter_info.get("options"):
+        return str(filter_info["options"][-1][1])
+    return "Current result set"
+
+
+def _short_id(value: str) -> str:
+    return value[:8] if value else "-"
+
+
+def _render_source_and_governance(turn: dict) -> None:
+    """Render compact enterprise metadata below the insight."""
+    if not turn.get("sql"):
+        return
+
+    env = os.getenv("ENVIRONMENT", "local").upper()
+    latest_period = _latest_period_label(turn.get("columns", []) or [], turn.get("rows", []) or [])
+    generated_at = turn.get("timestamp") or "-"
+    row_count = turn.get("row_count")
+    if row_count is None:
+        row_count = len(turn.get("rows", []) or [])
+    verdict = "Mismatch" if turn.get("verdict") == "Yes" else "Matched"
+
+    st.markdown(
+        f"""
+<div class="source-strip">
+  <div class="source-item"><strong>Environment</strong><span>{html_lib.escape(env)}</span></div>
+  <div class="source-item"><strong>Source</strong><span>Gold Layer / Athena</span></div>
+  <div class="source-item"><strong>Gold data period</strong><span>{html_lib.escape(latest_period)}</span></div>
+  <div class="source-item"><strong>Generated</strong><span>{html_lib.escape(generated_at)}</span></div>
+</div>
+<div class="governance-strip">
+  <div class="governance-item"><strong>Intent check</strong><span>{verdict}</span></div>
+  <div class="governance-item"><strong>Rows returned</strong><span>{row_count}</span></div>
+  <div class="governance-item"><strong>Scan cost</strong><span>{_format_cost(turn.get("cost_usd", 0.0))}</span></div>
+  <div class="governance-item"><strong>Request ID</strong><span>{_short_id(turn.get("request_id", ""))}</span></div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_refinement_filter(turn: dict, form_key: str, turn_number: int | None = None) -> None:
     """Render one optional filter and queue a governed follow-up when applied."""
     filter_info = _result_filter_options(turn)
     if not filter_info:
@@ -2050,7 +2196,7 @@ def _render_refinement_filter(turn: dict, form_key: str) -> None:
     st.markdown(
         """
 <div class="refine-panel">
-  <div class="refine-title">Refine Answer</div>
+  <div class="refine-title">Analysis Controls</div>
   <div class="refine-caption">
     Apply one filter by asking the agent to regenerate the full answer, so the summary,
     KPIs, chart, SQL, PDF, and logs stay aligned.
@@ -2087,6 +2233,14 @@ def _render_refinement_filter(turn: dict, form_key: str) -> None:
                 filter_info,
                 (options[start_idx], options[end_idx]),
             )
+            st.session_state.pending_filter_context = {
+                "source_turn": turn_number,
+                "source_question": turn.get("question", ""),
+                "filter_label": _filter_context_label(
+                    filter_info,
+                    (options[start_idx], options[end_idx]),
+                ),
+            }
             st.rerun()
         return
 
@@ -2103,6 +2257,11 @@ def _render_refinement_filter(turn: dict, form_key: str) -> None:
             filter_info,
             selected,
         )
+        st.session_state.pending_filter_context = {
+            "source_turn": turn_number,
+            "source_question": turn.get("question", ""),
+            "filter_label": _filter_context_label(filter_info, selected),
+        }
         st.rerun()
 
 
@@ -3041,7 +3200,7 @@ def _branded_table_html(df: pd.DataFrame) -> str:
     )
 
 
-def _render_turn(turn: dict, form_key: str) -> None:
+def _render_turn(turn: dict, form_key: str, turn_number: int | None = None) -> None:
     """Render one Q&A turn's answer content. Called inside a turn card."""
     lang = _detect_language(turn["question"])
     is_analytical = bool(turn.get("sql"))
@@ -3053,7 +3212,9 @@ def _render_turn(turn: dict, form_key: str) -> None:
         unsafe_allow_html=True,
     )
 
-    _render_refinement_filter(turn, form_key=form_key)
+    _render_source_and_governance(turn)
+
+    _render_refinement_filter(turn, form_key=form_key, turn_number=turn_number)
 
     # KPI tiles — single flex row so all cards stretch to equal height automatically.
     # Using st.columns would put each card in a separate Streamlit container,
@@ -3227,24 +3388,33 @@ def _render_turn(turn: dict, form_key: str) -> None:
 
 def _render_card(turn: dict, turn_number: int, form_key: str) -> None:
     """Render a complete turn: numbered card with question header and answer content."""
-    lang = _detect_language(turn["question"])
+    display_question = str(turn.get("display_question") or turn["question"])
+    lang = _detect_language(display_question)
     ts = turn.get("timestamp", "")
     # #1: st.container(border=True) replaces st.chat_message. Clean bordered card,
     # no chat bubble, no avatar — looks like a data product not a chatbot.
     # Pre-build the timestamp span to avoid backslash-in-f-string (Python 3.11).
     ts_span = f'<span class="turn-time">{ts}</span>' if ts else ""
     question_label = _t("Question", lang)
+    filtered_badge = ""
+    if turn.get("source_turn"):
+        filter_label = html_lib.escape(str(turn.get("filter_label", "")))
+        filtered_badge = (
+            f'<div class="filtered-link">Filtered view of Question {turn["source_turn"]}'
+            f"<span>{filter_label}</span></div>"
+        )
     with st.container(border=True):
         st.markdown(
             f'<div class="turn-meta">'
             f'<span class="turn-label">{question_label} {turn_number}</span>'
             f"{ts_span}"
             f"</div>"
-            f'<div class="turn-question">{html_lib.escape(turn["question"])}</div>',
+            f'<div class="turn-question">{html_lib.escape(display_question)}</div>'
+            f"{filtered_badge}",
             unsafe_allow_html=True,
         )
         st.divider()
-        _render_turn(turn, form_key=form_key)
+        _render_turn(turn, form_key=form_key, turn_number=turn_number)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -3262,6 +3432,31 @@ def _load_examples() -> list[str]:
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
+def _conversation_export_data() -> list[dict]:
+    """Return the current session history as portable JSON data."""
+    return [
+        {
+            "question": t["question"],
+            "display_question": t.get("display_question", t["question"]),
+            "backend_question": t.get("backend_question", ""),
+            "source_turn": t.get("source_turn"),
+            "filter_label": t.get("filter_label", ""),
+            "insight": t["insight"],
+            "sql": t.get("sql", ""),
+            "assumptions": t.get("assumptions", []),
+            "inferred_question": t.get("inferred_question", ""),
+            "verdict": t.get("verdict", "No"),
+            "discrepancy_detail": t.get("discrepancy_detail", "None"),
+            "request_id": t.get("request_id", ""),
+            "cost_usd": t.get("cost_usd", 0.0),
+            "bytes_scanned": t.get("bytes_scanned", 0),
+            "row_count": t.get("row_count", 0),
+            "timestamp": t.get("timestamp", ""),
+        }
+        for t in st.session_state.history
+    ]
+
+
 def _render_session_tools(sl: str, key_prefix: str, *, dark: bool = False) -> None:
     """Render session/history/log controls in either sidebar or main-page menu."""
     n = len(st.session_state.history)
@@ -3315,25 +3510,9 @@ def _render_session_tools(sl: str, key_prefix: str, *, dark: bool = False) -> No
 
     if st.session_state.history:
         st.divider()
-        export_data = [
-            {
-                "question": t["question"],
-                "insight": t["insight"],
-                "sql": t.get("sql", ""),
-                "assumptions": t.get("assumptions", []),
-                "inferred_question": t.get("inferred_question", ""),
-                "verdict": t.get("verdict", "No"),
-                "discrepancy_detail": t.get("discrepancy_detail", "None"),
-                "request_id": t.get("request_id", ""),
-                "cost_usd": t.get("cost_usd", 0.0),
-                "bytes_scanned": t.get("bytes_scanned", 0),
-                "timestamp": t.get("timestamp", ""),
-            }
-            for t in st.session_state.history
-        ]
         st.download_button(
             _t("Export conversation (JSON)", sl),
-            data=json.dumps(export_data, indent=2, ensure_ascii=False),
+            data=json.dumps(_conversation_export_data(), indent=2, ensure_ascii=False),
             file_name="edp_conversation.json",
             mime="application/json",
             key=f"{key_prefix}_export",
@@ -3410,6 +3589,10 @@ def _render_session_tools(sl: str, key_prefix: str, *, dark: bool = False) -> No
             st.session_state.history = [
                 {
                     "question": t["question"],
+                    "display_question": t.get("display_question", t["question"]),
+                    "backend_question": t.get("backend_question", ""),
+                    "source_turn": t.get("source_turn"),
+                    "filter_label": t.get("filter_label", ""),
                     "insight": t["insight"],
                     "sql": t.get("sql", ""),
                     "assumptions": t.get("assumptions", []),
@@ -3425,6 +3608,7 @@ def _render_session_tools(sl: str, key_prefix: str, *, dark: bool = False) -> No
                     "chart_height": 0,
                     "timestamp": "",
                     "request_id": "",
+                    "row_count": t.get("row_count", 0),
                     "verdict": "No",
                     "discrepancy_detail": "None",
                 }
@@ -3463,10 +3647,74 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-_menu_spacer, menu_right = st.columns([3.2, 1])
-with menu_right:
+history_count = len(st.session_state.history)
+st.markdown(
+    f"""
+<div class="enterprise-action-bar">
+  <div>
+    <div class="enterprise-action-title">Enterprise Console</div>
+    <div class="enterprise-action-meta">
+      Session {st.session_state.session_start} · {history_count} question{"s" if history_count != 1 else ""}
+    </div>
+  </div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+bar_new, bar_session, bar_export, bar_logs, bar_spacer = st.columns([0.75, 0.9, 1.1, 0.9, 3.2])
+with bar_new:
+    with st.popover("New", use_container_width=True):
+        st.caption("Start a clean analysis session.")
+        if st.button("Start new session", key="top_new_confirm", use_container_width=True):
+            st.session_state.session_id = None
+            st.session_state.history = []
+            st.session_state.confirm_clear = False
+            st.session_state.session_start = datetime.now(_BERLIN).strftime("%H:%M")
+            st.rerun()
+with bar_session:
     with st.popover("Session", use_container_width=True):
         _render_session_tools(hl, "main_menu")
+with bar_export:
+    if st.session_state.history:
+        st.download_button(
+            "Export",
+            data=json.dumps(_conversation_export_data(), indent=2, ensure_ascii=False),
+            file_name="edp_conversation.json",
+            mime="application/json",
+            key="top_export",
+            use_container_width=True,
+        )
+    else:
+        st.button("Export", disabled=True, use_container_width=True)
+with bar_logs:
+    with st.popover("Logs", use_container_width=True):
+        if not st.session_state.session_id:
+            st.caption("Logs appear after the first analytical answer.")
+        else:
+            if st.button("Prepare Session Log", key="top_prepare_log", use_container_width=True):
+                try:
+                    r = requests.get(
+                        f"{BACKEND_URL}/engineer-log",
+                        params={"session_id": st.session_state.session_id},
+                        timeout=15,
+                    )
+                    r.raise_for_status()
+                    payload = r.json()
+                    st.session_state["_log_csv"] = payload.get("csv", "") or ""
+                    st.session_state["_log_rows"] = payload.get("row_count", 0)
+                    st.session_state["_log_sid"] = st.session_state.session_id
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Could not fetch log: {exc}")
+                st.rerun()
+            if st.session_state.get("_log_csv"):
+                st.download_button(
+                    f"Download Log ({st.session_state.get('_log_rows', 0)} rows)",
+                    data=st.session_state["_log_csv"].encode("utf-8"),
+                    file_name=f"edp_engineer_log_{st.session_state.session_id[:8]}.csv",
+                    mime="text/csv",
+                    key="top_download_log",
+                    use_container_width=True,
+                )
 
 # ── Empty state — example questions ──────────────────────────────────────────
 if not st.session_state.history:
@@ -3487,14 +3735,27 @@ for idx, turn in enumerate(st.session_state.history):
 # ── Question input ────────────────────────────────────────────────────────────
 chat_question = st.chat_input("Ask a question about your data...")
 question = chat_question or st.session_state.pending_question
+filter_context = (
+    st.session_state.pending_filter_context if st.session_state.pending_question else None
+)
 if st.session_state.pending_question:
     st.session_state.pending_question = None
+    st.session_state.pending_filter_context = None
 
 if question:
-    lang = _detect_language(question)
+    display_question = (
+        str(filter_context.get("source_question") or question) if filter_context else question
+    )
+    lang = _detect_language(display_question)
     n = len(st.session_state.history) + 1
     now_str = datetime.now(_BERLIN).strftime("%H:%M")
     question_label = _t("Question", lang)
+    filtered_badge = ""
+    if filter_context and filter_context.get("source_turn"):
+        filtered_badge = (
+            f'<div class="filtered-link">Filtered view of Question {filter_context["source_turn"]}'
+            f'<span>{html_lib.escape(str(filter_context.get("filter_label", "")))}</span></div>'
+        )
 
     # #1: Live turn also uses the card container so it matches history cards.
     with st.container(border=True):
@@ -3503,7 +3764,8 @@ if question:
             f'<span class="turn-label">{question_label} {n}</span>'
             f'<span class="turn-time">{now_str}</span>'
             f"</div>"
-            f'<div class="turn-question">{html_lib.escape(question)}</div>',
+            f'<div class="turn-question">{html_lib.escape(display_question)}</div>'
+            f"{filtered_badge}",
             unsafe_allow_html=True,
         )
         st.divider()
@@ -3585,7 +3847,11 @@ if question:
             st.session_state.session_id = turn_data["session_id"]
 
             turn = {
-                "question": question,
+                "question": display_question,
+                "backend_question": question,
+                "display_question": display_question,
+                "source_turn": filter_context.get("source_turn") if filter_context else None,
+                "filter_label": filter_context.get("filter_label", "") if filter_context else "",
                 "insight": turn_data["insight"],
                 "assumptions": turn_data.get("assumptions", []),
                 "html_chart": turn_data.get("html_chart"),
@@ -3598,11 +3864,12 @@ if question:
                 "inferred_question": turn_data.get("inferred_question", ""),
                 "columns": turn_data.get("columns", []),
                 "rows": turn_data.get("rows", []),
+                "row_count": turn_data.get("row_count", len(turn_data.get("rows", []))),
                 "chart_height": turn_data.get("chart_height", 400),
                 "timestamp": now_str,  # #12: stored so card header shows it on replay
                 "request_id": turn_data.get("request_id", ""),
                 "verdict": turn_data.get("verdict", "No"),
                 "discrepancy_detail": turn_data.get("discrepancy_detail", "None"),
             }
-            _render_turn(turn, form_key="current")
+            _render_turn(turn, form_key="current", turn_number=n)
             st.session_state.history.append(turn)

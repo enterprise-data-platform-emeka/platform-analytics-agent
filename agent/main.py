@@ -33,6 +33,7 @@ import json
 import logging
 import os
 import random
+import re
 import sys
 import time
 import uuid
@@ -97,6 +98,72 @@ def _extract_chart_type_hint(question: str) -> str:
         if keyword in ql:
             return chart_type
     return ""
+
+
+def _requested_month_window(question: str) -> int | None:
+    """Return requested month count for relative month-window questions."""
+    ql = question.lower()
+    match = re.search(r"\b(?:last|past|previous)\s+(\d{1,2})\s+months?\b", ql)
+    if match:
+        months = int(match.group(1))
+        return months if 2 <= months <= 36 else None
+    if re.search(r"\b(?:last|past|previous)\s+(?:one\s+)?year\b", ql):
+        return 12
+    return None
+
+
+def _month_period_count(columns: list[str], rows: list[dict[str, str]]) -> int:
+    """Count distinct month periods in common Athena result shapes."""
+    if not rows:
+        return 0
+
+    year_col = next((c for c in columns if "year" in c.lower()), None)
+    month_col = next((c for c in columns if "month" in c.lower() and c != year_col), None)
+    if year_col and month_col:
+        periods: set[tuple[int, int]] = set()
+        for row in rows:
+            year = str(row.get(year_col, "") or "").strip()
+            month = str(row.get(month_col, "") or "").strip()
+            if year.isdigit() and month.isdigit() and 1 <= int(month) <= 12:
+                periods.add((int(year), int(month)))
+        return len(periods)
+
+    periods = set()
+    for col in columns:
+        if "month" not in col.lower() and "period" not in col.lower() and "date" not in col.lower():
+            continue
+        for row in rows:
+            raw = str(row.get(col, "") or "").strip()
+            match = re.match(r"^(\d{4})-(\d{1,2})(?:-\d{1,2})?$", raw)
+            if match:
+                periods.add((int(match.group(1)), int(match.group(2))))
+    return len(periods)
+
+
+def _relative_month_window_feedback(
+    question: str,
+    sql: str,
+    columns: list[str],
+    rows: list[dict[str, str]],
+) -> str:
+    """Return feedback when a relative monthly trend query returned too few periods."""
+    requested_months = _requested_month_window(question)
+    if not requested_months:
+        return ""
+    if "monthly_revenue_trend" not in sql.lower():
+        return ""
+
+    returned_months = _month_period_count(columns, rows)
+    if returned_months >= requested_months:
+        return ""
+
+    return (
+        f"The question asks for the last {requested_months} months, but the SQL result "
+        f"returned only {returned_months} distinct month periods. Regenerate the SQL by "
+        "anchoring the window to the latest available order_year/order_month in "
+        "monthly_revenue_trend, including that latest month plus the previous "
+        f"{requested_months - 1} months. Do not use current calendar year or year-to-date."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -387,6 +454,7 @@ class AgentSession:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Verdict retry failed (%s) — proceeding with original SQL.", exc)
 
+        semantic_retry_count = 0
         query_result = self._executor.execute(generated.sql)
         logger.info(
             "Athena execution complete: execution_id=%s rows=%d bytes_scanned=%d",
@@ -394,6 +462,33 @@ class AgentSession:
             len(query_result.rows),
             query_result.bytes_scanned,
         )
+        window_feedback = _relative_month_window_feedback(
+            question,
+            generated.sql,
+            query_result.columns,
+            query_result.rows,
+        )
+        if window_feedback:
+            logger.info("Relative month-window guardrail triggered — retrying SQL generation.")
+            try:
+                generated = self._generator.generate(
+                    question=question,
+                    system_prompt=system_prompt,
+                    verdict_feedback=window_feedback,
+                )
+                inferred_question = self._client.infer_question_from_sql(
+                    generated.sql, question=question
+                )
+                verdict, discrepancy_detail = "No", "None"
+                query_result = self._executor.execute(generated.sql)
+                semantic_retry_count = 1
+                logger.info(
+                    "Guardrail retry Athena execution complete: execution_id=%s rows=%d",
+                    query_result.execution_id,
+                    len(query_result.rows),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Relative month-window retry failed (%s) — proceeding.", exc)
 
         validation_report = validate(query_result)
         if not validation_report.is_clean:
@@ -422,7 +517,7 @@ class AgentSession:
             inferred_question=inferred_question,
             columns=query_result.columns,
             rows=query_result.rows[:100],
-            sql_retry_count=max(0, generated.attempts - 1),
+            sql_retry_count=max(0, generated.attempts - 1) + semantic_retry_count,
             row_count=len(query_result.rows),
             verdict=verdict,
             discrepancy_detail=discrepancy_detail,
@@ -602,6 +697,7 @@ try:
         chart_height: int  # Plotly iframe height in pixels
         columns: list[str]  # result column names for client-side table toggle
         rows: list[dict[str, str]]  # raw result rows (capped at 100)
+        row_count: int  # total rows returned by Athena before client-side capping
         request_id: str  # UUID tracing this request through all log systems
         verdict: str  # 'Yes' = discrepancy detected, 'No' = intent matches
         discrepancy_detail: str  # one-sentence description of the discrepancy, or 'None'
@@ -721,6 +817,7 @@ try:
             chart_height=result.chart.chart_height,
             columns=result.columns,
             rows=result.rows,
+            row_count=result.row_count,
             request_id=request_id,
             verdict=verdict,
             discrepancy_detail=discrepancy_detail,
@@ -988,6 +1085,7 @@ try:
                                 "chart_height": 0,
                                 "columns": [],
                                 "rows": [],
+                                "row_count": 0,
                                 "request_id": request_id,
                                 "verdict": "No",
                                 "discrepancy_detail": "None",
@@ -1063,6 +1161,7 @@ try:
                                 "chart_height": retype_chart.chart_height,
                                 "columns": retype_result.columns,
                                 "rows": retype_result.rows[:100],
+                                "row_count": len(retype_result.rows),
                                 "request_id": request_id,
                                 "verdict": "No",
                                 "discrepancy_detail": "None",
@@ -1133,6 +1232,45 @@ try:
                 logger.error("Athena execution failed: %s", exc)
                 yield json.dumps({"type": "error", "text": str(exc)}) + "\n"
                 return
+            stream_semantic_retry_count = 0
+            window_feedback = _relative_month_window_feedback(
+                body.question,
+                generated.sql,
+                query_result.columns,
+                query_result.rows,
+            )
+            if window_feedback:
+                logger.info("Stream: relative month-window guardrail triggered.")
+                yield (
+                    json.dumps(
+                        {
+                            "type": "status",
+                            "text": _status_msg("Generating SQL query...", lang),
+                        }
+                    )
+                    + "\n"
+                )
+                try:
+                    generated = _session._generator.generate(
+                        question=body.question,
+                        system_prompt=system_prompt,
+                        verdict_feedback=window_feedback,
+                    )
+                    inferred_question = _session._client.infer_question_from_sql(
+                        generated.sql, question=body.question
+                    )
+                    stream_verdict, stream_discrepancy = "No", "None"
+                    query_result = _session._executor.execute(generated.sql)
+                    stream_semantic_retry_count = 1
+                except AgentError as exc:
+                    logger.error("Stream: month-window retry failed: %s", exc)
+                    yield json.dumps({"type": "error", "text": str(exc)}) + "\n"
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Stream: month-window retry failed (%s) — proceeding with original result.",
+                        exc,
+                    )
 
             validation_report = validate(query_result)
 
@@ -1208,7 +1346,7 @@ try:
                 athena_cost_usd=query_result.cost_usd,
                 response_time_seconds=time.monotonic() - request_start,
                 athena_query_execution_id=query_result.execution_id,
-                sql_retry_count=max(0, generated.attempts - 1),
+                sql_retry_count=max(0, generated.attempts - 1) + stream_semantic_retry_count,
                 row_count_returned=len(query_result.rows),
                 chart_type_rendered=chart.chart_type,
                 language=lang,
@@ -1238,6 +1376,7 @@ try:
                             "chart_height": chart.chart_height,
                             "columns": query_result.columns,
                             "rows": query_result.rows[:100],
+                            "row_count": len(query_result.rows),
                             "request_id": request_id,
                             "verdict": stream_verdict,
                             "discrepancy_detail": stream_discrepancy,
