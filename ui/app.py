@@ -1898,17 +1898,45 @@ html, body, [class*="css"] {
     border-color: #4B5320 !important;
     box-shadow: 0 0 0 3px rgba(75,83,32,0.12) !important;
 }
-[data-testid="stForm"] .stButton > button,
+/* ── Form buttons (Ask + Apply) — 3D press effect ───────────────────────── */
 [data-testid="stFormSubmitButton"] > button {
-    height: 48px !important;
-    min-height: 48px !important;
     padding-top: 0 !important;
     padding-bottom: 0 !important;
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
     width: 100% !important;
+    border: none !important;
+    border-radius: 8px !important;
+    color: white !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.3px !important;
+    background: linear-gradient(180deg, #5c6b39 0%, #4B5320 55%, #3d4c1e 100%) !important;
+    box-shadow: 0 4px 0 #252e12, 0 6px 10px rgba(0,0,0,0.18) !important;
+    transform: translateY(0px) !important;
+    transition: box-shadow 0.08s ease, transform 0.08s ease, background 0.08s ease !important;
+    cursor: pointer !important;
+}
+[data-testid="stFormSubmitButton"] > button:hover {
+    background: linear-gradient(180deg, #687942 0%, #566025 55%, #464e22 100%) !important;
+    box-shadow: 0 4px 0 #252e12, 0 8px 14px rgba(0,0,0,0.22) !important;
+}
+[data-testid="stFormSubmitButton"] > button:active {
+    box-shadow: 0 0px 0 #252e12, 0 2px 4px rgba(0,0,0,0.15) !important;
+    transform: translateY(4px) !important;
+    background: linear-gradient(180deg, #4B5320 0%, #3d4c1e 100%) !important;
+}
+/* Ask button — form contains a text input (no label space needed) */
+[data-testid="stForm"]:has([data-testid="stTextInput"]) [data-testid="stFormSubmitButton"] > button {
+    height: 48px !important;
+    min-height: 48px !important;
     margin-top: 4px !important;
+}
+/* Apply button — filter forms (selectbox/slider), match their input height */
+[data-testid="stForm"]:not(:has([data-testid="stTextInput"])) [data-testid="stFormSubmitButton"] > button {
+    height: 38px !important;
+    min-height: 38px !important;
+    margin-top: 0 !important;
 }
 
 /* ── Divider ─────────────────────────────────────────────────────────────── */
@@ -2274,7 +2302,7 @@ def _render_refinement_filter(turn: dict, form_key: str, turn_number: int | None
                     key=f"filter_end_{form_key}",
                 )
             with c3:
-                st.markdown('<div style="height:28px"></div>', unsafe_allow_html=True)
+                st.markdown('<div style="height:24px"></div>', unsafe_allow_html=True)
                 submitted = st.form_submit_button("Apply", use_container_width=True)
         if submitted:
             start_idx = labels.index(start_label)
@@ -2312,7 +2340,7 @@ def _render_refinement_filter(turn: dict, form_key: str, turn_number: int | None
                 key=f"filter_threshold_{form_key}",
             )
         with c2:
-            st.markdown('<div style="height:28px"></div>', unsafe_allow_html=True)
+            st.markdown('<div style="height:24px"></div>', unsafe_allow_html=True)
             submitted = st.form_submit_button("Apply", use_container_width=True)
     if submitted:
         st.session_state.pending_question = _filter_followup_question(
