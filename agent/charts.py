@@ -230,13 +230,13 @@ _PIE_HINTS: frozenset[str] = frozenset(
 
 # Olive-family colour palette for multi-series charts (pie slices, multi-line traces).
 _OLIVE_PALETTE: list[str] = [
-    "#4B5320",  # brand olive (darkest)
-    "#94A3B8",  # muted slate — clear contrast for 2-series comparisons
+    "#4B5320",  # brand olive
+    "#E07B39",  # warm orange — high contrast with olive for 2-series comparisons
+    "#2E86AB",  # steel blue — distinct third series
     "#8B9A5B",
     "#A8BA7A",
-    "#C8D4A8",
     "#566117",
-    "#D4DDB5",
+    "#C8D4A8",
     "#3A4D0E",
 ]
 
@@ -994,9 +994,16 @@ class ChartGenerator:
         use_dual = len(metric_cols) >= 2 and _min_max > 0 and _max_max / _min_max > 50
 
         # Assign each metric column to left or right axis.
+        # Use scale order (largest max → left) so name-hint ambiguity (e.g. "order_volume"
+        # containing "volume") never incorrectly collapses both series onto one axis.
         if use_dual:
-            left_cols = [c for c in metric_cols if _is_monetary(c)] or [metric_cols[0]]
-            right_cols = [c for c in metric_cols if c not in left_cols]
+            sorted_by_scale = sorted(
+                metric_cols,
+                key=lambda c: col_maxima[metric_cols.index(c)],
+                reverse=True,
+            )
+            left_cols = [sorted_by_scale[0]]
+            right_cols = sorted_by_scale[1:]
         else:
             left_cols = metric_cols
             right_cols = []
@@ -1568,11 +1575,14 @@ def _plotly_multiline(
         "legend": {"orientation": "h", "y": -0.2},
     }
     if _right:
+        right_colour = colours[metric_cols.index(list(_right)[0])] if _right else "#E07B39"
         layout["yaxis2"] = {
             "overlaying": "y",
             "side": "right",
             "showgrid": False,
             "title": right_cols[0].replace("_", " ").title() if right_cols else "",
+            "tickfont": {"color": right_colour},
+            "titlefont": {"color": right_colour},
         }
     fig.update_layout(**layout)
     return str(fig.to_html(full_html=False, include_plotlyjs="cdn"))
