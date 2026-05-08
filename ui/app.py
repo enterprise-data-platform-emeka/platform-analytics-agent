@@ -1493,7 +1493,7 @@ st.set_page_config(
     page_title="EDP Analytics Agent",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ── Custom CSS ────────────────────────────────────────────────────────────────
@@ -1710,6 +1710,25 @@ html, body, [class*="css"] {
 .filtered-link span {
     color: #64748b;
     font-weight: 500;
+}
+.active-filter-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #f0f4e8;
+    color: #3a4a18;
+    border: 1px solid #c5cf9e;
+    border-radius: 999px;
+    padding: 4px 9px;
+    margin-top: 8px;
+    font-size: 12px;
+    font-weight: 600;
+}
+.freshness-label {
+    font-size: 10px;
+    color: rgba(255,255,255,0.65);
+    margin-top: 3px;
+    letter-spacing: 0.04em;
 }
 
 /* ── Insight card ────────────────────────────────────────────────────────── */
@@ -2279,8 +2298,7 @@ def _render_refinement_filter(turn: dict, form_key: str, turn_number: int | None
 <div class="refine-panel">
   <div class="refine-title">Analysis Controls</div>
   <div class="refine-caption">
-    Apply one filter by asking the agent to regenerate the full answer, so the summary,
-    KPIs, chart, SQL, PDF, and logs stay aligned.
+    Refine this answer by applying a filter.
   </div>
 </div>
 """,
@@ -3332,14 +3350,25 @@ def _render_turn(turn: dict, form_key: str, turn_number: int | None = None) -> N
     # wrapper gives display:flex align-items:stretch for free.
     kpi_tiles = _extract_kpi_tiles(turn.get("columns", []), turn.get("rows", []), lang)
     if kpi_tiles:
+        _current_period = datetime.now(_BERLIN).strftime("%b %Y")
+        _latest_p = _latest_period_label(turn.get("columns", []), turn.get("rows", []))
+        _is_partial = _latest_p == _current_period
+
         n_tiles = len(kpi_tiles)
-        # Single tile: cap width to ~33% so it doesn't span the full card width.
         wrapper_style = "display:flex;gap:12px;margin:12px 0 4px 0;align-items:stretch;" + (
             "max-width:34%;" if n_tiles == 1 else ""
         )
         tiles_html = f'<div style="{wrapper_style}">'
-        for metric_lbl, value, sub_lbl, badge in kpi_tiles:
-            badge_color = "#16a34a" if badge.startswith("+") else "#dc2626"
+        for tile_idx, (metric_lbl, value, sub_lbl, badge) in enumerate(kpi_tiles):
+            if tile_idx == 0 and _is_partial and badge:
+                badge_color = "#d97706"  # amber — signal incomplete period, not a true decline
+                partial_hint = (
+                    '<div style="font-size:11px;color:#92400e;margin-top:3px;'
+                    'font-style:italic">Partial month</div>'
+                )
+            else:
+                badge_color = "#16a34a" if badge.startswith("+") else "#dc2626"
+                partial_hint = ""
             badge_html = (
                 f'<div style="color:{badge_color};font-size:12px;font-weight:600;'
                 f'margin-top:4px">{badge}</div>'
@@ -3355,7 +3384,7 @@ def _render_turn(turn: dict, form_key: str, turn_number: int | None = None) -> N
                 f'<div style="font-size:22px;font-weight:700;color:#0f172a;'
                 f'line-height:1.1">{value}</div>'
                 f'<div style="font-size:12px;color:#64748b;margin-top:3px">{sub_lbl}</div>'
-                f"{badge_html}</div>"
+                f"{badge_html}{partial_hint}</div>"
             )
         tiles_html += "</div>"
         st.markdown(tiles_html, unsafe_allow_html=True)
@@ -3378,8 +3407,6 @@ def _render_turn(turn: dict, form_key: str, turn_number: int | None = None) -> N
                 st.markdown(_branded_table_html(df), unsafe_allow_html=True)
         else:
             components.html(turn["html_chart"], height=chart_h + 20, scrolling=False)
-
-    _render_source_and_governance(turn)
 
     # #2: One row of action buttons. Download is a direct button; email toggles
     # an inline form via session state so the user doesn't need to hunt for it.
@@ -3450,6 +3477,8 @@ def _render_turn(turn: dict, form_key: str, turn_number: int | None = None) -> N
     # button/rerun) since inferred_question is already in the turn dict.
     if is_analytical:
         with st.expander(_t("Details", lang)):
+            _render_source_and_governance(turn)
+            st.divider()
             st.code(turn["sql"], language="sql")
             st.divider()
             c1, c2, c3 = st.columns(3)
@@ -3509,7 +3538,12 @@ def _render_card(turn: dict, turn_number: int, form_key: str) -> None:
     ts_span = f'<span class="turn-time">{ts}</span>' if ts else ""
     question_label = _t("Question", lang)
     filtered_badge = ""
-    if turn.get("source_turn"):
+    if turn.get("filter_active"):
+        filtered_badge = (
+            f'<div class="active-filter-badge">Filter: '
+            f'{html_lib.escape(str(turn["filter_active"]))}</div>'
+        )
+    elif turn.get("source_turn"):
         filter_label = html_lib.escape(str(turn.get("filter_label", "")))
         filtered_badge = (
             f'<div class="filtered-link">Filtered view of Question {turn["source_turn"]}'
@@ -3690,47 +3724,6 @@ def _render_session_tools(sl: str, key_prefix: str, *, dark: bool = False) -> No
             label = q if len(q) <= 42 else q[:39] + "..."
             st.caption(f"{i}. {label}")
 
-    # Import conversation
-    st.divider()
-    uploaded = st.file_uploader(
-        _t("Import conversation (JSON)", sl), type="json", key=f"{key_prefix}_import_file"
-    )
-    if uploaded is not None:
-        try:
-            imported: list[dict] = json.loads(uploaded.read())
-            st.session_state.history = [
-                {
-                    "question": t["question"],
-                    "display_question": t.get("display_question", t["question"]),
-                    "backend_question": t.get("backend_question", ""),
-                    "source_turn": t.get("source_turn"),
-                    "filter_label": t.get("filter_label", ""),
-                    "insight": t["insight"],
-                    "sql": t.get("sql", ""),
-                    "assumptions": t.get("assumptions", []),
-                    "html_chart": None,
-                    "png_b64": None,
-                    "cost_usd": 0.0,
-                    "bytes_scanned": 0,
-                    "validation_flags": [],
-                    "chart_type": "",
-                    "inferred_question": "",
-                    "columns": [],
-                    "rows": [],
-                    "chart_height": 0,
-                    "timestamp": "",
-                    "request_id": "",
-                    "row_count": t.get("row_count", 0),
-                    "verdict": "No",
-                    "discrepancy_detail": "None",
-                }
-                for t in imported
-            ]
-            st.session_state.session_id = None
-            st.success(_t_restored(len(imported), sl))
-            st.rerun()
-        except Exception as exc:  # noqa: BLE001
-            st.error(f"{_t('Import failed:', sl)} {exc}")
 
 
 with st.sidebar:
@@ -3745,6 +3738,19 @@ _subtitle = html_lib.escape(
         hl,
     )
 )
+_freshness_label = ""
+if st.session_state.history:
+    _last_t = st.session_state.history[-1]
+    _lp = _latest_period_label(
+        _last_t.get("columns", []) or [], _last_t.get("rows", []) or []
+    )
+    if _lp and _lp != "Current result set":
+        _freshness_label = _lp
+_freshness_html = (
+    f'<div class="freshness-label">Data as of {html_lib.escape(_freshness_label)}</div>'
+    if _freshness_label
+    else ""
+)
 st.markdown(
     f"""
 <div class="edp-header">
@@ -3753,7 +3759,7 @@ st.markdown(
     <h1>EDP Analytics Agent</h1>
     <p>{_subtitle}</p>
   </div>
-  <div class="edp-header-badge">Gold Layer &nbsp;&#x25CF;&nbsp; Live</div>
+  <div class="edp-header-badge">Gold Layer &nbsp;&#x25CF;&nbsp; Live{_freshness_html}</div>
 </div>
 """,
     unsafe_allow_html=True,
@@ -3861,14 +3867,15 @@ if question:
         str(filter_context.get("source_question") or question) if filter_context else question
     )
     lang = _detect_language(display_question)
-    n = len(st.session_state.history) + 1
+    _replacing_turn = filter_context and filter_context.get("source_turn")
+    n = filter_context["source_turn"] if _replacing_turn else len(st.session_state.history) + 1
     now_str = datetime.now(_BERLIN).strftime("%H:%M")
     question_label = _t("Question", lang)
     filtered_badge = ""
     if filter_context and filter_context.get("source_turn"):
         filtered_badge = (
-            f'<div class="filtered-link">Filtered view of Question {filter_context["source_turn"]}'
-            f'<span>{html_lib.escape(str(filter_context.get("filter_label", "")))}</span></div>'
+            f'<div class="active-filter-badge">Filter: '
+            f'{html_lib.escape(str(filter_context.get("filter_label", "")))}</div>'
         )
 
     # #1: Live turn also uses the card container so it matches history cards.
@@ -3960,12 +3967,14 @@ if question:
         if turn_data:
             st.session_state.session_id = turn_data["session_id"]
 
+            _filter_lbl = filter_context.get("filter_label", "") if filter_context else ""
             turn = {
                 "question": display_question,
                 "backend_question": question,
                 "display_question": display_question,
-                "source_turn": filter_context.get("source_turn") if filter_context else None,
-                "filter_label": filter_context.get("filter_label", "") if filter_context else "",
+                "source_turn": None,
+                "filter_label": _filter_lbl,
+                "filter_active": _filter_lbl,
                 "insight": turn_data["insight"],
                 "assumptions": turn_data.get("assumptions", []),
                 "html_chart": turn_data.get("html_chart"),
@@ -3980,11 +3989,14 @@ if question:
                 "rows": turn_data.get("rows", []),
                 "row_count": turn_data.get("row_count", len(turn_data.get("rows", []))),
                 "chart_height": turn_data.get("chart_height", 400),
-                "timestamp": now_str,  # #12: stored so card header shows it on replay
+                "timestamp": now_str,
                 "request_id": turn_data.get("request_id", ""),
                 "verdict": turn_data.get("verdict", "No"),
                 "discrepancy_detail": turn_data.get("discrepancy_detail", "None"),
             }
             _render_turn(turn, form_key="current", turn_number=n)
-            st.session_state.history.append(turn)
+            if _replacing_turn:
+                st.session_state.history[filter_context["source_turn"] - 1] = turn
+            else:
+                st.session_state.history.append(turn)
             st.rerun()
