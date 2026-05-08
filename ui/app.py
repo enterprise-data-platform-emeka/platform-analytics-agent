@@ -3725,7 +3725,6 @@ def _render_session_tools(sl: str, key_prefix: str, *, dark: bool = False) -> No
             st.caption(f"{i}. {label}")
 
 
-
 with st.sidebar:
     _render_session_tools(_session_language(), "sidebar", dark=True)
 
@@ -3741,9 +3740,7 @@ _subtitle = html_lib.escape(
 _freshness_label = ""
 if st.session_state.history:
     _last_t = st.session_state.history[-1]
-    _lp = _latest_period_label(
-        _last_t.get("columns", []) or [], _last_t.get("rows", []) or []
-    )
+    _lp = _latest_period_label(_last_t.get("columns", []) or [], _last_t.get("rows", []) or [])
     if _lp and _lp != "Current result set":
         _freshness_label = _lp
 _freshness_html = (
