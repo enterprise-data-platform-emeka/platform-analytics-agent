@@ -1419,7 +1419,6 @@ try:
             raise HTTPException(status_code=400, detail="session_id is required")
         try:
             import boto3
-            from botocore.exceptions import ClientError
 
             bucket = _session._config.aws.bronze_bucket
             region = _session._config.aws.region
