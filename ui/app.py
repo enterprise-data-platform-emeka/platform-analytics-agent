@@ -3405,6 +3405,13 @@ def _render_turn(turn: dict, form_key: str, turn_number: int | None = None) -> N
             with tab_table:
                 df = pd.DataFrame(turn["rows"])
                 st.markdown(_branded_table_html(df), unsafe_allow_html=True)
+                st.download_button(
+                    "Download CSV",
+                    data=df.to_csv(index=False),
+                    file_name=f"edp_data_q{form_key}.csv",
+                    mime="text/csv",
+                    key=f"csv_{form_key}",
+                )
         else:
             components.html(turn["html_chart"], height=chart_h + 20, scrolling=False)
 
