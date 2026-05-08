@@ -580,19 +580,22 @@ def _write_engineer_log(
     language: str,
     prompt_version: str,
 ) -> None:
-    """Write one engineer audit log row to S3 as a single-row CSV.
+    """Append one engineer audit log row to the session CSV in S3.
 
     Non-fatal: logs ERROR and returns normally on any failure.
     S3 key pattern:
-        metadata/engineer-log/date=YYYY-MM-DD/session={session_id}/{request_id}.csv
+        metadata/engineer-log/date=YYYY-MM-DD/{session_id}.csv
+
+    One file per session, all requests appended. The endpoint reads this
+    single file directly — no aggregation needed.
     """
     try:
         import boto3
+        from botocore.exceptions import ClientError
 
         date_str = datetime.now(UTC).strftime("%Y-%m-%d")
-        key = f"{_ENGINEER_LOG_PREFIX}/date={date_str}" f"/session={session_id}/{request_id}.csv"
+        key = f"{_ENGINEER_LOG_PREFIX}/date={date_str}/{session_id}.csv"
 
-        buf = io.StringIO()
         fieldnames = [
             "session_id",
             "request_id",
@@ -612,8 +615,23 @@ def _write_engineer_log(
             "language",
             "prompt_version",
         ]
+
+        s3 = boto3.client("s3", region_name=aws_config.region)
+
+        # Read existing session CSV (if any) — first request creates the file.
+        existing_content = ""
+        try:
+            resp = s3.get_object(Bucket=aws_config.bronze_bucket, Key=key)
+            existing_content = resp["Body"].read().decode("utf-8").rstrip("\n")
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "NoSuchKey":
+                raise
+
+        # Build the new row. Write header only when creating a fresh file.
+        buf = io.StringIO()
         writer = csv.DictWriter(buf, fieldnames=fieldnames)
-        writer.writeheader()
+        if not existing_content:
+            writer.writeheader()
         writer.writerow(
             {
                 "session_id": session_id,
@@ -636,18 +654,15 @@ def _write_engineer_log(
             }
         )
 
-        s3 = boto3.client("s3", region_name=aws_config.region)
+        combined = existing_content + "\n" + buf.getvalue() if existing_content else buf.getvalue()
+
         s3.put_object(
             Bucket=aws_config.bronze_bucket,
             Key=key,
-            Body=buf.getvalue().encode("utf-8"),
+            Body=combined.encode("utf-8"),
             ContentType="text/csv",
         )
-        logger.info(
-            "Engineer log written: s3://%s/%s",
-            aws_config.bronze_bucket,
-            key,
-        )
+        logger.info("Engineer log appended: s3://%s/%s", aws_config.bronze_bucket, key)
     except Exception as exc:  # noqa: BLE001
         logger.error("Engineer log write failed (non-fatal): %s", exc, exc_info=True)
 
@@ -1390,12 +1405,10 @@ try:
 
     @app.get("/engineer-log")
     async def engineer_log(session_id: str) -> dict[str, Any]:
-        """Return all engineer log rows for a session as a CSV string.
+        """Return the session CSV from S3 as a single GET.
 
-        Reads every per-request CSV file under
-        metadata/engineer-log/date=*/session={session_id}/*.csv
-        from the Bronze bucket, concatenates the rows (header once), and
-        returns the result so the UI can offer a one-click download.
+        Reads metadata/engineer-log/date=*/{session_id}.csv — one file per
+        session, so no aggregation is needed. Returns the file contents directly.
 
         Returns {"csv": "<csv text>", "row_count": n} on success.
         Returns {"csv": "", "row_count": 0} if no log exists yet.
@@ -1406,44 +1419,30 @@ try:
             raise HTTPException(status_code=400, detail="session_id is required")
         try:
             import boto3
-            from botocore.exceptions import ClientError
 
             bucket = _session._config.aws.bronze_bucket
             region = _session._config.aws.region
             s3 = boto3.client("s3", region_name=region)
-            prefix = f"{_ENGINEER_LOG_PREFIX}/"
-            paginator = s3.get_paginator("list_objects_v2")
-            session_suffix = f"/session={session_id}/"
-            keys: list[str] = []
-            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-                for entry in page.get("Contents", []):
-                    key: str = entry["Key"]
-                    if session_suffix in key and key.endswith(".csv"):
-                        keys.append(key)
 
-            if not keys:
+            # Find the session file across date partitions (sessions always
+            # start and end same day, so there will be exactly one match).
+            paginator = s3.get_paginator("list_objects_v2")
+            key: str | None = None
+            for page in paginator.paginate(Bucket=bucket, Prefix=f"{_ENGINEER_LOG_PREFIX}/"):
+                for entry in page.get("Contents", []):
+                    if entry["Key"].endswith(f"/{session_id}.csv"):
+                        key = entry["Key"]
+                        break
+                if key:
+                    break
+
+            if not key:
                 return {"csv": "", "row_count": 0}
 
-            keys.sort()
-            rows_out: list[str] = []
-            header_written = False
-            for key in keys:
-                try:
-                    response = s3.get_object(Bucket=bucket, Key=key)
-                    text: str = response["Body"].read().decode("utf-8")
-                    lines = text.splitlines()
-                    if not lines:
-                        continue
-                    if not header_written:
-                        rows_out.append(lines[0])  # header
-                        header_written = True
-                    if len(lines) > 1:
-                        rows_out.extend(lines[1:])
-                except ClientError:
-                    pass
-
-            csv_text = "\n".join(rows_out)
-            return {"csv": csv_text, "row_count": len(rows_out) - (1 if header_written else 0)}
+            resp = s3.get_object(Bucket=bucket, Key=key)
+            csv_text: str = resp["Body"].read().decode("utf-8")
+            row_count = max(0, len(csv_text.splitlines()) - 1)  # subtract header
+            return {"csv": csv_text, "row_count": row_count}
         except Exception as exc:  # noqa: BLE001
             logger.error("engineer-log fetch failed: %s", exc)
             raise HTTPException(status_code=500, detail="Could not retrieve engineer log") from exc

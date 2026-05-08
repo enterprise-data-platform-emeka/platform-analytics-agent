@@ -3672,57 +3672,27 @@ def _render_session_tools(sl: str, key_prefix: str, *, dark: bool = False) -> No
             use_container_width=True,
         )
 
-        # Engineer log download (Option A: one CSV file per request on S3).
-        # Two-phase: "Prepare" fetches and caches in session_state so the
-        # st.download_button is always rendered on the same frame as the data.
+        # Engineer log — auto-fetched after each answer, always ready to download.
         if st.session_state.session_id:
-            # Clear cached log when the session changes.
             if st.session_state.get("_log_sid") != st.session_state.session_id:
                 st.session_state["_log_csv"] = None
                 st.session_state["_log_rows"] = 0
                 st.session_state["_log_sid"] = st.session_state.session_id
 
-            if st.session_state.get("_log_csv") is None:
-                # Phase 1: fetch button
-                if st.button(
-                    _t("Prepare Session Log (CSV)", sl),
-                    key=f"{key_prefix}_prepare_log",
-                    use_container_width=True,
-                ):
-                    try:
-                        r = requests.get(
-                            f"{BACKEND_URL}/engineer-log",
-                            params={"session_id": st.session_state.session_id},
-                            timeout=15,
-                        )
-                        r.raise_for_status()
-                        payload = r.json()
-                        st.session_state["_log_csv"] = payload.get("csv", "") or ""
-                        st.session_state["_log_rows"] = payload.get("row_count", 0)
-                    except Exception as exc:  # noqa: BLE001
-                        st.error(f"Could not fetch log: {exc}")
-                    st.rerun()
-            else:
-                # Phase 2: save button — always visible after fetch
+            if st.session_state.get("_log_csv"):
                 log_label = (
                     f"{_t('Download Session Log', sl)} ({st.session_state['_log_rows']} rows)"
                 )
-                if st.session_state["_log_csv"]:
-                    st.download_button(
-                        label=log_label,
-                        data=st.session_state["_log_csv"].encode("utf-8"),
-                        file_name=f"edp_engineer_log_{st.session_state.session_id[:8]}.csv",
-                        mime="text/csv",
-                        key=f"{key_prefix}_download_log",
-                        use_container_width=True,
-                    )
-                else:
-                    st.caption(_t("No log entries yet for this session.", sl))
-                if st.button(
-                    _t("Refresh log", sl), key=f"{key_prefix}_refresh_log", use_container_width=True
-                ):
-                    st.session_state["_log_csv"] = None
-                    st.rerun()
+                st.download_button(
+                    label=log_label,
+                    data=st.session_state["_log_csv"].encode("utf-8"),
+                    file_name=f"edp_engineer_log_{st.session_state.session_id[:8]}.csv",
+                    mime="text/csv",
+                    key=f"{key_prefix}_download_log",
+                    use_container_width=True,
+                )
+            else:
+                st.caption(_t("Session log updates after each answer.", sl))
 
         st.divider()
         st.caption(f"**{_t('History', sl)}**")
@@ -3810,33 +3780,17 @@ with bar_export:
         st.button("Export", disabled=True, use_container_width=True)
 with bar_logs:
     with st.popover("Logs", use_container_width=True):
-        if not st.session_state.session_id:
-            st.caption("Logs appear after the first analytical answer.")
+        if not st.session_state.session_id or not st.session_state.get("_log_csv"):
+            st.caption("Session log updates automatically after each answer.")
         else:
-            if st.button("Prepare Session Log", key="top_prepare_log", use_container_width=True):
-                try:
-                    r = requests.get(
-                        f"{BACKEND_URL}/engineer-log",
-                        params={"session_id": st.session_state.session_id},
-                        timeout=15,
-                    )
-                    r.raise_for_status()
-                    payload = r.json()
-                    st.session_state["_log_csv"] = payload.get("csv", "") or ""
-                    st.session_state["_log_rows"] = payload.get("row_count", 0)
-                    st.session_state["_log_sid"] = st.session_state.session_id
-                except Exception as exc:  # noqa: BLE001
-                    st.error(f"Could not fetch log: {exc}")
-                st.rerun()
-            if st.session_state.get("_log_csv"):
-                st.download_button(
-                    f"Download Log ({st.session_state.get('_log_rows', 0)} rows)",
-                    data=st.session_state["_log_csv"].encode("utf-8"),
-                    file_name=f"edp_engineer_log_{st.session_state.session_id[:8]}.csv",
-                    mime="text/csv",
-                    key="top_download_log",
-                    use_container_width=True,
-                )
+            st.download_button(
+                f"Download Log ({st.session_state.get('_log_rows', 0)} rows)",
+                data=st.session_state["_log_csv"].encode("utf-8"),
+                file_name=f"edp_engineer_log_{st.session_state.session_id[:8]}.csv",
+                mime="text/csv",
+                key="top_download_log",
+                use_container_width=True,
+            )
 
 # ── Conversation history ──────────────────────────────────────────────────────
 # #1: Each turn is a numbered card, not a chat bubble.
@@ -4003,4 +3957,18 @@ if question:
                 st.session_state.history[filter_context["source_turn"] - 1] = turn
             else:
                 st.session_state.history.append(turn)
+            # Auto-refresh session log from S3 after each answer.
+            try:
+                _log_r = requests.get(
+                    f"{BACKEND_URL}/engineer-log",
+                    params={"session_id": st.session_state.session_id},
+                    timeout=10,
+                )
+                if _log_r.ok:
+                    _log_payload = _log_r.json()
+                    st.session_state["_log_csv"] = _log_payload.get("csv", "") or ""
+                    st.session_state["_log_rows"] = _log_payload.get("row_count", 0)
+                    st.session_state["_log_sid"] = st.session_state.session_id
+            except Exception:  # noqa: BLE001
+                pass  # non-fatal — log download still works manually
             st.rerun()
