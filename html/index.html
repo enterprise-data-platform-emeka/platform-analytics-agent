@@ -105,6 +105,40 @@
     .metric strong { display: block; margin-top: 0.35rem; font-size: 1.6rem; color: var(--ink); }
     .diagram { margin: 1rem 0; overflow: hidden; border-radius: 22px; border: 1px solid var(--line); box-shadow: var(--shadow); }
     .diagram svg { display: block; width: 100%; height: auto; }
+    .sequence {
+      margin: 1rem 0;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: #fff;
+      box-shadow: var(--shadow);
+      overflow-x: auto;
+    }
+    .sequence svg {
+      display: block;
+      min-width: 1180px;
+      width: 100%;
+      height: auto;
+    }
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.8rem;
+      margin: 1rem 0;
+    }
+    .legend .panel {
+      box-shadow: none;
+      background: var(--surface-soft);
+    }
+    .legend strong {
+      display: block;
+      color: var(--ink);
+      margin-bottom: 0.35rem;
+    }
+    .legend span {
+      color: var(--muted);
+      line-height: 1.5;
+      font-size: 0.92rem;
+    }
     .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; }
     .panel { padding: 1.1rem; }
     .panel h2, .panel h3 { margin: 0; }
@@ -145,7 +179,7 @@
     .wide { grid-column: 1 / -1; }
     .footer { margin-top: 1.5rem; color: var(--muted); text-align: center; font-size: 0.9rem; }
     @media (max-width: 900px) {
-      .hero, .grid { grid-template-columns: 1fr; }
+      .hero, .grid, .legend { grid-template-columns: 1fr; }
       .topbar { align-items: flex-start; flex-direction: column; }
       h1 { font-size: 2.4rem; }
     }
@@ -245,6 +279,142 @@
           
         </g>
     </svg>
+    </section>
+
+    <section class="panel wide" id="request-lifecycle">
+      <div class="eyebrow">Request lifecycle</div>
+      <h2>What happens when a stakeholder asks a question</h2>
+      <p>The Analytics Agent is more than a text box over SQL. The backend generates SQL, validates guardrails, infers query intent, checks for mismatch against the original business question, optionally corrects the query, runs Athena, generates the answer, and writes an audit trail.</p>
+    </section>
+
+    <section class="sequence" aria-label="Analytics Agent request lifecycle sequence diagram">
+      <svg viewBox="0 0 1500 980" role="img" aria-labelledby="seq-title seq-desc">
+        <title id="seq-title">Analytics Agent request lifecycle</title>
+        <desc id="seq-desc">Sequence diagram from stakeholder browser through load balancer, Streamlit UI, FastAPI backend, Claude API, Athena, and S3 audit logging.</desc>
+        <defs>
+          <marker id="seq-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L0,6 L9,3 z" fill="#334155"/>
+          </marker>
+          <marker id="seq-blue-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L0,6 L9,3 z" fill="#1d4ed8"/>
+          </marker>
+          <linearGradient id="seq-bg" x1="0" x2="1" y1="0" y2="1">
+            <stop stop-color="#eff6ff"/>
+            <stop offset="1" stop-color="#ffffff"/>
+          </linearGradient>
+        </defs>
+
+        <rect width="1500" height="980" rx="24" fill="url(#seq-bg)"/>
+        <text x="34" y="48" fill="#0f172a" font-size="26" font-weight="900">End-to-end agent flow</text>
+        <text x="34" y="76" fill="#475569" font-size="15">The UI and backend run in the same ECS task; Claude and Athena are external calls; audit artifacts land in S3.</text>
+
+        <g font-size="13" font-weight="800">
+          <rect x="52" y="110" width="132" height="44" rx="10" fill="#fff" stroke="#bfdbfe"/>
+          <text x="118" y="137" text-anchor="middle">Stakeholder</text>
+
+          <rect x="238" y="110" width="150" height="44" rx="10" fill="#fff" stroke="#bfdbfe"/>
+          <text x="313" y="137" text-anchor="middle">AWS ALB</text>
+
+          <rect x="444" y="110" width="160" height="44" rx="10" fill="#fff" stroke="#bfdbfe"/>
+          <text x="524" y="137" text-anchor="middle">Streamlit UI</text>
+
+          <rect x="672" y="110" width="170" height="44" rx="10" fill="#fff" stroke="#bfdbfe"/>
+          <text x="757" y="137" text-anchor="middle">FastAPI backend</text>
+
+          <rect x="930" y="110" width="140" height="44" rx="10" fill="#fff" stroke="#bfdbfe"/>
+          <text x="1000" y="137" text-anchor="middle">Claude API</text>
+
+          <rect x="1130" y="110" width="150" height="44" rx="10" fill="#fff" stroke="#bfdbfe"/>
+          <text x="1205" y="137" text-anchor="middle">Athena</text>
+
+          <rect x="1332" y="110" width="138" height="44" rx="10" fill="#fff" stroke="#bfdbfe"/>
+          <text x="1401" y="137" text-anchor="middle">S3 Gold/Audit</text>
+        </g>
+
+        <rect x="424" y="164" width="438" height="30" rx="6" fill="#fef3c7" stroke="#f59e0b"/>
+        <text x="643" y="184" text-anchor="middle" fill="#78350f" font-size="12" font-weight="800">Streamlit and FastAPI live in the same ECS container</text>
+
+        <g stroke="#93c5fd" stroke-width="2">
+          <line x1="118" y1="154" x2="118" y2="910"/>
+          <line x1="313" y1="154" x2="313" y2="910"/>
+          <line x1="524" y1="154" x2="524" y2="910"/>
+          <line x1="757" y1="154" x2="757" y2="910"/>
+          <line x1="1000" y1="154" x2="1000" y2="910"/>
+          <line x1="1205" y1="154" x2="1205" y2="910"/>
+          <line x1="1401" y1="154" x2="1401" y2="910"/>
+        </g>
+
+        <g font-size="12" fill="#0f172a">
+          <path d="M118 222 H313" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
+          <text x="154" y="214">1. Open app</text>
+
+          <path d="M313 260 H524" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
+          <text x="338" y="252">2. Forward UI request</text>
+
+          <path d="M524 298 H118" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#seq-arrow)"/>
+          <text x="190" y="290">3. Browser renders question form</text>
+
+          <path d="M118 342 H524" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
+          <text x="164" y="334">4. Submit natural language question</text>
+
+          <path d="M524 382 H757" stroke="#1d4ed8" stroke-width="2.5" marker-end="url(#seq-blue-arrow)"/>
+          <text x="554" y="374">5. Internal call to backend</text>
+
+          <path d="M757 430 H1000" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
+          <text x="814" y="422">6. Claude call: generate SQL</text>
+          <path d="M1000 462 H757" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#seq-arrow)"/>
+          <text x="850" y="454">SQL query</text>
+
+          <path d="M757 500 c-42 0 -42 42 0 42" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
+          <text x="604" y="524">7. Validate SQL guardrails</text>
+
+          <path d="M757 578 H1000" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
+          <text x="790" y="570">8. Claude call: infer SQL intent</text>
+          <path d="M1000 610 H757" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#seq-arrow)"/>
+          <text x="842" y="602">Inferred intent</text>
+
+          <path d="M757 648 H1000" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
+          <text x="778" y="640">9. Compare question vs inferred intent</text>
+          <path d="M1000 680 H757" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#seq-arrow)"/>
+          <text x="805" y="672">Verdict + discrepancy detail</text>
+        </g>
+
+        <rect x="684" y="704" width="392" height="116" rx="14" fill="#f8fafc" stroke="#7c3aed" stroke-dasharray="5 4"/>
+        <text x="704" y="728" fill="#5b21b6" font-size="12" font-weight="900">Correction loop when intent mismatch is detected</text>
+        <path d="M757 756 H1000" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
+        <text x="795" y="748" fill="#0f172a" font-size="12">10. Regenerate SQL with correction detail</text>
+        <path d="M1000 786 H757" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#seq-arrow)"/>
+        <text x="844" y="778" fill="#0f172a" font-size="12">Corrected SQL</text>
+        <path d="M757 806 c-30 0 -30 28 0 28" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
+        <text x="704" y="843" fill="#0f172a" font-size="12">Validate corrected SQL</text>
+
+        <g font-size="12" fill="#0f172a">
+          <path d="M757 860 H1205" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
+          <text x="875" y="852">11. Run query against Gold tables</text>
+          <path d="M1205 890 H757" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#seq-arrow)"/>
+          <text x="904" y="882">Rows, columns, bytes scanned, execution ID</text>
+
+          <path d="M757 930 H1000" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
+          <text x="822" y="922">12. Claude call: generate insight</text>
+          <path d="M1000 956 H757" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#seq-arrow)"/>
+          <text x="808" y="948">Insight, chart title, summary</text>
+        </g>
+
+        <path d="M757 902 H1401" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
+        <text x="1010" y="894" fill="#0f172a" font-size="12">13. Write audit log</text>
+
+        <path d="M757 940 H524" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#seq-arrow)"/>
+        <text x="555" y="932" fill="#0f172a" font-size="12">14. Return insight, chart, cost, verdict</text>
+        <path d="M524 900 H118" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#seq-arrow)"/>
+        <text x="204" y="892" fill="#0f172a" font-size="12">15. Render answer and exports in browser</text>
+      </svg>
+    </section>
+
+    <section class="legend">
+      <article class="panel"><strong>Governed generation</strong><span>SQL is produced from schema context, then checked before it can touch Athena.</span></article>
+      <article class="panel"><strong>Intent verification</strong><span>The agent asks Claude to infer what the SQL actually answers and compares that to the user's question.</span></article>
+      <article class="panel"><strong>Correction loop</strong><span>If the SQL answers the wrong question, the backend regenerates and revalidates it before execution.</span></article>
+      <article class="panel"><strong>Audit trail</strong><span>Each answer records request ID, SQL, cost, scanned bytes, verdict, and session metadata to S3.</span></article>
     </section>
 
     <section class="grid" id="sections">
