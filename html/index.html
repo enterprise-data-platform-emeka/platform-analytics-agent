@@ -105,19 +105,105 @@
     .metric strong { display: block; margin-top: 0.35rem; font-size: 1.6rem; color: var(--ink); }
     .diagram { margin: 1rem 0; overflow: hidden; border-radius: 22px; border: 1px solid var(--line); box-shadow: var(--shadow); }
     .diagram svg { display: block; width: 100%; height: auto; }
-    .sequence {
+    .flow-suite {
+      display: grid;
+      gap: 1rem;
       margin: 1rem 0;
+    }
+    .flow-board {
       border: 1px solid var(--line);
       border-radius: 22px;
       background: #fff;
       box-shadow: var(--shadow);
       overflow-x: auto;
     }
-    .sequence svg {
+    .flow-board svg {
       display: block;
-      min-width: 1180px;
+      min-width: 980px;
       width: 100%;
       height: auto;
+    }
+    .flow-title {
+      padding: 1rem 1rem 0;
+    }
+    .flow-title h3 {
+      margin: 0.25rem 0 0;
+      font-size: 1.15rem;
+    }
+    .flow-title p {
+      max-width: 860px;
+      margin: 0.4rem 0 0.9rem;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    .flow-arrow .hit {
+      stroke: transparent;
+      stroke-width: 18;
+      fill: none;
+      pointer-events: stroke;
+    }
+    .flow-arrow .line {
+      fill: none;
+      stroke: #334155;
+      stroke-width: 2.4;
+      marker-end: url(#arrow-dark);
+      transition: stroke 0.18s ease, stroke-width 0.18s ease, filter 0.18s ease;
+    }
+    .flow-arrow.return .line {
+      stroke: #64748b;
+      stroke-dasharray: 6 6;
+      marker-end: url(#arrow-muted);
+    }
+    .flow-arrow.accent .line {
+      stroke: var(--accent);
+      stroke-width: 3;
+      marker-end: url(#arrow-accent);
+    }
+    .flow-arrow:hover .line {
+      stroke: var(--accent);
+      stroke-width: 4;
+      stroke-dasharray: 12 8;
+      filter: drop-shadow(0 0 8px color-mix(in srgb, var(--accent) 72%, transparent));
+      animation: flowDash 0.8s linear infinite;
+      marker-end: url(#arrow-accent);
+    }
+    .flow-arrow:hover text {
+      fill: var(--accent);
+      font-weight: 900;
+    }
+    .flow-arrow text {
+      fill: #0f172a;
+      font-size: 12px;
+      pointer-events: none;
+      transition: fill 0.18s ease, font-weight 0.18s ease;
+    }
+    .swimlane {
+      stroke: #93c5fd;
+      stroke-width: 2;
+      opacity: 0.75;
+    }
+    .actor-box {
+      fill: #fff;
+      stroke: #bfdbfe;
+      stroke-width: 1.5;
+    }
+    .actor-label {
+      fill: #0f172a;
+      font-size: 13px;
+      font-weight: 900;
+      text-anchor: middle;
+    }
+    .note-box {
+      fill: #fef3c7;
+      stroke: #f59e0b;
+    }
+    .loop-box {
+      fill: #faf5ff;
+      stroke: #8b5cf6;
+      stroke-dasharray: 6 5;
+    }
+    @keyframes flowDash {
+      to { stroke-dashoffset: -40; }
     }
     .legend {
       display: grid;
@@ -145,12 +231,67 @@
     .panel h2 { font-size: 1.25rem; }
     .panel h3 { font-size: 1rem; }
     .panel p { color: var(--muted); line-height: 1.58; }
-    .section-card {
-      min-height: 170px;
+    .visual-card {
+      min-height: 180px;
+      display: grid;
+      gap: 0.85rem;
+      align-content: start;
+      border-top: 4px solid color-mix(in srgb, var(--accent) 78%, #ffffff);
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, #fff), #fff 44%),
+        #fff;
+    }
+    .visual-card svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    .visual-card .caption {
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.45;
+    }
+    .mini-flow {
       display: flex;
-      flex-direction: column;
-      gap: 0.7rem;
-      border-top: 4px solid var(--accent);
+      align-items: center;
+      gap: 0.45rem;
+      flex-wrap: wrap;
+      margin-top: 0.25rem;
+    }
+    .mini-node {
+      padding: 0.45rem 0.58rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      font-size: 0.8rem;
+      font-weight: 850;
+      color: var(--ink);
+    }
+    .mini-arrow {
+      color: var(--accent);
+      font-weight: 900;
+    }
+    .surface-map {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.75rem;
+      margin-top: 0.9rem;
+    }
+    .surface-map div {
+      padding: 0.85rem;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface-soft);
+    }
+    .surface-map strong {
+      display: block;
+      margin-bottom: 0.25rem;
+      color: var(--ink);
+    }
+    .surface-map span {
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.42;
     }
     .pill-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.85rem; }
     .pill {
@@ -165,7 +306,6 @@
       font-size: 0.83rem;
       font-weight: 750;
     }
-    .command-list { display: grid; gap: 0.55rem; margin-top: 0.9rem; }
     code {
       display: block;
       padding: 0.74rem 0.85rem;
@@ -179,9 +319,10 @@
     .wide { grid-column: 1 / -1; }
     .footer { margin-top: 1.5rem; color: var(--muted); text-align: center; font-size: 0.9rem; }
     @media (max-width: 900px) {
-      .hero, .grid, .legend { grid-template-columns: 1fr; }
+      .hero, .grid, .legend, .surface-map { grid-template-columns: 1fr; }
       .topbar { align-items: flex-start; flex-direction: column; }
       h1 { font-size: 2.4rem; }
+      .flow-board svg { min-width: 860px; }
     }
   </style>
 </head>
@@ -192,7 +333,7 @@
       <a href="../README.md">README.md</a>
       <a href="#diagram">Diagram</a>
       <a href="#sections">Sections</a>
-      <a href="#commands">Commands</a>
+      <a href="#runtime">Runtime</a>
     </nav>
   </header>
 
@@ -282,191 +423,225 @@
     </section>
 
     <section class="panel wide" id="request-lifecycle">
-      <div class="eyebrow">Request lifecycle</div>
-      <h2>What happens when a stakeholder asks a question</h2>
-      <p>The Analytics Agent is more than a text box over SQL. The backend generates SQL, validates guardrails, infers query intent, checks for mismatch against the original business question, optionally corrects the query, runs Athena, generates the answer, and writes an audit trail.</p>
+      <div class="eyebrow">Interactive request flows</div>
+      <h2>Three front doors, one governed analytics brain</h2>
+      <p>Hover any arrow to highlight the direction of travel. The Streamlit UI, custom HTML UI, and Slack/MCP gateway all converge on the same FastAPI analytics backend, which performs SQL generation, guardrail validation, intent checking, Athena execution, insight generation, and audit logging.</p>
     </section>
 
-    <section class="sequence" aria-label="Analytics Agent request lifecycle sequence diagram">
-      <svg viewBox="0 0 1500 980" role="img" aria-labelledby="seq-title seq-desc">
-        <title id="seq-title">Analytics Agent request lifecycle</title>
-        <desc id="seq-desc">Sequence diagram from stakeholder browser through load balancer, Streamlit UI, FastAPI backend, Claude API, Athena, and S3 audit logging.</desc>
-        <defs>
-          <marker id="seq-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-            <path d="M0,0 L0,6 L9,3 z" fill="#334155"/>
-          </marker>
-          <marker id="seq-blue-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-            <path d="M0,0 L0,6 L9,3 z" fill="#1d4ed8"/>
-          </marker>
-          <linearGradient id="seq-bg" x1="0" x2="1" y1="0" y2="1">
-            <stop stop-color="#eff6ff"/>
-            <stop offset="1" stop-color="#ffffff"/>
-          </linearGradient>
-        </defs>
+    <section class="flow-suite" aria-label="Analytics Agent frontend flow diagrams">
+      <article class="flow-board" id="streamlit-flow">
+        <div class="flow-title">
+          <div class="eyebrow">Streamlit frontend</div>
+          <h3>Stakeholder browser to Streamlit UI and FastAPI backend</h3>
+          <p>The Streamlit page and FastAPI backend share one ECS container, so the UI hands the question to the backend through localhost before the governed agent loop begins.</p>
+        </div>
+        <svg viewBox="0 0 1320 760" role="img" aria-labelledby="streamlit-title">
+          <title id="streamlit-title">Streamlit UI request flow</title>
+          <defs>
+            <marker id="arrow-dark" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#334155"/></marker>
+            <marker id="arrow-muted" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#64748b"/></marker>
+            <marker id="arrow-accent" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#1d4ed8"/></marker>
+          </defs>
+          <rect x="0" y="0" width="1320" height="760" rx="22" fill="#f8fbff"/>
+          <g>
+            <line class="swimlane" x1="92" y1="88" x2="92" y2="705"/><line class="swimlane" x1="250" y1="88" x2="250" y2="705"/><line class="swimlane" x1="420" y1="88" x2="420" y2="705"/><line class="swimlane" x1="620" y1="88" x2="620" y2="705"/><line class="swimlane" x1="840" y1="88" x2="840" y2="705"/><line class="swimlane" x1="1020" y1="88" x2="1020" y2="705"/><line class="swimlane" x1="1190" y1="88" x2="1190" y2="705"/>
+            <rect class="actor-box" x="34" y="40" width="116" height="42" rx="10"/><text class="actor-label" x="92" y="66">Stakeholder</text>
+            <rect class="actor-box" x="188" y="40" width="124" height="42" rx="10"/><text class="actor-label" x="250" y="66">AWS ALB</text>
+            <rect class="actor-box" x="352" y="40" width="136" height="42" rx="10"/><text class="actor-label" x="420" y="66">Streamlit UI</text>
+            <rect class="actor-box" x="544" y="40" width="152" height="42" rx="10"/><text class="actor-label" x="620" y="66">FastAPI backend</text>
+            <rect class="actor-box" x="778" y="40" width="124" height="42" rx="10"/><text class="actor-label" x="840" y="66">Claude API</text>
+            <rect class="actor-box" x="956" y="40" width="128" height="42" rx="10"/><text class="actor-label" x="1020" y="66">Athena</text>
+            <rect class="actor-box" x="1130" y="40" width="120" height="42" rx="10"/><text class="actor-label" x="1190" y="66">S3 Audit</text>
+            <rect class="note-box" x="342" y="96" width="366" height="28" rx="7"/><text x="525" y="115" text-anchor="middle" fill="#78350f" font-size="12" font-weight="900">Streamlit and FastAPI run in the same ECS task</text>
+          </g>
+          <g class="flow-arrow"><path class="hit" d="M92 150 H250"/><path class="line" d="M92 150 H250"/><text x="116" y="140">1. Open app</text></g>
+          <g class="flow-arrow"><path class="hit" d="M250 190 H420"/><path class="line" d="M250 190 H420"/><text x="276" y="180">2. Forward UI request</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M420 230 H92"/><path class="line" d="M420 230 H92"/><text x="186" y="220">3. Render question form</text></g>
+          <g class="flow-arrow"><path class="hit" d="M92 280 H420"/><path class="line" d="M92 280 H420"/><text x="150" y="270">4. Submit question</text></g>
+          <g class="flow-arrow accent"><path class="hit" d="M420 326 H620"/><path class="line" d="M420 326 H620"/><text x="448" y="316">5. Local backend call</text></g>
+          <g class="flow-arrow"><path class="hit" d="M620 376 H840"/><path class="line" d="M620 376 H840"/><text x="680" y="366">6. Generate SQL</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M840 408 H620"/><path class="line" d="M840 408 H620"/><text x="700" y="398">SQL query</text></g>
+          <g class="flow-arrow"><path class="hit" d="M620 450 C570 450 570 492 620 492"/><path class="line" d="M620 450 C570 450 570 492 620 492"/><text x="454" y="474">7. Validate guardrails</text></g>
+          <g class="flow-arrow"><path class="hit" d="M620 536 H840"/><path class="line" d="M620 536 H840"/><text x="660" y="526">8. Intent check + insight</text></g>
+          <g class="flow-arrow"><path class="hit" d="M620 590 H1020"/><path class="line" d="M620 590 H1020"/><text x="730" y="580">9. Run Athena query</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M1020 622 H620"/><path class="line" d="M1020 622 H620"/><text x="748" y="612">Rows, cost, execution ID</text></g>
+          <g class="flow-arrow"><path class="hit" d="M620 658 H1190"/><path class="line" d="M620 658 H1190"/><text x="835" y="648">10. Write audit log</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M620 692 H92"/><path class="line" d="M620 692 H92"/><text x="252" y="682">11. Render answer, chart, KPI cards, exports</text></g>
+        </svg>
+      </article>
 
-        <rect width="1500" height="980" rx="24" fill="url(#seq-bg)"/>
-        <text x="34" y="48" fill="#0f172a" font-size="26" font-weight="900">End-to-end agent flow</text>
-        <text x="34" y="76" fill="#475569" font-size="15">The UI and backend run in the same ECS task; Claude and Athena are external calls; audit artifacts land in S3.</text>
+      <article class="flow-board" id="html-flow">
+        <div class="flow-title">
+          <div class="eyebrow">Custom HTML frontend</div>
+          <h3>Standalone web dashboard to the existing analytics backend</h3>
+          <p>The HTML dashboard is a separate ECS service. It serves static UI assets, proxies API calls to FastAPI, and preserves the backend reasoning loop without changing Streamlit.</p>
+        </div>
+        <svg viewBox="0 0 1320 680" role="img" aria-labelledby="html-title">
+          <title id="html-title">Custom HTML web frontend flow</title>
+          <defs>
+            <marker id="arrow-dark" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#334155"/></marker>
+            <marker id="arrow-muted" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#64748b"/></marker>
+            <marker id="arrow-accent" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#1d4ed8"/></marker>
+          </defs>
+          <rect x="0" y="0" width="1320" height="680" rx="22" fill="#fbfdff"/>
+          <g>
+            <line class="swimlane" x1="96" y1="88" x2="96" y2="625"/><line class="swimlane" x1="260" y1="88" x2="260" y2="625"/><line class="swimlane" x1="455" y1="88" x2="455" y2="625"/><line class="swimlane" x1="650" y1="88" x2="650" y2="625"/><line class="swimlane" x1="850" y1="88" x2="850" y2="625"/><line class="swimlane" x1="1040" y1="88" x2="1040" y2="625"/><line class="swimlane" x1="1200" y1="88" x2="1200" y2="625"/>
+            <rect class="actor-box" x="38" y="40" width="116" height="42" rx="10"/><text class="actor-label" x="96" y="66">Stakeholder</text>
+            <rect class="actor-box" x="198" y="40" width="124" height="42" rx="10"/><text class="actor-label" x="260" y="66">AWS ALB</text>
+            <rect class="actor-box" x="375" y="40" width="160" height="42" rx="10"/><text class="actor-label" x="455" y="66">HTML web ECS</text>
+            <rect class="actor-box" x="574" y="40" width="152" height="42" rx="10"/><text class="actor-label" x="650" y="66">FastAPI backend</text>
+            <rect class="actor-box" x="788" y="40" width="124" height="42" rx="10"/><text class="actor-label" x="850" y="66">Claude API</text>
+            <rect class="actor-box" x="976" y="40" width="128" height="42" rx="10"/><text class="actor-label" x="1040" y="66">Athena</text>
+            <rect class="actor-box" x="1140" y="40" width="120" height="42" rx="10"/><text class="actor-label" x="1200" y="66">S3 Audit</text>
+          </g>
+          <g class="flow-arrow"><path class="hit" d="M96 138 H260"/><path class="line" d="M96 138 H260"/><text x="126" y="128">1. Open web URL</text></g>
+          <g class="flow-arrow"><path class="hit" d="M260 178 H455"/><path class="line" d="M260 178 H455"/><text x="292" y="168">2. Serve HTML/CSS/JS</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M455 218 H96"/><path class="line" d="M455 218 H96"/><text x="188" y="208">3. Dashboard renders in browser</text></g>
+          <g class="flow-arrow accent"><path class="hit" d="M96 272 H455"/><path class="line" d="M96 272 H455"/><text x="154" y="262">4. POST /api/ask/stream</text></g>
+          <g class="flow-arrow accent"><path class="hit" d="M455 318 H650"/><path class="line" d="M455 318 H650"/><text x="488" y="308">5. Proxy to FastAPI</text></g>
+          <g class="flow-arrow"><path class="hit" d="M650 366 H850"/><path class="line" d="M650 366 H850"/><text x="704" y="356">6. Generate + verify SQL</text></g>
+          <g class="flow-arrow"><path class="hit" d="M650 424 H1040"/><path class="line" d="M650 424 H1040"/><text x="760" y="414">7. Execute governed query</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M1040 458 H650"/><path class="line" d="M1040 458 H650"/><text x="790" y="448">Rows and scan cost</text></g>
+          <g class="flow-arrow"><path class="hit" d="M650 502 H1200"/><path class="line" d="M650 502 H1200"/><text x="870" y="492">8. Audit request</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M650 552 H455"/><path class="line" d="M650 552 H455"/><text x="484" y="542">9. Stream answer JSON</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M455 594 H96"/><path class="line" d="M455 594 H96"/><text x="175" y="584">10. KPI cards, chart, CSV/PDF export</text></g>
+        </svg>
+      </article>
 
-        <g font-size="13" font-weight="800">
-          <rect x="52" y="110" width="132" height="44" rx="10" fill="#fff" stroke="#bfdbfe"/>
-          <text x="118" y="137" text-anchor="middle">Stakeholder</text>
-
-          <rect x="238" y="110" width="150" height="44" rx="10" fill="#fff" stroke="#bfdbfe"/>
-          <text x="313" y="137" text-anchor="middle">AWS ALB</text>
-
-          <rect x="444" y="110" width="160" height="44" rx="10" fill="#fff" stroke="#bfdbfe"/>
-          <text x="524" y="137" text-anchor="middle">Streamlit UI</text>
-
-          <rect x="672" y="110" width="170" height="44" rx="10" fill="#fff" stroke="#bfdbfe"/>
-          <text x="757" y="137" text-anchor="middle">FastAPI backend</text>
-
-          <rect x="930" y="110" width="140" height="44" rx="10" fill="#fff" stroke="#bfdbfe"/>
-          <text x="1000" y="137" text-anchor="middle">Claude API</text>
-
-          <rect x="1130" y="110" width="150" height="44" rx="10" fill="#fff" stroke="#bfdbfe"/>
-          <text x="1205" y="137" text-anchor="middle">Athena</text>
-
-          <rect x="1332" y="110" width="138" height="44" rx="10" fill="#fff" stroke="#bfdbfe"/>
-          <text x="1401" y="137" text-anchor="middle">S3 Gold/Audit</text>
-        </g>
-
-        <rect x="424" y="164" width="438" height="30" rx="6" fill="#fef3c7" stroke="#f59e0b"/>
-        <text x="643" y="184" text-anchor="middle" fill="#78350f" font-size="12" font-weight="800">Streamlit and FastAPI live in the same ECS container</text>
-
-        <g stroke="#93c5fd" stroke-width="2">
-          <line x1="118" y1="154" x2="118" y2="910"/>
-          <line x1="313" y1="154" x2="313" y2="910"/>
-          <line x1="524" y1="154" x2="524" y2="910"/>
-          <line x1="757" y1="154" x2="757" y2="910"/>
-          <line x1="1000" y1="154" x2="1000" y2="910"/>
-          <line x1="1205" y1="154" x2="1205" y2="910"/>
-          <line x1="1401" y1="154" x2="1401" y2="910"/>
-        </g>
-
-        <g font-size="12" fill="#0f172a">
-          <path d="M118 222 H313" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
-          <text x="154" y="214">1. Open app</text>
-
-          <path d="M313 260 H524" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
-          <text x="338" y="252">2. Forward UI request</text>
-
-          <path d="M524 298 H118" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#seq-arrow)"/>
-          <text x="190" y="290">3. Browser renders question form</text>
-
-          <path d="M118 342 H524" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
-          <text x="164" y="334">4. Submit natural language question</text>
-
-          <path d="M524 382 H757" stroke="#1d4ed8" stroke-width="2.5" marker-end="url(#seq-blue-arrow)"/>
-          <text x="554" y="374">5. Internal call to backend</text>
-
-          <path d="M757 430 H1000" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
-          <text x="814" y="422">6. Claude call: generate SQL</text>
-          <path d="M1000 462 H757" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#seq-arrow)"/>
-          <text x="850" y="454">SQL query</text>
-
-          <path d="M757 500 c-42 0 -42 42 0 42" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
-          <text x="604" y="524">7. Validate SQL guardrails</text>
-
-          <path d="M757 578 H1000" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
-          <text x="790" y="570">8. Claude call: infer SQL intent</text>
-          <path d="M1000 610 H757" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#seq-arrow)"/>
-          <text x="842" y="602">Inferred intent</text>
-
-          <path d="M757 648 H1000" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
-          <text x="778" y="640">9. Compare question vs inferred intent</text>
-          <path d="M1000 680 H757" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#seq-arrow)"/>
-          <text x="805" y="672">Verdict + discrepancy detail</text>
-        </g>
-
-        <rect x="684" y="704" width="392" height="116" rx="14" fill="#f8fafc" stroke="#7c3aed" stroke-dasharray="5 4"/>
-        <text x="704" y="728" fill="#5b21b6" font-size="12" font-weight="900">Correction loop when intent mismatch is detected</text>
-        <path d="M757 756 H1000" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
-        <text x="795" y="748" fill="#0f172a" font-size="12">10. Regenerate SQL with correction detail</text>
-        <path d="M1000 786 H757" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#seq-arrow)"/>
-        <text x="844" y="778" fill="#0f172a" font-size="12">Corrected SQL</text>
-        <path d="M757 806 c-30 0 -30 28 0 28" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
-        <text x="704" y="843" fill="#0f172a" font-size="12">Validate corrected SQL</text>
-
-        <g font-size="12" fill="#0f172a">
-          <path d="M757 860 H1205" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
-          <text x="875" y="852">11. Run query against Gold tables</text>
-          <path d="M1205 890 H757" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#seq-arrow)"/>
-          <text x="904" y="882">Rows, columns, bytes scanned, execution ID</text>
-
-          <path d="M757 930 H1000" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
-          <text x="822" y="922">12. Claude call: generate insight</text>
-          <path d="M1000 956 H757" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#seq-arrow)"/>
-          <text x="808" y="948">Insight, chart title, summary</text>
-        </g>
-
-        <path d="M757 902 H1401" stroke="#334155" stroke-width="2" marker-end="url(#seq-arrow)"/>
-        <text x="1010" y="894" fill="#0f172a" font-size="12">13. Write audit log</text>
-
-        <path d="M757 940 H524" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#seq-arrow)"/>
-        <text x="555" y="932" fill="#0f172a" font-size="12">14. Return insight, chart, cost, verdict</text>
-        <path d="M524 900 H118" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#seq-arrow)"/>
-        <text x="204" y="892" fill="#0f172a" font-size="12">15. Render answer and exports in browser</text>
-      </svg>
+      <article class="flow-board" id="slack-flow">
+        <div class="flow-title">
+          <div class="eyebrow">Slack / MCP gateway</div>
+          <h3>Slack entry point for governed analytics tools</h3>
+          <p>The Slack gateway is another front door. Slack messages reach the MCP gateway, the gateway invokes analytics tools against the same FastAPI backend, and responses return to Slack with auditability preserved.</p>
+        </div>
+        <svg viewBox="0 0 1320 660" role="img" aria-labelledby="slack-title">
+          <title id="slack-title">Slack MCP analytics flow</title>
+          <defs>
+            <marker id="arrow-dark" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#334155"/></marker>
+            <marker id="arrow-muted" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#64748b"/></marker>
+            <marker id="arrow-accent" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#1d4ed8"/></marker>
+          </defs>
+          <rect x="0" y="0" width="1320" height="660" rx="22" fill="#fbfffb"/>
+          <g>
+            <line class="swimlane" x1="98" y1="88" x2="98" y2="610"/><line class="swimlane" x1="270" y1="88" x2="270" y2="610"/><line class="swimlane" x1="470" y1="88" x2="470" y2="610"/><line class="swimlane" x1="670" y1="88" x2="670" y2="610"/><line class="swimlane" x1="865" y1="88" x2="865" y2="610"/><line class="swimlane" x1="1050" y1="88" x2="1050" y2="610"/><line class="swimlane" x1="1200" y1="88" x2="1200" y2="610"/>
+            <rect class="actor-box" x="40" y="40" width="116" height="42" rx="10"/><text class="actor-label" x="98" y="66">Stakeholder</text>
+            <rect class="actor-box" x="208" y="40" width="124" height="42" rx="10"/><text class="actor-label" x="270" y="66">Slack</text>
+            <rect class="actor-box" x="390" y="40" width="160" height="42" rx="10"/><text class="actor-label" x="470" y="66">MCP gateway</text>
+            <rect class="actor-box" x="594" y="40" width="152" height="42" rx="10"/><text class="actor-label" x="670" y="66">FastAPI backend</text>
+            <rect class="actor-box" x="803" y="40" width="124" height="42" rx="10"/><text class="actor-label" x="865" y="66">Claude API</text>
+            <rect class="actor-box" x="986" y="40" width="128" height="42" rx="10"/><text class="actor-label" x="1050" y="66">Athena</text>
+            <rect class="actor-box" x="1140" y="40" width="120" height="42" rx="10"/><text class="actor-label" x="1200" y="66">S3 Audit</text>
+          </g>
+          <g class="flow-arrow"><path class="hit" d="M98 140 H270"/><path class="line" d="M98 140 H270"/><text x="124" y="130">1. Ask in Slack</text></g>
+          <g class="flow-arrow"><path class="hit" d="M270 188 H470"/><path class="line" d="M270 188 H470"/><text x="310" y="178">2. Event/tool request</text></g>
+          <g class="flow-arrow"><path class="hit" d="M470 236 C430 236 430 278 470 278"/><path class="line" d="M470 236 C430 236 430 278 470 278"/><text x="330" y="258">3. Verify Slack + route MCP tool</text></g>
+          <g class="flow-arrow accent"><path class="hit" d="M470 326 H670"/><path class="line" d="M470 326 H670"/><text x="500" y="316">4. Call analytics API</text></g>
+          <g class="flow-arrow"><path class="hit" d="M670 374 H865"/><path class="line" d="M670 374 H865"/><text x="712" y="364">5. SQL and intent loop</text></g>
+          <g class="flow-arrow"><path class="hit" d="M670 430 H1050"/><path class="line" d="M670 430 H1050"/><text x="780" y="420">6. Query Gold tables</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M1050 464 H670"/><path class="line" d="M1050 464 H670"/><text x="812" y="454">Rows and metrics</text></g>
+          <g class="flow-arrow"><path class="hit" d="M670 506 H1200"/><path class="line" d="M670 506 H1200"/><text x="880" y="496">7. Write audit log</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M670 550 H470"/><path class="line" d="M670 550 H470"/><text x="504" y="540">8. Tool result</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M470 590 H270"/><path class="line" d="M470 590 H270"/><text x="310" y="580">9. Slack response payload</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M270 620 H98"/><path class="line" d="M270 620 H98"/><text x="132" y="610">10. Answer in channel</text></g>
+        </svg>
+      </article>
     </section>
 
     <section class="legend">
-      <article class="panel"><strong>Governed generation</strong><span>SQL is produced from schema context, then checked before it can touch Athena.</span></article>
-      <article class="panel"><strong>Intent verification</strong><span>The agent asks Claude to infer what the SQL actually answers and compares that to the user's question.</span></article>
-      <article class="panel"><strong>Correction loop</strong><span>If the SQL answers the wrong question, the backend regenerates and revalidates it before execution.</span></article>
-      <article class="panel"><strong>Audit trail</strong><span>Each answer records request ID, SQL, cost, scanned bytes, verdict, and session metadata to S3.</span></article>
+      <article class="panel"><strong>Hover to follow flow</strong><span>Every arrow has a larger invisible hit area. Move the cursor over a line to glow and animate the direction.</span></article>
+      <article class="panel"><strong>Same analytics brain</strong><span>Streamlit, HTML, and Slack all converge on the same FastAPI backend and governance checks.</span></article>
+      <article class="panel"><strong>Correction before execution</strong><span>The backend validates SQL and corrects intent mismatch before querying Athena.</span></article>
+      <article class="panel"><strong>Audit by default</strong><span>Each interface preserves request metadata, cost, verdict, and query audit trails.</span></article>
     </section>
 
     <section class="grid" id="sections">
       <article class="panel wide">
-        <div class="eyebrow">README compressed</div>
-        <h2>Read this page first, then use README.md for exact commands and edge cases.</h2>
-        <p>This HTML explainer keeps the same intent as the root README but converts the long-form markdown into a visual map, compact summaries, and a short workflow reference.</p>
+        <div class="eyebrow">Visual ownership map</div>
+        <h2>What this repo owns</h2>
+        <p>This HTML page deliberately avoids repeating the README. It shows the operating model: frontend entry points, the shared FastAPI reasoning loop, governed query execution, and stakeholder exports.</p>
+        <div class="surface-map" aria-label="Repository ownership summary">
+          <div><strong>API surface</strong><span>/ask, /ask/stream, /health, /report/pdf</span></div>
+          <div><strong>Reasoning loop</strong><span>Generate SQL, validate guardrails, verify intent, correct mismatch</span></div>
+          <div><strong>Data plane</strong><span>Athena over Gold marts with cost and row evidence</span></div>
+          <div><strong>UX surfaces</strong><span>Streamlit UI, custom HTML dashboard, Slack/MCP gateway</span></div>
+          <div><strong>Exports</strong><span>KPI cards, charts, CSV tables, PDF reports, downloadable logs</span></div>
+          <div><strong>Evidence trail</strong><span>SQL, execution ID, cost, verdict, and S3 audit metadata</span></div>
+        </div>
       </article>
-      
-      <article class="panel section-card">
-        <h3>What problem this solves</h3>
-        <p>The Gold layer holds carefully curated, business-ready aggregations. Getting value from it still requires an analyst who can write Athena SQL, knows the exact table and column names, and understands the partition structure well enough not to run expensive full</p>
+
+      <article class="panel visual-card">
+        <h3>Governed generation</h3>
+        <svg viewBox="0 0 320 92" role="img" aria-label="Governed generation mini diagram">
+          <rect x="8" y="20" width="76" height="36" rx="10" fill="#eff6ff" stroke="#bfdbfe"/><text x="46" y="43" text-anchor="middle" font-size="11" font-weight="900">Question</text>
+          <path d="M88 38 H124" stroke="#1d4ed8" stroke-width="3" marker-end="url(#arrow)"/>
+          <rect x="128" y="20" width="76" height="36" rx="10" fill="#eef2ff" stroke="#c7d2fe"/><text x="166" y="43" text-anchor="middle" font-size="11" font-weight="900">Claude</text>
+          <path d="M208 38 H244" stroke="#1d4ed8" stroke-width="3" marker-end="url(#arrow)"/>
+          <rect x="248" y="20" width="64" height="36" rx="10" fill="#f0fdf4" stroke="#bbf7d0"/><text x="280" y="43" text-anchor="middle" font-size="11" font-weight="900">SQL</text>
+        </svg>
+        <span class="caption">The model generates SQL from preloaded Gold schemas, not from direct ad hoc table discovery.</span>
       </article>
-      <article class="panel section-card">
-        <h3>Why Athena specifically</h3>
-        <p>Amazon Athena is a serverless SQL (Structured Query Language) query engine that runs directly over S3 (Simple Storage Service) data. The cost model is pay-per-byte-scanned, not per compute hour. A query that scans the whole table because a partition filter is </p>
+      <article class="panel visual-card">
+        <h3>Guardrail gate</h3>
+        <svg viewBox="0 0 320 92" role="img" aria-label="Guardrail validation mini diagram">
+          <rect x="16" y="18" width="82" height="40" rx="10" fill="#fff7ed" stroke="#fed7aa"/><text x="57" y="42" text-anchor="middle" font-size="11" font-weight="900">Draft SQL</text>
+          <path d="M104 38 H140" stroke="#f97316" stroke-width="3" marker-end="url(#arrow)"/>
+          <rect x="144" y="10" width="72" height="56" rx="12" fill="#fefce8" stroke="#fde68a"/><text x="180" y="34" text-anchor="middle" font-size="11" font-weight="900">SELECT</text><text x="180" y="50" text-anchor="middle" font-size="11" font-weight="900">Gold only</text>
+          <path d="M220 38 H258" stroke="#16a34a" stroke-width="3" marker-end="url(#arrow)"/>
+          <rect x="262" y="18" width="42" height="40" rx="10" fill="#f0fdf4" stroke="#bbf7d0"/><text x="283" y="42" text-anchor="middle" font-size="11" font-weight="900">Run</text>
+        </svg>
+        <span class="caption">SQL is checked before Athena sees it: read-only query, allowed database, safe limits, and known schema.</span>
       </article>
-      <article class="panel section-card">
-        <h3>Architecture</h3>
-        <p>---</p>
+      <article class="panel visual-card">
+        <h3>Intent verification</h3>
+        <svg viewBox="0 0 320 92" role="img" aria-label="Intent verification mini diagram">
+          <rect x="12" y="16" width="84" height="44" rx="10" fill="#eff6ff" stroke="#bfdbfe"/><text x="54" y="34" text-anchor="middle" font-size="10" font-weight="900">Original</text><text x="54" y="49" text-anchor="middle" font-size="10" font-weight="900">question</text>
+          <rect x="118" y="16" width="84" height="44" rx="10" fill="#f5f3ff" stroke="#ddd6fe"/><text x="160" y="34" text-anchor="middle" font-size="10" font-weight="900">Inferred</text><text x="160" y="49" text-anchor="middle" font-size="10" font-weight="900">intent</text>
+          <path d="M100 38 H114" stroke="#1d4ed8" stroke-width="3" marker-end="url(#arrow)"/>
+          <path d="M206 38 H244" stroke="#1d4ed8" stroke-width="3" marker-end="url(#arrow)"/>
+          <rect x="248" y="16" width="58" height="44" rx="10" fill="#f0fdf4" stroke="#bbf7d0"/><text x="277" y="34" text-anchor="middle" font-size="10" font-weight="900">Verdict</text><text x="277" y="49" text-anchor="middle" font-size="10" font-weight="900">match?</text>
+        </svg>
+        <span class="caption">The backend compares the user question to SQL intent and can regenerate before execution.</span>
       </article>
-      <article class="panel section-card">
-        <h3>Stakeholder interface</h3>
-        <p>The FastAPI backend is the analytical engine. Non-technical stakeholders don&#039;t interact with it directly. The user-facing layer is a Streamlit browser app that wraps the backend. A stakeholder opens a URL in their browser, types a plain-English question in a t</p>
+      <article class="panel visual-card">
+        <h3>Business answer package</h3>
+        <div class="mini-flow">
+          <span class="mini-node">Insight</span><span class="mini-arrow">→</span><span class="mini-node">KPI cards</span><span class="mini-arrow">→</span><span class="mini-node">Chart</span><span class="mini-arrow">→</span><span class="mini-node">Table</span><span class="mini-arrow">→</span><span class="mini-node">PDF/CSV</span>
+        </div>
+        <span class="caption">Each frontend should show the same evidence package, even when the presentation differs.</span>
       </article>
-      <article class="panel section-card">
-        <h3>How the reasoning loop works</h3>
-        <p>The agent starts each ECS task by loading all Gold schemas once and embedding them in the Claude system prompt. Claude knows every table and column before it sees the first question. This eliminates the multi-turn list tables / get schema tool-call round trips</p>
+      <article class="panel visual-card">
+        <h3>Export paths</h3>
+        <div class="mini-flow">
+          <span class="mini-node">Rows</span><span class="mini-arrow">→</span><span class="mini-node">CSV</span>
+          <span class="mini-node">Narrative</span><span class="mini-arrow">→</span><span class="mini-node">PDF</span>
+          <span class="mini-node">Session</span><span class="mini-arrow">→</span><span class="mini-node">Log</span>
+        </div>
+        <span class="caption">Stakeholders get shareable outputs without needing Athena, SQL, or repo access.</span>
       </article>
-      <article class="panel section-card">
-        <h3>Guardrails</h3>
-        <p>These are non-negotiable and enforced before any query reaches Athena. Guardrail How it&#039;s enforced --- --- SELECT only sqlparse rejects anything that isn&#039;t a single SELECT statement Gold DB only Target database validated against edp {env} gold whitelist LIMIT </p>
-      </article>
-      <article class="panel section-card">
-        <h3>Schema auto-sync with MWAA</h3>
-        <p>The MWAA DAG includes a final task upload dbt artifacts that runs after every successful dbt test . It copies target/manifest.json and target/catalog.json from the dbt workspace to s3://{bronze bucket}/metadata/dbt/ . The agent reads this path at query time, n</p>
-      </article>
-      <article class="panel section-card">
-        <h3>What the agent can answer</h3>
-        <p>The agent queries the Gold layer. There are 7 mart tables, each designed to answer a specific category of business question. The questions below are grounded in the exact columns those tables expose. Understanding the boundaries matters as much as knowing what</p>
+      <article class="panel visual-card">
+        <h3>Audit trail</h3>
+        <svg viewBox="0 0 320 92" role="img" aria-label="Audit trail mini diagram">
+          <rect x="18" y="20" width="76" height="36" rx="10" fill="#eff6ff" stroke="#bfdbfe"/><text x="56" y="43" text-anchor="middle" font-size="11" font-weight="900">Request</text>
+          <path d="M98 38 H138" stroke="#1d4ed8" stroke-width="3" marker-end="url(#arrow)"/>
+          <rect x="142" y="20" width="76" height="36" rx="10" fill="#f0fdf4" stroke="#bbf7d0"/><text x="180" y="43" text-anchor="middle" font-size="11" font-weight="900">Verdict</text>
+          <path d="M222 38 H260" stroke="#1d4ed8" stroke-width="3" marker-end="url(#arrow)"/>
+          <rect x="264" y="20" width="42" height="36" rx="10" fill="#f8fafc" stroke="#cbd5e1"/><text x="285" y="43" text-anchor="middle" font-size="11" font-weight="900">S3</text>
+        </svg>
+        <span class="caption">Questions, generated SQL, mismatch verdicts, execution IDs, and costs are recorded for review.</span>
       </article>
     </section>
 
-    <section class="grid" id="commands">
+    <section class="grid" id="runtime">
       <article class="panel">
-        <div class="eyebrow">Typical workflow</div>
-        <h2>Command path</h2>
-        <p>Representative commands surfaced from the README. Use the original README for complete setup and environment-specific values.</p>
+        <div class="eyebrow">Runtime view</div>
+        <h2>Deployment surfaces</h2>
+        <p>The README remains the source of truth for commands. This page keeps the operational shape visible at a glance.</p>
       </article>
       <article class="panel wide">
-        <div class="command-list">
-          <code>---</code><code>The UI has several features beyond a simple text box:</code><code>---</code><code>**What Streamlit is**</code><code>**What &quot;running on a server&quot; means**</code><code>**Why the code calls localhost**</code>
+        <div class="surface-map">
+          <div><strong>Local dev</strong><span>FastAPI on port 8080; frontend surfaces proxy requests to the backend.</span></div>
+          <div><strong>AWS dev</strong><span>ALB routes traffic to ECS services for Streamlit, HTML web, Slack gateway, and API.</span></div>
+          <div><strong>Data dependencies</strong><span>Glue Gold catalog, Athena workgroup, S3 result bucket, Claude API key in SSM.</span></div>
         </div>
       </article>
     </section>
