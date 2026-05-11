@@ -6,14 +6,16 @@
   <title>platform-analytics-agent — HTML README</title>
   <style>
     :root {
-      --accent: #1d4ed8;
-      --page: #f8fafc;
+      --accent: #2563eb;
+      --accent-2: #0f766e;
+      --accent-3: #7c3aed;
+      --page: #f5f8fb;
       --surface: #ffffff;
-      --surface-soft: #f1f5f9;
+      --surface-soft: #eef4fa;
       --ink: #0f172a;
       --muted: #475569;
-      --line: #d8e2ee;
-      --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+      --line: #d6e0ec;
+      --shadow: 0 22px 70px rgba(15, 23, 42, 0.11);
     }
     * { box-sizing: border-box; }
     body {
@@ -21,8 +23,12 @@
       color: var(--ink);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background:
-        radial-gradient(circle at top left, color-mix(in srgb, var(--accent) 12%, transparent), transparent 34rem),
+        linear-gradient(rgba(37, 99, 235, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(37, 99, 235, 0.035) 1px, transparent 1px),
+        radial-gradient(circle at 8% 0%, rgba(37, 99, 235, 0.16), transparent 34rem),
+        radial-gradient(circle at 92% 8%, rgba(15, 118, 110, 0.13), transparent 32rem),
         var(--page);
+      background-size: 44px 44px, 44px 44px, auto, auto, auto;
     }
     a { color: var(--accent); text-decoration: none; }
     .topbar {
@@ -33,21 +39,21 @@
       justify-content: space-between;
       align-items: center;
       gap: 1rem;
-      padding: 0.9rem 1.4rem;
+      padding: 0.85rem 1.4rem;
       border-bottom: 1px solid var(--line);
-      background: rgba(255,255,255,0.92);
-      backdrop-filter: blur(14px);
+      background: rgba(255,255,255,0.88);
+      backdrop-filter: blur(18px);
     }
     .brand { display: flex; align-items: center; gap: 0.75rem; font-weight: 900; }
     .mark {
       width: 38px;
       height: 38px;
-      border-radius: 10px;
+      border-radius: 12px;
       display: grid;
       place-items: center;
       color: #fff;
-      background: var(--accent);
-      box-shadow: 0 10px 22px color-mix(in srgb, var(--accent) 28%, transparent);
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      box-shadow: 0 14px 28px rgba(37, 99, 235, 0.25);
       font-size: 0.8rem;
     }
     .nav { display: flex; flex-wrap: wrap; gap: 0.5rem; }
@@ -55,12 +61,12 @@
       padding: 0.52rem 0.75rem;
       border: 1px solid var(--line);
       border-radius: 999px;
-      background: #fff;
+      background: rgba(255,255,255,0.82);
       color: var(--muted);
       font-size: 0.86rem;
       font-weight: 750;
     }
-    .wrap { width: min(1180px, calc(100vw - 2rem)); margin: 0 auto; padding: 1.2rem 0 4rem; }
+    .wrap { width: min(1240px, calc(100vw - 2rem)); margin: 0 auto; padding: 1.2rem 0 4rem; }
     .hero {
       display: grid;
       grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
@@ -70,11 +76,17 @@
     }
     .hero-card, .panel {
       border: 1px solid var(--line);
-      border-radius: 18px;
-      background: rgba(255,255,255,0.94);
+      border-radius: 22px;
+      background: rgba(255,255,255,0.9);
       box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
     }
-    .hero-card { padding: 2rem; }
+    .hero-card {
+      padding: 2.1rem;
+      background:
+        linear-gradient(135deg, rgba(37,99,235,0.08), rgba(15,118,110,0.06) 45%, rgba(255,255,255,0.96)),
+        rgba(255,255,255,0.96);
+    }
     .eyebrow {
       color: var(--accent);
       text-transform: uppercase;
@@ -87,7 +99,7 @@
       max-width: 820px;
       font-size: clamp(2.2rem, 5vw, 4.4rem);
       line-height: 0.95;
-      letter-spacing: -0.05em;
+      letter-spacing: -0.045em;
     }
     .intro { max-width: 820px; color: var(--muted); font-size: 1.03rem; line-height: 1.65; }
     .meta {
@@ -103,7 +115,7 @@
     }
     .metric span { display: block; color: var(--muted); font-size: 0.78rem; font-weight: 750; }
     .metric strong { display: block; margin-top: 0.35rem; font-size: 1.6rem; color: var(--ink); }
-    .diagram { margin: 1rem 0; overflow: hidden; border-radius: 22px; border: 1px solid var(--line); box-shadow: var(--shadow); }
+    .diagram { margin: 1rem 0; overflow: hidden; border-radius: 24px; border: 1px solid var(--line); box-shadow: var(--shadow); background: #fff; }
     .diagram svg { display: block; width: 100%; height: auto; }
     .flow-suite {
       display: grid;
@@ -112,19 +124,21 @@
     }
     .flow-board {
       border: 1px solid var(--line);
-      border-radius: 22px;
-      background: #fff;
+      border-radius: 24px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.94)),
+        #fff;
       box-shadow: var(--shadow);
       overflow-x: auto;
     }
     .flow-board svg {
       display: block;
-      min-width: 980px;
+      min-width: 1040px;
       width: 100%;
       height: auto;
     }
     .flow-title {
-      padding: 1rem 1rem 0;
+      padding: 1.1rem 1.15rem 0;
     }
     .flow-title h3 {
       margin: 0.25rem 0 0;
@@ -198,9 +212,39 @@
       stroke: #f59e0b;
     }
     .loop-box {
-      fill: #faf5ff;
-      stroke: #8b5cf6;
-      stroke-dasharray: 6 5;
+      fill: rgba(124,58,237,0.08);
+      stroke: var(--accent-3);
+      stroke-width: 1.5;
+      stroke-dasharray: 7 5;
+    }
+    .loop-label {
+      fill: #5b21b6;
+      font-size: 12px;
+      font-weight: 900;
+    }
+    .flow-explain {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.75rem;
+      padding: 0 1.15rem 1.15rem;
+    }
+    .flow-explain div {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 0.85rem;
+      background: rgba(255,255,255,0.82);
+    }
+    .flow-explain strong {
+      display: block;
+      color: var(--ink);
+      margin-bottom: 0.25rem;
+      font-size: 0.9rem;
+    }
+    .flow-explain span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.4;
     }
     @keyframes flowDash {
       to { stroke-dashoffset: -40; }
@@ -319,10 +363,10 @@
     .wide { grid-column: 1 / -1; }
     .footer { margin-top: 1.5rem; color: var(--muted); text-align: center; font-size: 0.9rem; }
     @media (max-width: 900px) {
-      .hero, .grid, .legend, .surface-map { grid-template-columns: 1fr; }
+      .hero, .grid, .legend, .surface-map, .flow-explain { grid-template-columns: 1fr; }
       .topbar { align-items: flex-start; flex-direction: column; }
       h1 { font-size: 2.4rem; }
-      .flow-board svg { min-width: 860px; }
+      .flow-board svg { min-width: 920px; }
     }
   </style>
 </head>
@@ -330,9 +374,9 @@
   <header class="topbar">
     <div class="brand"><div class="mark">EDP</div><span>platform-analytics-agent</span></div>
     <nav class="nav">
-      <a href="../README.md">README.md</a>
-      <a href="#diagram">Diagram</a>
-      <a href="#sections">Sections</a>
+      <a href="https://github.com/enterprise-data-platform-emeka/platform-analytics-agent/blob/main/README.md">README.md</a>
+      <a href="#diagram">Platform Role</a>
+      <a href="#request-lifecycle">Request Flows</a>
       <a href="#runtime">Runtime</a>
     </nav>
   </header>
@@ -423,9 +467,9 @@
     </section>
 
     <section class="panel wide" id="request-lifecycle">
-      <div class="eyebrow">Interactive request flows</div>
+      <div class="eyebrow">Request flow diagrams</div>
       <h2>Three front doors, one governed analytics brain</h2>
-      <p>Hover any arrow to highlight the direction of travel. The Streamlit UI, custom HTML UI, and Slack/MCP gateway all converge on the same FastAPI analytics backend, which performs SQL generation, guardrail validation, intent checking, Athena execution, insight generation, and audit logging.</p>
+      <p>The Streamlit UI, custom HTML UI, and Slack/MCP gateway all converge on the same FastAPI analytics backend. The backend owns SQL generation, guardrail validation, intent verification, correction on mismatch, Athena execution, insight generation, export packaging, and audit logging.</p>
     </section>
 
     <section class="flow-suite" aria-label="Analytics Agent frontend flow diagrams">
@@ -435,16 +479,16 @@
           <h3>Stakeholder browser to Streamlit UI and FastAPI backend</h3>
           <p>The Streamlit page and FastAPI backend share one ECS container, so the UI hands the question to the backend through localhost before the governed agent loop begins.</p>
         </div>
-        <svg viewBox="0 0 1320 760" role="img" aria-labelledby="streamlit-title">
+        <svg viewBox="0 0 1320 850" role="img" aria-labelledby="streamlit-title">
           <title id="streamlit-title">Streamlit UI request flow</title>
           <defs>
             <marker id="arrow-dark" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#334155"/></marker>
             <marker id="arrow-muted" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#64748b"/></marker>
             <marker id="arrow-accent" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#1d4ed8"/></marker>
           </defs>
-          <rect x="0" y="0" width="1320" height="760" rx="22" fill="#f8fbff"/>
+          <rect x="0" y="0" width="1320" height="850" rx="22" fill="#f8fbff"/>
           <g>
-            <line class="swimlane" x1="92" y1="88" x2="92" y2="705"/><line class="swimlane" x1="250" y1="88" x2="250" y2="705"/><line class="swimlane" x1="420" y1="88" x2="420" y2="705"/><line class="swimlane" x1="620" y1="88" x2="620" y2="705"/><line class="swimlane" x1="840" y1="88" x2="840" y2="705"/><line class="swimlane" x1="1020" y1="88" x2="1020" y2="705"/><line class="swimlane" x1="1190" y1="88" x2="1190" y2="705"/>
+            <line class="swimlane" x1="92" y1="88" x2="92" y2="812"/><line class="swimlane" x1="250" y1="88" x2="250" y2="812"/><line class="swimlane" x1="420" y1="88" x2="420" y2="812"/><line class="swimlane" x1="620" y1="88" x2="620" y2="812"/><line class="swimlane" x1="840" y1="88" x2="840" y2="812"/><line class="swimlane" x1="1020" y1="88" x2="1020" y2="812"/><line class="swimlane" x1="1190" y1="88" x2="1190" y2="812"/>
             <rect class="actor-box" x="34" y="40" width="116" height="42" rx="10"/><text class="actor-label" x="92" y="66">Stakeholder</text>
             <rect class="actor-box" x="188" y="40" width="124" height="42" rx="10"/><text class="actor-label" x="250" y="66">AWS ALB</text>
             <rect class="actor-box" x="352" y="40" width="136" height="42" rx="10"/><text class="actor-label" x="420" y="66">Streamlit UI</text>
@@ -462,12 +506,25 @@
           <g class="flow-arrow"><path class="hit" d="M620 376 H840"/><path class="line" d="M620 376 H840"/><text x="680" y="366">6. Generate SQL</text></g>
           <g class="flow-arrow return"><path class="hit" d="M840 408 H620"/><path class="line" d="M840 408 H620"/><text x="700" y="398">SQL query</text></g>
           <g class="flow-arrow"><path class="hit" d="M620 450 C570 450 570 492 620 492"/><path class="line" d="M620 450 C570 450 570 492 620 492"/><text x="454" y="474">7. Validate guardrails</text></g>
-          <g class="flow-arrow"><path class="hit" d="M620 536 H840"/><path class="line" d="M620 536 H840"/><text x="660" y="526">8. Intent check + insight</text></g>
-          <g class="flow-arrow"><path class="hit" d="M620 590 H1020"/><path class="line" d="M620 590 H1020"/><text x="730" y="580">9. Run Athena query</text></g>
-          <g class="flow-arrow return"><path class="hit" d="M1020 622 H620"/><path class="line" d="M1020 622 H620"/><text x="748" y="612">Rows, cost, execution ID</text></g>
-          <g class="flow-arrow"><path class="hit" d="M620 658 H1190"/><path class="line" d="M620 658 H1190"/><text x="835" y="648">10. Write audit log</text></g>
-          <g class="flow-arrow return"><path class="hit" d="M620 692 H92"/><path class="line" d="M620 692 H92"/><text x="252" y="682">11. Render answer, chart, KPI cards, exports</text></g>
+          <g class="flow-arrow"><path class="hit" d="M620 536 H840"/><path class="line" d="M620 536 H840"/><text x="660" y="526">8. Infer SQL intent</text></g>
+          <g class="flow-arrow"><path class="hit" d="M620 580 H840"/><path class="line" d="M620 580 H840"/><text x="644" y="570">9. Compare question vs intent</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M840 612 H620"/><path class="line" d="M840 612 H620"/><text x="660" y="602">Verdict + discrepancy detail</text></g>
+          <rect class="loop-box" x="586" y="628" width="296" height="112" rx="18"/>
+          <text class="loop-label" x="734" y="654" text-anchor="middle">Correction loop on mismatch</text>
+          <g class="flow-arrow"><path class="hit" d="M620 682 H840"/><path class="line" d="M620 682 H840"/><text x="656" y="672">10. Regenerate corrected SQL</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M840 714 H620"/><path class="line" d="M840 714 H620"/><text x="688" y="704">Corrected SQL</text></g>
+          <g class="flow-arrow"><path class="hit" d="M620 728 C570 728 570 762 620 762"/><path class="line" d="M620 728 C570 728 570 762 620 762"/><text x="446" y="752">Validate corrected SQL</text></g>
+          <g class="flow-arrow"><path class="hit" d="M620 776 H1020"/><path class="line" d="M620 776 H1020"/><text x="730" y="766">11. Run Athena query</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M1020 804 H620"/><path class="line" d="M1020 804 H620"/><text x="748" y="794">Rows, cost, execution ID</text></g>
+          <g class="flow-arrow"><path class="hit" d="M620 826 H1190"/><path class="line" d="M620 826 H1190"/><text x="835" y="816">12. Write audit log</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M620 838 H92"/><path class="line" d="M620 838 H92"/><text x="252" y="828">13. Render answer, chart, KPI cards, exports</text></g>
         </svg>
+        <div class="flow-explain">
+          <div><strong>Container boundary</strong><span>Streamlit and FastAPI run in the same ECS task, so the UI can call the backend locally.</span></div>
+          <div><strong>Governed SQL</strong><span>Claude generates SQL, then the backend validates it before Athena execution.</span></div>
+          <div><strong>Correction loop</strong><span>Intent mismatch triggers regeneration and a second validation pass before data is queried.</span></div>
+          <div><strong>Returned package</strong><span>The browser receives the answer, chart, KPI cards, table data, exports, cost, and audit verdict.</span></div>
+        </div>
       </article>
 
       <article class="flow-board" id="html-flow">
@@ -476,16 +533,16 @@
           <h3>Standalone web dashboard to the existing analytics backend</h3>
           <p>The HTML dashboard is a separate ECS service. It serves static UI assets, proxies API calls to FastAPI, and preserves the backend reasoning loop without changing Streamlit.</p>
         </div>
-        <svg viewBox="0 0 1320 680" role="img" aria-labelledby="html-title">
+        <svg viewBox="0 0 1320 780" role="img" aria-labelledby="html-title">
           <title id="html-title">Custom HTML web frontend flow</title>
           <defs>
             <marker id="arrow-dark" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#334155"/></marker>
             <marker id="arrow-muted" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#64748b"/></marker>
             <marker id="arrow-accent" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#1d4ed8"/></marker>
           </defs>
-          <rect x="0" y="0" width="1320" height="680" rx="22" fill="#fbfdff"/>
+          <rect x="0" y="0" width="1320" height="780" rx="22" fill="#fbfdff"/>
           <g>
-            <line class="swimlane" x1="96" y1="88" x2="96" y2="625"/><line class="swimlane" x1="260" y1="88" x2="260" y2="625"/><line class="swimlane" x1="455" y1="88" x2="455" y2="625"/><line class="swimlane" x1="650" y1="88" x2="650" y2="625"/><line class="swimlane" x1="850" y1="88" x2="850" y2="625"/><line class="swimlane" x1="1040" y1="88" x2="1040" y2="625"/><line class="swimlane" x1="1200" y1="88" x2="1200" y2="625"/>
+            <line class="swimlane" x1="96" y1="88" x2="96" y2="730"/><line class="swimlane" x1="260" y1="88" x2="260" y2="730"/><line class="swimlane" x1="455" y1="88" x2="455" y2="730"/><line class="swimlane" x1="650" y1="88" x2="650" y2="730"/><line class="swimlane" x1="850" y1="88" x2="850" y2="730"/><line class="swimlane" x1="1040" y1="88" x2="1040" y2="730"/><line class="swimlane" x1="1200" y1="88" x2="1200" y2="730"/>
             <rect class="actor-box" x="38" y="40" width="116" height="42" rx="10"/><text class="actor-label" x="96" y="66">Stakeholder</text>
             <rect class="actor-box" x="198" y="40" width="124" height="42" rx="10"/><text class="actor-label" x="260" y="66">AWS ALB</text>
             <rect class="actor-box" x="375" y="40" width="160" height="42" rx="10"/><text class="actor-label" x="455" y="66">HTML web ECS</text>
@@ -499,13 +556,27 @@
           <g class="flow-arrow return"><path class="hit" d="M455 218 H96"/><path class="line" d="M455 218 H96"/><text x="188" y="208">3. Dashboard renders in browser</text></g>
           <g class="flow-arrow accent"><path class="hit" d="M96 272 H455"/><path class="line" d="M96 272 H455"/><text x="154" y="262">4. POST /api/ask/stream</text></g>
           <g class="flow-arrow accent"><path class="hit" d="M455 318 H650"/><path class="line" d="M455 318 H650"/><text x="488" y="308">5. Proxy to FastAPI</text></g>
-          <g class="flow-arrow"><path class="hit" d="M650 366 H850"/><path class="line" d="M650 366 H850"/><text x="704" y="356">6. Generate + verify SQL</text></g>
-          <g class="flow-arrow"><path class="hit" d="M650 424 H1040"/><path class="line" d="M650 424 H1040"/><text x="760" y="414">7. Execute governed query</text></g>
-          <g class="flow-arrow return"><path class="hit" d="M1040 458 H650"/><path class="line" d="M1040 458 H650"/><text x="790" y="448">Rows and scan cost</text></g>
-          <g class="flow-arrow"><path class="hit" d="M650 502 H1200"/><path class="line" d="M650 502 H1200"/><text x="870" y="492">8. Audit request</text></g>
-          <g class="flow-arrow return"><path class="hit" d="M650 552 H455"/><path class="line" d="M650 552 H455"/><text x="484" y="542">9. Stream answer JSON</text></g>
-          <g class="flow-arrow return"><path class="hit" d="M455 594 H96"/><path class="line" d="M455 594 H96"/><text x="175" y="584">10. KPI cards, chart, CSV/PDF export</text></g>
+          <g class="flow-arrow"><path class="hit" d="M650 366 H850"/><path class="line" d="M650 366 H850"/><text x="704" y="356">6. Generate SQL</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M850 398 H650"/><path class="line" d="M850 398 H650"/><text x="718" y="388">SQL query</text></g>
+          <g class="flow-arrow"><path class="hit" d="M650 436 C600 436 600 476 650 476"/><path class="line" d="M650 436 C600 436 600 476 650 476"/><text x="488" y="460">Validate guardrails</text></g>
+          <g class="flow-arrow"><path class="hit" d="M650 510 H850"/><path class="line" d="M650 510 H850"/><text x="682" y="500">7. Verify SQL intent</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M850 542 H650"/><path class="line" d="M850 542 H650"/><text x="682" y="532">Verdict + discrepancy detail</text></g>
+          <rect class="loop-box" x="616" y="558" width="280" height="96" rx="18"/>
+          <text class="loop-label" x="756" y="584" text-anchor="middle">Correction loop on mismatch</text>
+          <g class="flow-arrow"><path class="hit" d="M650 610 H850"/><path class="line" d="M650 610 H850"/><text x="680" y="600">8. Regenerate corrected SQL</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M850 638 H650"/><path class="line" d="M850 638 H650"/><text x="704" y="628">Corrected SQL</text></g>
+          <g class="flow-arrow"><path class="hit" d="M650 672 H1040"/><path class="line" d="M650 672 H1040"/><text x="760" y="662">9. Execute governed query</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M1040 704 H650"/><path class="line" d="M1040 704 H650"/><text x="790" y="694">Rows and scan cost</text></g>
+          <g class="flow-arrow"><path class="hit" d="M650 730 H1200"/><path class="line" d="M650 730 H1200"/><text x="870" y="720">10. Audit request</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M650 748 H455"/><path class="line" d="M650 748 H455"/><text x="484" y="738">11. Stream answer JSON</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M455 762 H96"/><path class="line" d="M455 762 H96"/><text x="175" y="752">12. KPI cards, chart, CSV/PDF export</text></g>
         </svg>
+        <div class="flow-explain">
+          <div><strong>Separate frontend</strong><span>The HTML service owns presentation and proxies analytics calls to the existing FastAPI backend.</span></div>
+          <div><strong>Same API behavior</strong><span>It uses the same question, SQL, result, report, and audit contract as Streamlit.</span></div>
+          <div><strong>Correction loop</strong><span>Mismatch handling remains in the backend, so the richer UI does not weaken governance.</span></div>
+          <div><strong>Stakeholder exports</strong><span>The frontend can emphasize KPI cards, polished charts, CSV table downloads, and PDF reports.</span></div>
+        </div>
       </article>
 
       <article class="flow-board" id="slack-flow">
@@ -514,16 +585,16 @@
           <h3>Slack entry point for governed analytics tools</h3>
           <p>The Slack gateway is another front door. Slack messages reach the MCP gateway, the gateway invokes analytics tools against the same FastAPI backend, and responses return to Slack with auditability preserved.</p>
         </div>
-        <svg viewBox="0 0 1320 660" role="img" aria-labelledby="slack-title">
+        <svg viewBox="0 0 1320 760" role="img" aria-labelledby="slack-title">
           <title id="slack-title">Slack MCP analytics flow</title>
           <defs>
             <marker id="arrow-dark" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#334155"/></marker>
             <marker id="arrow-muted" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#64748b"/></marker>
             <marker id="arrow-accent" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#1d4ed8"/></marker>
           </defs>
-          <rect x="0" y="0" width="1320" height="660" rx="22" fill="#fbfffb"/>
+          <rect x="0" y="0" width="1320" height="760" rx="22" fill="#fbfffb"/>
           <g>
-            <line class="swimlane" x1="98" y1="88" x2="98" y2="610"/><line class="swimlane" x1="270" y1="88" x2="270" y2="610"/><line class="swimlane" x1="470" y1="88" x2="470" y2="610"/><line class="swimlane" x1="670" y1="88" x2="670" y2="610"/><line class="swimlane" x1="865" y1="88" x2="865" y2="610"/><line class="swimlane" x1="1050" y1="88" x2="1050" y2="610"/><line class="swimlane" x1="1200" y1="88" x2="1200" y2="610"/>
+            <line class="swimlane" x1="98" y1="88" x2="98" y2="714"/><line class="swimlane" x1="270" y1="88" x2="270" y2="714"/><line class="swimlane" x1="470" y1="88" x2="470" y2="714"/><line class="swimlane" x1="670" y1="88" x2="670" y2="714"/><line class="swimlane" x1="865" y1="88" x2="865" y2="714"/><line class="swimlane" x1="1050" y1="88" x2="1050" y2="714"/><line class="swimlane" x1="1200" y1="88" x2="1200" y2="714"/>
             <rect class="actor-box" x="40" y="40" width="116" height="42" rx="10"/><text class="actor-label" x="98" y="66">Stakeholder</text>
             <rect class="actor-box" x="208" y="40" width="124" height="42" rx="10"/><text class="actor-label" x="270" y="66">Slack</text>
             <rect class="actor-box" x="390" y="40" width="160" height="42" rx="10"/><text class="actor-label" x="470" y="66">MCP gateway</text>
@@ -536,19 +607,33 @@
           <g class="flow-arrow"><path class="hit" d="M270 188 H470"/><path class="line" d="M270 188 H470"/><text x="310" y="178">2. Event/tool request</text></g>
           <g class="flow-arrow"><path class="hit" d="M470 236 C430 236 430 278 470 278"/><path class="line" d="M470 236 C430 236 430 278 470 278"/><text x="330" y="258">3. Verify Slack + route MCP tool</text></g>
           <g class="flow-arrow accent"><path class="hit" d="M470 326 H670"/><path class="line" d="M470 326 H670"/><text x="500" y="316">4. Call analytics API</text></g>
-          <g class="flow-arrow"><path class="hit" d="M670 374 H865"/><path class="line" d="M670 374 H865"/><text x="712" y="364">5. SQL and intent loop</text></g>
-          <g class="flow-arrow"><path class="hit" d="M670 430 H1050"/><path class="line" d="M670 430 H1050"/><text x="780" y="420">6. Query Gold tables</text></g>
-          <g class="flow-arrow return"><path class="hit" d="M1050 464 H670"/><path class="line" d="M1050 464 H670"/><text x="812" y="454">Rows and metrics</text></g>
-          <g class="flow-arrow"><path class="hit" d="M670 506 H1200"/><path class="line" d="M670 506 H1200"/><text x="880" y="496">7. Write audit log</text></g>
-          <g class="flow-arrow return"><path class="hit" d="M670 550 H470"/><path class="line" d="M670 550 H470"/><text x="504" y="540">8. Tool result</text></g>
-          <g class="flow-arrow return"><path class="hit" d="M470 590 H270"/><path class="line" d="M470 590 H270"/><text x="310" y="580">9. Slack response payload</text></g>
-          <g class="flow-arrow return"><path class="hit" d="M270 620 H98"/><path class="line" d="M270 620 H98"/><text x="132" y="610">10. Answer in channel</text></g>
+          <g class="flow-arrow"><path class="hit" d="M670 374 H865"/><path class="line" d="M670 374 H865"/><text x="712" y="364">5. Generate SQL</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M865 406 H670"/><path class="line" d="M865 406 H670"/><text x="730" y="396">SQL query</text></g>
+          <g class="flow-arrow"><path class="hit" d="M670 442 C620 442 620 480 670 480"/><path class="line" d="M670 442 C620 442 620 480 670 480"/><text x="504" y="464">Validate guardrails</text></g>
+          <g class="flow-arrow"><path class="hit" d="M670 510 H865"/><path class="line" d="M670 510 H865"/><text x="700" y="500">6. Intent verification</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M865 540 H670"/><path class="line" d="M865 540 H670"/><text x="704" y="530">Verdict + discrepancy detail</text></g>
+          <rect class="loop-box" x="636" y="558" width="276" height="94" rx="18"/>
+          <text class="loop-label" x="774" y="584" text-anchor="middle">Correction loop on mismatch</text>
+          <g class="flow-arrow"><path class="hit" d="M670 610 H865"/><path class="line" d="M670 610 H865"/><text x="704" y="600">7. Regenerate SQL</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M865 638 H670"/><path class="line" d="M865 638 H670"/><text x="724" y="628">Corrected SQL</text></g>
+          <g class="flow-arrow"><path class="hit" d="M670 670 H1050"/><path class="line" d="M670 670 H1050"/><text x="780" y="660">8. Query Gold tables</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M1050 700 H670"/><path class="line" d="M1050 700 H670"/><text x="812" y="690">Rows and metrics</text></g>
+          <g class="flow-arrow"><path class="hit" d="M670 724 H1200"/><path class="line" d="M670 724 H1200"/><text x="880" y="714">9. Write audit log</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M670 738 H470"/><path class="line" d="M670 738 H470"/><text x="504" y="728">10. Tool result</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M470 748 H270"/><path class="line" d="M470 748 H270"/><text x="310" y="738">11. Slack response payload</text></g>
+          <g class="flow-arrow return"><path class="hit" d="M270 756 H98"/><path class="line" d="M270 756 H98"/><text x="132" y="746">12. Answer in channel</text></g>
         </svg>
+        <div class="flow-explain">
+          <div><strong>Slack as a front door</strong><span>The MCP gateway turns Slack interaction into an analytics API request.</span></div>
+          <div><strong>Backend ownership</strong><span>Question interpretation, SQL generation, validation, and execution stay inside the agent backend.</span></div>
+          <div><strong>Correction loop</strong><span>The same mismatch correction path runs before any query reaches the Gold layer.</span></div>
+          <div><strong>Slack-native return</strong><span>The gateway packages the answer, metrics, assumptions, report assets, and audit context for Slack.</span></div>
+        </div>
       </article>
     </section>
 
     <section class="legend">
-      <article class="panel"><strong>Hover to follow flow</strong><span>Every arrow has a larger invisible hit area. Move the cursor over a line to glow and animate the direction.</span></article>
+      <article class="panel"><strong>Shared backend contract</strong><span>Each frontend sends questions to the same governed FastAPI API surface.</span></article>
       <article class="panel"><strong>Same analytics brain</strong><span>Streamlit, HTML, and Slack all converge on the same FastAPI backend and governance checks.</span></article>
       <article class="panel"><strong>Correction before execution</strong><span>The backend validates SQL and corrects intent mismatch before querying Athena.</span></article>
       <article class="panel"><strong>Audit by default</strong><span>Each interface preserves request metadata, cost, verdict, and query audit trails.</span></article>
@@ -558,7 +643,7 @@
       <article class="panel wide">
         <div class="eyebrow">Visual ownership map</div>
         <h2>What this repo owns</h2>
-        <p>This HTML page deliberately avoids repeating the README. It shows the operating model: frontend entry points, the shared FastAPI reasoning loop, governed query execution, and stakeholder exports.</p>
+        <p>The repository owns the analytics API, the reasoning and verification loop, the stakeholder answer package, and the audit trail that supports governance across all user-facing channels.</p>
         <div class="surface-map" aria-label="Repository ownership summary">
           <div><strong>API surface</strong><span>/ask, /ask/stream, /health, /report/pdf</span></div>
           <div><strong>Reasoning loop</strong><span>Generate SQL, validate guardrails, verify intent, correct mismatch</span></div>
@@ -646,7 +731,7 @@
       </article>
     </section>
 
-    <p class="footer">Generated from README.md. Existing markdown remains the source of truth.</p>
+    <p class="footer">Detailed setup commands, environment variables, and troubleshooting live in the rendered README.md.</p>
   </main>
 </body>
 </html>
