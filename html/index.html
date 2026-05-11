@@ -117,6 +117,15 @@
     .metric strong { display: block; margin-top: 0.35rem; font-size: 1.6rem; color: var(--ink); }
     .diagram { margin: 1rem 0; overflow: hidden; border-radius: 24px; border: 1px solid var(--line); box-shadow: var(--shadow); background: #fff; }
     .diagram svg { display: block; width: 100%; height: auto; }
+    .diagram-heading {
+      fill: var(--ink);
+      font-size: 24px;
+      font-weight: 950;
+    }
+    .diagram-subtitle {
+      fill: var(--muted);
+      font-size: 14px;
+    }
     .flow-suite {
       display: grid;
       gap: 1rem;
@@ -206,6 +215,11 @@
       font-size: 13px;
       font-weight: 900;
       text-anchor: middle;
+    }
+    .node-sub {
+      fill: var(--muted);
+      font-size: 11px;
+      font-weight: 750;
     }
     .note-box {
       fill: #fef3c7;
@@ -400,70 +414,59 @@
     </section>
 
     <section id="diagram" class="diagram">
-      
-    <svg viewBox="0 0 1120 260" role="img" aria-label="Repository workflow diagram">
-      <defs>
-        <marker id="arrow" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
-          <path d="M0,0 L0,6 L8,3 z" fill="#1d4ed8"/>
-        </marker>
-        <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
-          <stop stop-color="#1d4ed8" stop-opacity="0.12"/>
-          <stop offset="1" stop-color="#ffffff" stop-opacity="1"/>
-        </linearGradient>
-      </defs>
-      <rect x="0" y="0" width="1120" height="260" rx="24" fill="url(#bg)"/>
-      <text x="32" y="48" fill="#0f172a" font-size="24" font-weight="900">How this repository fits into the platform</text>
-      <text x="32" y="76" fill="#475569" font-size="14">A compact visual reading path distilled from the README.</text>
-      
-        <g>
-          <rect x="24" y="96" width="158" height="72" rx="16" fill="#ffffff" stroke="#d8e2ee"/>
-          <circle cx="48" cy="132" r="12" fill="#1d4ed8" opacity="0.14"/>
-          <circle cx="48" cy="132" r="5" fill="#1d4ed8"/>
-          <text x="68" y="127" fill="#0f172a" font-size="15" font-weight="800">Question</text>
-          <text x="68" y="148" fill="#64748b" font-size="12">Step 1</text>
-          <path d="M 186 130 L 198 130" stroke="#1d4ed8" stroke-width="3" marker-end="url(#arrow)" opacity="0.72"/>
-        </g>
-        <g>
-          <rect x="206" y="96" width="158" height="72" rx="16" fill="#ffffff" stroke="#d8e2ee"/>
-          <circle cx="230" cy="132" r="12" fill="#1d4ed8" opacity="0.14"/>
-          <circle cx="230" cy="132" r="5" fill="#1d4ed8"/>
-          <text x="250" y="127" fill="#0f172a" font-size="15" font-weight="800">FastAPI</text>
-          <text x="250" y="148" fill="#64748b" font-size="12">Step 2</text>
-          <path d="M 368 130 L 380 130" stroke="#1d4ed8" stroke-width="3" marker-end="url(#arrow)" opacity="0.72"/>
-        </g>
-        <g>
-          <rect x="388" y="96" width="158" height="72" rx="16" fill="#ffffff" stroke="#d8e2ee"/>
-          <circle cx="412" cy="132" r="12" fill="#1d4ed8" opacity="0.14"/>
-          <circle cx="412" cy="132" r="5" fill="#1d4ed8"/>
-          <text x="432" y="127" fill="#0f172a" font-size="15" font-weight="800">Claude SQL</text>
-          <text x="432" y="148" fill="#64748b" font-size="12">Step 3</text>
-          <path d="M 550 130 L 562 130" stroke="#1d4ed8" stroke-width="3" marker-end="url(#arrow)" opacity="0.72"/>
-        </g>
-        <g>
-          <rect x="570" y="96" width="158" height="72" rx="16" fill="#ffffff" stroke="#d8e2ee"/>
-          <circle cx="594" cy="132" r="12" fill="#1d4ed8" opacity="0.14"/>
-          <circle cx="594" cy="132" r="5" fill="#1d4ed8"/>
-          <text x="614" y="127" fill="#0f172a" font-size="15" font-weight="800">Athena</text>
-          <text x="614" y="148" fill="#64748b" font-size="12">Step 4</text>
-          <path d="M 732 130 L 744 130" stroke="#1d4ed8" stroke-width="3" marker-end="url(#arrow)" opacity="0.72"/>
-        </g>
-        <g>
-          <rect x="752" y="96" width="158" height="72" rx="16" fill="#ffffff" stroke="#d8e2ee"/>
-          <circle cx="776" cy="132" r="12" fill="#1d4ed8" opacity="0.14"/>
-          <circle cx="776" cy="132" r="5" fill="#1d4ed8"/>
-          <text x="796" y="127" fill="#0f172a" font-size="15" font-weight="800">Insight</text>
-          <text x="796" y="148" fill="#64748b" font-size="12">Step 5</text>
-          <path d="M 914 130 L 926 130" stroke="#1d4ed8" stroke-width="3" marker-end="url(#arrow)" opacity="0.72"/>
-        </g>
-        <g>
-          <rect x="934" y="96" width="158" height="72" rx="16" fill="#ffffff" stroke="#d8e2ee"/>
-          <circle cx="958" cy="132" r="12" fill="#1d4ed8" opacity="0.14"/>
-          <circle cx="958" cy="132" r="5" fill="#1d4ed8"/>
-          <text x="978" y="127" fill="#0f172a" font-size="15" font-weight="800">PDF</text>
-          <text x="978" y="148" fill="#64748b" font-size="12">Step 6</text>
-          
-        </g>
-    </svg>
+      <svg viewBox="0 0 1230 560" role="img" aria-label="Complete analytics agent architecture with all frontends">
+        <defs>
+          <marker id="arch-arrow-dark" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#334155"/></marker>
+          <marker id="arch-arrow-accent" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#2563eb"/></marker>
+        </defs>
+        <rect x="0" y="0" width="1230" height="560" rx="28" fill="#f8fbff"/>
+        <text x="40" y="46" class="diagram-heading">Complete analytics serving architecture</text>
+        <text x="40" y="72" class="diagram-subtitle">Three frontend experiences share one governed FastAPI backend and one Gold analytics layer.</text>
+
+        <rect class="actor-box" x="70" y="120" width="150" height="62" rx="16"/><text class="actor-label" x="145" y="148">Stakeholder</text><text class="node-sub" x="145" y="166" text-anchor="middle">business question</text>
+        <rect class="actor-box" x="300" y="80" width="150" height="62" rx="16"/><text class="actor-label" x="375" y="108">Streamlit UI</text><text class="node-sub" x="375" y="126" text-anchor="middle">current dashboard</text>
+        <rect class="actor-box" x="300" y="180" width="150" height="62" rx="16"/><text class="actor-label" x="375" y="208">HTML dashboard</text><text class="node-sub" x="375" y="226" text-anchor="middle">custom web UI</text>
+        <rect class="actor-box" x="300" y="280" width="150" height="62" rx="16"/><text class="actor-label" x="375" y="308">Slack MCP</text><text class="node-sub" x="375" y="326" text-anchor="middle">chat entry point</text>
+
+        <rect x="535" y="130" width="205" height="132" rx="24" fill="rgba(37,99,235,0.07)" stroke="#bfdbfe"/>
+        <rect class="actor-box" x="560" y="156" width="155" height="72" rx="18"/><text class="actor-label" x="637" y="185">FastAPI backend</text><text class="node-sub" x="637" y="204" text-anchor="middle">agent session + API</text>
+
+        <rect class="actor-box" x="835" y="76" width="150" height="62" rx="16"/><text class="actor-label" x="910" y="104">Claude API</text><text class="node-sub" x="910" y="122" text-anchor="middle">SQL + insight</text>
+        <rect class="actor-box" x="835" y="178" width="150" height="62" rx="16"/><text class="actor-label" x="910" y="206">Guardrails</text><text class="node-sub" x="910" y="224" text-anchor="middle">validate + correct</text>
+        <rect class="actor-box" x="835" y="280" width="150" height="62" rx="16"/><text class="actor-label" x="910" y="308">Athena</text><text class="node-sub" x="910" y="326" text-anchor="middle">query Gold</text>
+        <rect class="actor-box" x="1038" y="230" width="150" height="62" rx="16"/><text class="actor-label" x="1113" y="258">Gold S3</text><text class="node-sub" x="1113" y="276" text-anchor="middle">business marts</text>
+        <rect class="actor-box" x="1038" y="360" width="150" height="62" rx="16"/><text class="actor-label" x="1113" y="388">S3 Audit</text><text class="node-sub" x="1113" y="406" text-anchor="middle">evidence trail</text>
+
+        <rect x="512" y="322" width="252" height="118" rx="22" fill="rgba(124,58,237,0.08)" stroke="#7c3aed" stroke-dasharray="7 5"/>
+        <text class="loop-label" x="638" y="350" text-anchor="middle">Correction loop</text>
+        <text class="node-sub" x="638" y="374" text-anchor="middle">infer SQL intent</text>
+        <text class="node-sub" x="638" y="394" text-anchor="middle">compare to question</text>
+        <text class="node-sub" x="638" y="414" text-anchor="middle">regenerate on mismatch</text>
+
+        <g class="flow-arrow"><path class="hit" d="M220 151 H300"/><path class="line" d="M220 151 H300"/></g>
+        <g class="flow-arrow"><path class="hit" d="M220 151 C250 151 256 211 300 211"/><path class="line" d="M220 151 C250 151 256 211 300 211"/></g>
+        <g class="flow-arrow"><path class="hit" d="M220 151 C252 151 255 311 300 311"/><path class="line" d="M220 151 C252 151 255 311 300 311"/></g>
+        <g class="flow-arrow accent"><path class="hit" d="M450 111 C510 111 505 190 560 190"/><path class="line" d="M450 111 C510 111 505 190 560 190"/><text x="474" y="104">same backend contract</text></g>
+        <g class="flow-arrow accent"><path class="hit" d="M450 211 H560"/><path class="line" d="M450 211 H560"/></g>
+        <g class="flow-arrow accent"><path class="hit" d="M450 311 C508 311 506 216 560 216"/><path class="line" d="M450 311 C508 311 506 216 560 216"/></g>
+        <g class="flow-arrow"><path class="hit" d="M715 178 H835"/><path class="line" d="M715 178 H835"/><text x="742" y="166">generate SQL</text></g>
+        <g class="flow-arrow return"><path class="hit" d="M835 209 H715"/><path class="line" d="M835 209 H715"/><text x="746" y="229">validated SQL</text></g>
+        <g class="flow-arrow"><path class="hit" d="M715 228 C780 228 772 209 835 209"/><path class="line" d="M715 228 C780 228 772 209 835 209"/></g>
+        <g class="flow-arrow"><path class="hit" d="M740 198 H835"/><path class="line" d="M740 198 H835"/></g>
+        <g class="flow-arrow"><path class="hit" d="M715 228 C760 258 760 332 764 382"/><path class="line" d="M715 228 C760 258 760 332 764 382"/></g>
+        <g class="flow-arrow"><path class="hit" d="M764 382 C820 382 808 210 835 210"/><path class="line" d="M764 382 C820 382 808 210 835 210"/></g>
+        <g class="flow-arrow"><path class="hit" d="M715 228 C790 238 790 311 835 311"/><path class="line" d="M715 228 C790 238 790 311 835 311"/><text x="760" y="294">execute</text></g>
+        <g class="flow-arrow"><path class="hit" d="M985 311 H1038"/><path class="line" d="M985 311 H1038"/></g>
+        <g class="flow-arrow return"><path class="hit" d="M1038 262 H715"/><path class="line" d="M1038 262 H715"/><text x="836" y="254">rows + cost</text></g>
+        <g class="flow-arrow"><path class="hit" d="M715 228 C820 420 944 391 1038 391"/><path class="line" d="M715 228 C820 420 944 391 1038 391"/><text x="862" y="432">audit metadata</text></g>
+        <g class="flow-arrow return"><path class="hit" d="M560 190 C460 452 260 450 145 182"/><path class="line" d="M560 190 C460 452 260 450 145 182"/><text x="278" y="456">answer package: insight, KPI cards, chart, table, PDF, CSV</text></g>
+      </svg>
+      <div class="flow-explain">
+        <div><strong>Frontend choices</strong><span>Streamlit, custom HTML, and Slack are presentation layers. They do not duplicate the analytics reasoning logic.</span></div>
+        <div><strong>Governance center</strong><span>FastAPI owns schema context, SQL generation, guardrails, mismatch correction, query execution, and audit logging.</span></div>
+        <div><strong>Learning lens</strong><span>The important mental model is convergence: multiple user experiences, one trusted backend, one Gold data layer.</span></div>
+        <div><strong>Demo value</strong><span>This is the architecture to narrate when explaining why the HTML frontend can improve presentation without breaking Streamlit.</span></div>
+      </div>
     </section>
 
     <section class="panel wide" id="request-lifecycle">
