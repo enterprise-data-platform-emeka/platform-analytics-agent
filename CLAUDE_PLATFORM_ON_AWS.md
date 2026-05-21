@@ -2,7 +2,7 @@
 
 ## Why this change matters
 
-I built the Analytics Agent so business questions can become safe Structured Query Language (SQL), run against Gold data in Amazon Athena, and return a plain-English answer with a chart, table, verdict check, audit log, and Portable Document Format (PDF) report.
+I built the Analytics Agent so business questions can become safe Structured Query Language (SQL), run against Gold data in Amazon Athena, and return a clear business answer with a chart, table, verdict check, audit log, and Portable Document Format (PDF) report.
 
 Today, the agent can call Claude by using an Anthropic application programming interface (API) key. That works, but it means the running service depends on a long-lived secret. The better option now is Claude Platform on Amazon Web Services (AWS), because the agent can call Claude with its AWS Identity and Access Management (IAM) task role instead of a static API key.
 
