@@ -1044,6 +1044,13 @@ try:
                     break
 
         def _generate() -> Generator[str, None, None]:
+            try:
+                yield from _generate_inner()
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Unhandled error in stream generator: %s", exc, exc_info=True)
+                yield json.dumps({"type": "error", "text": str(exc)}) + "\n"
+
+        def _generate_inner() -> Generator[str, None, None]:
             lang = _detect_language(body.question)
             yield (
                 json.dumps(

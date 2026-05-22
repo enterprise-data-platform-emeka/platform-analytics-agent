@@ -553,6 +553,15 @@ class ClaudeClient:
                         delay,
                     )
                     time.sleep(delay)
+            except anthropic.APIError as exc:
+                # Non-transient API error (auth, permission denied, bad request, etc.).
+                # Do not retry — surface immediately with enough context to diagnose.
+                logger.error(
+                    "Claude API permanent error (provider=%s): %s",
+                    self._config.aws.claude_provider,
+                    exc,
+                )
+                raise SQLGenerationError(f"Claude API error ({type(exc).__name__}): {exc}") from exc
 
         raise SQLGenerationError(
             f"Claude API unavailable after {_MAX_RETRIES} retries: {last_exc}"

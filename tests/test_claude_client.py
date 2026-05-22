@@ -342,7 +342,7 @@ class TestGenerateSqlRetry:
             )
 
         with patch.object(client._client.messages, "create", side_effect=bad_request):
-            with pytest.raises(anthropic.BadRequestError):
+            with pytest.raises(SQLGenerationError, match="BadRequestError"):
                 client.generate_sql(
                     messages=[{"role": "user", "content": "test"}],
                     system_prompt="sys",
