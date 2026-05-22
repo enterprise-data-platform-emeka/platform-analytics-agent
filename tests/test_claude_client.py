@@ -36,6 +36,9 @@ def _config() -> Config:
             athena_workgroup="edp-dev-workgroup",
             glue_gold_database=GOLD_DB,
             ssm_api_key_param="/edp/dev/anthropic_api_key",
+            claude_provider="anthropic_api_key",
+            claude_workspace_id="",
+            claude_inference_geo="",
         ),
         agent=AgentConfig(
             cost_threshold_usd=0.10,
@@ -144,6 +147,36 @@ class TestFetchApiKey:
                     api_key="override-key",
                 )
             mock_boto.assert_not_called()
+
+    def test_aws_provider_uses_anthropic_aws_client(self) -> None:
+        config = _config()
+        config = Config(
+            aws=AWSConfig(
+                region=config.aws.region,
+                environment=config.aws.environment,
+                bronze_bucket=config.aws.bronze_bucket,
+                gold_bucket=config.aws.gold_bucket,
+                athena_results_bucket=config.aws.athena_results_bucket,
+                athena_workgroup=config.aws.athena_workgroup,
+                glue_gold_database=config.aws.glue_gold_database,
+                ssm_api_key_param="",
+                claude_provider="aws_claude_platform",
+                claude_workspace_id="wrkspc_test",
+                claude_inference_geo="us",
+            ),
+            agent=config.agent,
+        )
+        with patch("agent.claude_client.boto3.client") as mock_boto:
+            with patch.object(anthropic, "AnthropicAWS", create=True) as mock_aws:
+                ClaudeClient(
+                    config=config,
+                    schema_resolver=_schema_resolver(),
+                )
+            mock_boto.assert_not_called()
+            mock_aws.assert_called_once_with(
+                aws_region="eu-central-1",
+                workspace_id="wrkspc_test",
+            )
 
 
 # ── generate_sql — happy path ──────────────────────────────────────────────────

@@ -87,7 +87,7 @@ class SQLGenerator:
         system_prompt: str,
         verdict_feedback: str = "",
     ) -> GeneratedSQL:
-        """Generate validated SQL for a plain-English question.
+        """Generate validated SQL for a business-language question.
 
         Drives up to MAX_ATTEMPTS (3) rounds of generation and validation.
         On each validation failure the reason is fed back to Claude as a

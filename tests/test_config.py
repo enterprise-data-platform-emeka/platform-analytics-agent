@@ -14,6 +14,7 @@ def test_config_loads_from_env(agent_env_vars: None) -> None:
     assert config.aws.region == "eu-central-1"
     assert config.aws.bronze_bucket == "edp-dev-123456789012-bronze"
     assert config.aws.glue_gold_database == "edp_dev_gold"
+    assert config.aws.claude_provider == "anthropic_api_key"
     assert config.agent.max_rows == 1000
     assert config.agent.cost_threshold_usd == 0.10
 
@@ -40,6 +41,35 @@ def test_config_fails_on_invalid_max_rows(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("MAX_ROWS", "lots")
     with pytest.raises(ConfigurationError, match="MAX_ROWS"):
         Config.from_env()
+
+
+def test_config_fails_on_invalid_claude_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CLAUDE_PROVIDER", "bedrock")
+    with pytest.raises(ConfigurationError, match="CLAUDE_PROVIDER"):
+        Config.from_env()
+
+
+def test_config_requires_workspace_for_aws_claude_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CLAUDE_PROVIDER", "aws_claude_platform")
+    monkeypatch.delenv("ANTHROPIC_AWS_WORKSPACE_ID", raising=False)
+    with pytest.raises(ConfigurationError, match="ANTHROPIC_AWS_WORKSPACE_ID"):
+        Config.from_env()
+
+
+def test_config_loads_aws_claude_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CLAUDE_PROVIDER", "aws_claude_platform")
+    monkeypatch.setenv("ANTHROPIC_AWS_WORKSPACE_ID", "wrkspc_test")
+    monkeypatch.setenv("ANTHROPIC_AWS_INFERENCE_GEO", "us")
+    monkeypatch.delenv("SSM_API_KEY_PARAM", raising=False)
+
+    config = Config.from_env()
+
+    assert config.aws.claude_provider == "aws_claude_platform"
+    assert config.aws.claude_workspace_id == "wrkspc_test"
+    assert config.aws.claude_inference_geo == "us"
+    assert config.aws.ssm_api_key_param == ""
 
 
 def test_config_repr_does_not_expose_bucket_names(agent_env_vars: None) -> None:

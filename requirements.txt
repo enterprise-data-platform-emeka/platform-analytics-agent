@@ -1,4 +1,4 @@
-anthropic==0.49.0
+anthropic[aws]>=0.70.0,<1.0
 boto3==1.35.0
 sqlparse==0.5.4
 pandas==2.2.3

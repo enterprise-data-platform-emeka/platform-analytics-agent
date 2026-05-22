@@ -719,7 +719,7 @@ try:
 
     @app.post("/ask", response_model=AskResponse)
     async def ask_endpoint(body: AskRequest) -> AskResponse:
-        """Accept a plain-English question and return a structured insight.
+        """Accept a business-language question and return a structured insight.
 
         Pass session_id from a prior response to enable multi-turn follow-ups.
         A new session_id is created on the first request and must be echoed

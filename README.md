@@ -8,7 +8,7 @@ This repository is part of the [Enterprise Data Platform](https://github.com/ent
 
 ---
 
-This is the Natural Language (NL) Analytics Agent for the Enterprise Data Platform. It's the final layer of the platform: everything before this (DMS (Database Migration Service), Glue, dbt, MWAA (Amazon Managed Workflows for Apache Airflow)) exists to produce a clean, curated Gold data layer. This agent makes that data accessible to anyone who can ask a question in plain English, without needing to know SQL, table names, or partition structures.
+This is the Natural Language (NL) Analytics Agent for the Enterprise Data Platform. It's the final layer of the platform: everything before this (DMS (Database Migration Service), Glue, dbt, MWAA (Amazon Managed Workflows for Apache Airflow)) exists to produce a clean, curated Gold data layer. This agent makes that data accessible to anyone who can ask a question in business terms, without needing to know SQL, table names, or partition structures.
 
 ---
 
@@ -26,7 +26,7 @@ The agent:
 5. Checks that the SQL actually answers the question before running it: reads the SQL blind, infers its intent, and regenerates once with correction feedback if there's a mismatch
 6. Runs the query via Athena and validates the result for obvious anomalies
 7. Produces a chart matched to the data shape (line, bar, scatter, pie, or multi-line)
-8. Returns a plain-English insight alongside the SQL it ran, every assumption it made, the scan cost, and an intent verdict
+8. Returns a business-language insight alongside the SQL it ran, every assumption it made, the scan cost, and an intent verdict
 
 If it interpreted "transactions" as completed orders only, it says so explicitly before returning the result, so the user can catch that interpretation and correct it.
 
@@ -128,7 +128,7 @@ flowchart TD
 
 The FastAPI backend is the analytical engine. Non-technical stakeholders don't interact with it directly. The user-facing layer is a Streamlit browser app that wraps the backend.
 
-A stakeholder opens a URL in their browser, types a plain-English question in a text box, and clicks submit. Streamlit POSTs the question to the FastAPI `/ask` endpoint. When the response arrives, Streamlit renders everything inline: the plain-English insight (streamed token-by-token as it generates), an interactive Plotly chart with a raw data table tab, the SQL in a "Query details" expander, the assumptions the agent made, and the scan cost in USD.
+A stakeholder opens a URL in their browser, types a business-language question in a text box, and clicks submit. Streamlit POSTs the question to the FastAPI `/ask` endpoint. When the response arrives, Streamlit renders everything inline: the business-language insight (streamed token-by-token as it generates), an interactive Plotly chart with a raw data table tab, the SQL in a "Query details" expander, the assumptions the agent made, and the scan cost in USD.
 
 No command-line access needed. No SQL knowledge needed. No understanding of Athena, Glue, or partition structures required. That's the whole point.
 
@@ -140,7 +140,7 @@ The UI has several features beyond a simple text box:
 - **Numbered Q&A cards.** Each question-answer pair is rendered as a numbered card with a border, not a chat bubble. The card shows the question, the streaming insight, the chart (or table), and a collapsible "Query details" section with SQL, assumptions, scan cost, and a query intent check.
 - **Query intent check.** Before Athena runs, Claude first reads only the SQL and infers what business question the SQL is answering. The original question is withheld from that call except for a small language hint. A separate Claude verdict call then compares the original question with the inferred SQL intent and returns a `Yes`/`No` mismatch verdict. If a genuine mismatch is detected, FastAPI regenerates the SQL once with the discrepancy as feedback before any Athena query runs, so no scan cost is spent on SQL that is already known to be wrong. The final verdict is shown as a badge in the UI and recorded in the engineer log.
 - **Chart/Table tabs.** Every result has two tabs: an interactive Plotly chart and a raw data table. The user can switch between them without re-running the query.
-- **PDF report download.** A "Download PDF" button generates a 2-page stakeholder report. Page 1 has the question, KPI tiles, the plain-English summary, and the chart. Page 2 has the plain-English methodology (assumptions rewritten without SQL, table names, or technical identifiers), plus a query intent cross-check. The PDF uses the army olive brand palette (`#4B5320`), includes a geometric E logo mark, a generation timestamp, and "Page X of Y" page numbers in the footer. CJK (Chinese, Japanese, Korean) scripts use the Noto CJK font installed in the Docker image so characters render correctly.
+- **PDF report download.** A "Download PDF" button generates a 2-page stakeholder report. Page 1 has the question, KPI tiles, the business-language summary, and the chart. Page 2 has the business-language methodology (assumptions rewritten without SQL, table names, or technical identifiers), plus a query intent cross-check. The PDF uses the army olive brand palette (`#4B5320`), includes a geometric E logo mark, a generation timestamp, and "Page X of Y" page numbers in the footer. CJK (Chinese, Japanese, Korean) scripts use the Noto CJK font installed in the Docker image so characters render correctly.
 - **Backend PDF report endpoint.** Non-browser clients such as the Slack MCP gateway can call `POST /report/pdf` with a completed `/ask` response and receive the branded PDF as base64. This keeps Slack report delivery on the same backend contract instead of rebuilding report logic in the gateway.
 - **Conversation export and import.** A sidebar button downloads the full conversation as a JSON file. A file uploader lets the user restore a previous conversation in a new session, so multi-day analysis workflows don't start from scratch.
 - **Session sidebar.** Shows the session start time and a running count of questions asked in the current session.
@@ -278,7 +278,7 @@ sequenceDiagram
 What each part achieves:
 
 1. **Stakeholder in Slack** keeps the experience where business users already
-   work. They ask a question in plain English instead of opening AWS or writing
+   work. They ask a question in business terms instead of opening AWS or writing
    SQL.
 2. **Slack Workspace** receives the message and sends it to the Slack app. Slack
    is the chat system, not the analytics engine.
@@ -316,7 +316,7 @@ FastAPI is a Python web framework, meaning a program that listens for incoming r
 
 **Claude API**
 
-Claude is Anthropic's AI model. I call it three times for each analytical question. The first call generates the SQL query and a list of assumptions (Claude reads the question against the full schema embedded in the system prompt). The second call reads only the SQL (the original question is withheld) and infers what business question the SQL is answering. This cross-check catches cases where the SQL technically runs but answers the wrong question. The third call reads the data returned by Athena and writes the plain-English insight. Claude is stateless: each call is independent, and the relevant context is passed explicitly each time.
+Claude is Anthropic's AI model. I call it three times for each analytical question. The first call generates the SQL query and a list of assumptions (Claude reads the question against the full schema embedded in the system prompt). The second call reads only the SQL (the original question is withheld) and infers what business question the SQL is answering. This cross-check catches cases where the SQL technically runs but answers the wrong question. The third call reads the data returned by Athena and writes the business-language insight. Claude is stateless: each call is independent, and the relevant context is passed explicitly each time.
 
 **Amazon Athena**
 
@@ -375,7 +375,7 @@ If a genuine mismatch is detected (wrong metric, wrong table, wrong filter), the
 
 `ChartGenerator` selects chart type from the shape of the result and keywords in the question. Five types are supported: **line** (time + 1 metric), **multi-line** (time + 2+ metrics), **bar** (categorical + metric), **scatter** (2 numeric + categorical, correlation question), and **pie/donut** (proportion question, ≤ 8 rows). The chart is uploaded to S3 and returned as a presigned URL (Uniform Resource Locator).
 
-`InsightGenerator` makes a Claude call with the original question, SQL, result sample, and assumptions, and returns a 2-3 sentence plain-English insight.
+`InsightGenerator` makes a Claude call with the original question, SQL, result sample, and assumptions, and returns a 2-3 sentence business-language insight.
 
 ### Step 8: Audit
 
@@ -654,7 +654,7 @@ In the AWS console, making sure the region is `eu-central-1`, navigate to System
 |---|---|
 | Name | `/edp/dev/anthropic_api_key` |
 | Type | `SecureString` |
-| Value | Anthropic API key (starts with `sk-ant-`) |
+| Value | Anthropic API key from the Claude Console |
 | KMS key | Use the default `aws/ssm` key |
 
 This only needs to be done once. The parameter survives `terraform destroy` because it's not managed by Terraform.
@@ -665,7 +665,7 @@ Alternatively, from the terminal:
 aws ssm put-parameter \
   --name "/edp/dev/anthropic_api_key" \
   --type "SecureString" \
-  --value "sk-ant-YOUR-KEY-HERE" \
+  --value "<anthropic-api-key>" \
   --profile dev-admin \
   --region eu-central-1
 ```
@@ -679,6 +679,28 @@ aws ssm get-parameter \
   --profile dev-admin \
   --region eu-central-1
 ```
+
+**Claude Platform on AWS option.**
+
+For AWS IAM authentication, I store the Claude workspace ID in SSM Parameter Store instead of committing it in Terraform. The workspace ID is not a secret, but SSM gives each environment one clear place to hold its current Claude workspace.
+
+```bash
+aws ssm put-parameter \
+  --name "/edp/dev/claude/workspace_id" \
+  --type "String" \
+  --value "<workspace-id>" \
+  --overwrite \
+  --profile dev-admin \
+  --region eu-central-1
+```
+
+Then the dev Terraform apply uses:
+
+```bash
+TF_VAR_claude_provider=aws_claude_platform
+```
+
+In this mode, the ECS task role calls Claude through AWS IAM/SigV4. No Claude API key is required for the running service.
 
 **2. Confirm the MWAA pipeline has run and Gold data exists.**
 
@@ -768,7 +790,7 @@ The agent takes 12-20 seconds to respond. On the first run there's an additional
 - Every assumption it made ("'revenue' interpreted as the `total_price` column on completed orders")
 - The result table
 - Bytes scanned and cost in USD
-- A 2-3 sentence plain-English insight
+- A 2-3 sentence business-language insight
 - A presigned S3 URL (Uniform Resource Locator) for the chart PNG
 
 ---
@@ -938,7 +960,7 @@ The command takes 15-30 seconds. The agent is loading schemas from Glue, generat
 
 **Output:**
 
-- `INSIGHT`: a 2-3 sentence plain-English answer based on the actual data
+- `INSIGHT`: a 2-3 sentence business-language answer based on the actual data
 - The assumptions list: what the agent interpreted (for example, "'revenue' means total price on completed orders only")
 - `BYTES SCANNED`: how much Athena data was read (should be small for Gold tables, under 10 MB)
 - `COST USD`: the Athena query cost (should be under $0.001)
@@ -1119,6 +1141,8 @@ Resources: ECR repository (scan on push, lifecycle policy keeps last 10 images),
 
 Task IAM role grants: Gold S3 read-only, Athena results bucket read/write, Bronze `metadata/dbt/*` read, Bronze `metadata/agent-audit/*` write, Glue Gold catalog read-only, Athena query execution on the platform workgroup only, SSM API key read on `/edp/{env}/anthropic_api_key`, KMS decrypt on platform key only. No wildcard resources anywhere.
 
+When `claude_provider=aws_claude_platform`, the task IAM role grants `aws-external-anthropic:CreateInference` and `aws-external-anthropic:CountTokens` on the configured Claude workspace ARN instead of reading the Anthropic API key parameter. The workspace ID comes from `/edp/{env}/claude/workspace_id`.
+
 Deliverable: `terraform plan` in `terraform-platform-infra-live/environments/dev` produces the correct IAM role. All application AWS code is written inside this permission boundary.
 
 ### Phase 3: Schema resolver: complete
@@ -1156,7 +1180,7 @@ The agentic loop is a first-class module, not wired ad-hoc inside `main.py`.
 - `agent/prompts.py`: all prompts in one place, reviewed and tuned independently of code:
   - System prompt: includes the full pre-loaded Gold schema dict from Phase 3, guardrail rules, and output format expectations. Because all schemas are embedded here, Claude can answer most questions in a single non-tool-call response.
   - SQL generation prompt: question + schema context → SELECT query + assumptions list
-  - Insight prompt: question + SQL + result sample → 2-3 sentence plain-English insight
+  - Insight prompt: question + SQL + result sample → 2-3 sentence business-language insight
   - Tool definitions: `get_schema` (for edge cases where Claude needs to re-examine one table)
 - `agent/claude_client.py`: `ClaudeClient`:
   - For the common case (question maps clearly to one Gold table): single Claude call, no tool use needed. Claude reads the schema from the system prompt and returns SQL + assumptions directly.
@@ -1198,7 +1222,7 @@ Deliverable: Full Athena execution path works correctly. Actual cost tracked per
 ### Phase 8: Result validator, insight generator, and audit log: complete
 
 - `agent/result_validator.py`: `ResultValidator`: checks numeric values within plausible bounds (negative revenue is flagged), checks for unexpected nulls on key columns. Zero rows is a valid result for Gold tables: an aggregation with no matching data is a legitimate answer, not a bug. Returns a list of flags, never blocks execution, always surfaces flags in output.
-- `agent/insight.py`: `InsightGenerator`: final Claude call that takes the original question, SQL, result DataFrame, and assumptions, and returns a 2-3 sentence plain-English insight. Uses the insight prompt from `prompts.py`. Structured output so malformed responses raise `AgentError`, not crash.
+- `agent/insight.py`: `InsightGenerator`: final Claude call that takes the original question, SQL, result DataFrame, and assumptions, and returns a 2-3 sentence business-language insight. Uses the insight prompt from `prompts.py`. Structured output so malformed responses raise `AgentError`, not crash.
 - `agent/audit.py`: `AuditLogger`: writes a structured JSON record to `s3://{bronze_bucket}/metadata/agent-audit/` after every query. Fields: question, SQL, assumptions, row count, bytes scanned, cost in USD, validation flags, insight, timestamp. The audit log is itself queryable via Athena.
 - `tests/test_result_validator.py`, `tests/test_insight.py`
 
@@ -1236,7 +1260,7 @@ A Streamlit browser app (`ui/app.py`) that wraps the FastAPI backend so non-tech
 What was built:
 
 - `ui/app.py`: numbered Q&A cards (not chat bubbles), session state for multi-turn follow-ups, bordered card layout
-- **Streaming insight display.** The plain-English insight streams token-by-token as Claude generates it, so stakeholders see progress immediately instead of waiting for the full response.
+- **Streaming insight display.** The business-language insight streams token-by-token as Claude generates it, so stakeholders see progress immediately instead of waiting for the full response.
 - **Status badges.** A spinner and coloured status badge show each pipeline step in real time (generating SQL, running query, generating insight).
 - **Chart/Table tabs.** Every result renders both an interactive Plotly chart and a raw data table via `st.tabs`. The user switches between them without re-running the query.
 - **Query intent check.** Before Athena runs, Claude first reads only the SQL and infers its business intent. The original question is withheld from that call except for a language hint. A separate Claude verdict call compares the original question with the inferred SQL intent. If a mismatch is detected, FastAPI regenerates the SQL once with correction feedback before any query runs. The final verdict appears as a badge in the Details expander so stakeholders can see whether a correction was applied.
@@ -1253,7 +1277,7 @@ Reliability, auditability, and a professional PDF output for non-technical stake
 
 What was built:
 
-- **Stakeholder PDF.** A 2-page report generated by fpdf2. Page 1 has KPI tiles (key numbers pulled from the result), the plain-English insight, and the chart. Page 2 has the methodology in plain English (no SQL, no table names, no technical identifiers). Army olive brand palette (`#4B5320`), geometric E logo mark, olive accent bars, CJK font support. The PDF is safe to hand to a non-technical executive.
+- **Stakeholder PDF.** A 2-page report generated by fpdf2. Page 1 has KPI tiles (key numbers pulled from the result), the business-language insight, and the chart. Page 2 has the methodology in business terms (no SQL, no table names, no technical identifiers). Army olive brand palette (`#4B5320`), geometric E logo mark, olive accent bars, CJK font support. The PDF is safe to hand to a non-technical executive.
 - **Engineer audit log.** A 17-column CSV written to `s3://{bronze_bucket}/metadata/engineer-log/date={date}/session={session_id}/{request_id}.csv` for every request. Columns: `session_id`, `request_id`, `timestamp_utc`, `question_asked`, `sql_executed`, `claude_interpretation`, `discrepancy_detail`, `verdict`, `bytes_scanned`, `athena_cost_usd`, `response_time_seconds`, `athena_query_execution_id`, `sql_retry_count`, `row_count_returned`, `chart_type_rendered`, `language`, `prompt_version`. The `prompt_version` column (e.g. `v1`) lets me filter the log by prompt version to compare verdict rates before and after a prompt change. A "Prepare Session Log" button in the sidebar fetches and merges all session rows from S3 into a single downloadable CSV.
 - **Verdict computation.** The pre-Athena intent check writes a `verdict` field (`Yes`/`No`) and a `discrepancy_detail` sentence to the response, audit log, and engineer log. If verdict is `Yes`, the SQL is regenerated once before Athena runs. The UI shows the final verdict as a badge in the Details expander.
 - **Circuit breaker.** A 30-second timeout on every Claude API call. Up to 3 attempts with 2s/5s/10s exponential backoff on transient errors (throttling, timeout). Semantic errors (table not found, permission denied) fail immediately with no retry.
@@ -1466,7 +1490,7 @@ Integration tests also exist but are not part of the standard CI run. They are m
 
 ## Status
 
-All 14 phases complete. The full agent is deployed to ECS Fargate on AWS dev and end-to-end tested. Non-technical stakeholders open a browser, type a plain-English question in any supported language, and see a streaming plain-English insight, an interactive Plotly chart, numbered Q&A cards, assumptions, a query intent cross-check with verdict badge, and scan cost. PDF reports can be downloaded directly from the browser (2-page stakeholder layout, olive brand, KPI tiles, no SQL or technical identifiers, CJK font support). Engineers can download a session audit CSV from the sidebar.
+All 14 phases complete. The full agent is deployed to ECS Fargate on AWS dev and end-to-end tested. Non-technical stakeholders open a browser, type a business-language question in any supported language, and see a streaming business-language insight, an interactive Plotly chart, numbered Q&A cards, assumptions, a query intent cross-check with verdict badge, and scan cost. PDF reports can be downloaded directly from the browser (2-page stakeholder layout, olive brand, KPI tiles, no SQL or technical identifiers, CJK font support). Engineers can download a session audit CSV from the sidebar.
 
 | Phase | Status |
 |---|---|

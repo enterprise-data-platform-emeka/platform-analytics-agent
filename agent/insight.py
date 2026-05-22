@@ -1,4 +1,4 @@
-"""Insight generator: produces a plain-English answer from query results.
+"""Insight generator: produces a business-language answer from query results.
 
 Wraps the second Claude call. Receives the question, validated SQL,
 result markdown, and validation flags, and returns a structured
@@ -31,7 +31,7 @@ class InsightResponse:
     """Structured output from the insight generator.
 
     Attributes:
-        insight: 2-3 sentence plain-English answer to the question.
+        insight: 2-3 sentence business-language answer to the question.
         assumptions: List of assumption strings from the SQL generator.
             Passed through so the full response includes them.
         validation_flags: List of anomaly flag strings from ResultValidator.
@@ -80,7 +80,7 @@ class InsightResponse:
 
 
 class InsightGenerator:
-    """Generates a plain-English insight from query results via Claude.
+    """Generates a business-language insight from query results via Claude.
 
     Instantiate once per agent session alongside ClaudeClient.
 
@@ -106,13 +106,13 @@ class InsightGenerator:
         assumptions: list[str],
         validation_report: ValidationReport,
     ) -> InsightResponse:
-        """Generate a plain-English insight for the query result.
+        """Generate a business-language insight for the query result.
 
         If the result has zero rows, a zero-row insight is generated
         without making a Claude call (Claude has nothing to reason about).
 
         Args:
-            question: Original plain-English question from the user.
+            question: Original business-language question from the user.
             sql: Validated SQL that was executed.
             query_result: The QueryResult from AthenaExecutor.
             assumptions: Assumption strings from the SQL generator.

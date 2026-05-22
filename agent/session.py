@@ -24,9 +24,9 @@ class Turn:
     """One question-answer exchange within a conversation.
 
     Attributes:
-        question: The plain-English question the user asked.
+        question: The business-language question the user asked.
         sql: The validated SQL that was executed.
-        insight: The plain-English insight returned to the user.
+        insight: The business-language insight returned to the user.
         assumptions: Assumption strings from the SQL generator.
         timestamp: ISO-8601 UTC timestamp of when this turn was recorded.
     """

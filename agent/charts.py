@@ -444,7 +444,7 @@ class ChartGenerator:
 
         Args:
             result: The QueryResult from AthenaExecutor.execute().
-            question: Original plain-English question (used only for logging).
+            question: Original business-language question (used only for logging).
             title: Short chart title from the insight generator, in the same
                 language as the question. Displayed above the chart. If empty,
                 no title is shown.
