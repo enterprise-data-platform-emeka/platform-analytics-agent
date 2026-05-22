@@ -82,20 +82,28 @@ In the AWS mode, the app should use:
 ```text
 CLAUDE_PROVIDER=aws_claude_platform
 AWS_REGION=eu-central-1
-ANTHROPIC_BASE_URL=https://aws-external-anthropic.eu-central-1.api.aws
-ANTHROPIC_WORKSPACE_ID=<workspace-id>
+ANTHROPIC_AWS_WORKSPACE_ID=<workspace-id>
+ANTHROPIC_AWS_INFERENCE_GEO=us
 ```
 
-The app should stop requiring `ANTHROPIC_API_KEY` when `CLAUDE_PROVIDER=aws_claude_platform`.
+The workspace ID is stored in AWS Systems Manager (SSM) Parameter Store at:
 
-## What changes in Terraform later
+```text
+/edp/{environment}/claude/workspace_id
+```
+
+The workspace ID is not a secret, but storing it in SSM keeps environment-specific identifiers out of committed Terraform files. Terraform reads that value at apply time and passes it to the ECS task as `ANTHROPIC_AWS_WORKSPACE_ID`.
+
+The app stops requiring `ANTHROPIC_API_KEY` when `CLAUDE_PROVIDER=aws_claude_platform`.
+
+## What changes in Terraform
 
 The code change should be made in two places:
 
-1. `terraform-platform-infra-live/modules/iam-metadata/`
-2. The Terraform module that defines the Analytics Agent ECS task environment variables and secrets
+1. `terraform-platform-infra-live/modules/analytics-agent/`
+2. `terraform-platform-infra-live/environments/{dev,staging,prod}/`
 
-The IAM module should grant the Analytics Agent ECS task role only the Claude actions it needs. In plain English:
+The Analytics Agent module owns the ECS task role, so the Claude permission belongs there. The environment files pass the provider settings into that module.
 
 ```text
 The Analytics Agent ECS task role can create Claude inference requests and count tokens for the Analytics Agent Claude workspace.
@@ -116,6 +124,24 @@ The policy shape should be similar to this, with placeholders kept out of commit
   ],
   "Resource": "arn:aws:aws-external-anthropic:eu-central-1:<account-id>:workspace/<workspace-id>"
 }
+```
+
+To enable this for dev after the workspace exists, I set the SSM parameter once:
+
+```bash
+aws ssm put-parameter \
+  --name "/edp/dev/claude/workspace_id" \
+  --type "String" \
+  --value "<workspace-id>" \
+  --overwrite \
+  --profile dev-admin \
+  --region eu-central-1
+```
+
+Then I apply Terraform with:
+
+```bash
+TF_VAR_claude_provider=aws_claude_platform
 ```
 
 ## Why this is the best current option

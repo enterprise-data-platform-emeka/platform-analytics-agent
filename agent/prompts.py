@@ -6,7 +6,7 @@ elsewhere. Nothing in this file makes network calls.
 Two Claude calls happen per question:
   1. SQL generation: system prompt with embedded Gold schemas + user question
      -> <sql> block + <assumptions> block
-  2. Insight generation: results + question -> 2-3 sentence plain-English insight
+  2. Insight generation: results + question -> 2-3 sentence business-language insight
 
 The static GOLD_TABLE_CATALOG encodes business meaning derived from live
 Athena query results. It is the fallback description layer used when dbt
@@ -336,7 +336,7 @@ def _format_static_table_block(
 def build_sql_request_messages(question: str) -> list[dict[str, str]]:
     """Build the initial messages list for a SQL generation request.
 
-    Returns a single user message containing the plain-English question.
+    Returns a single user message containing the business-language question.
     The system prompt is passed separately to the Claude API call.
     """
     return [{"role": "user", "content": question}]
@@ -421,7 +421,7 @@ def build_insight_messages(
     """Build the messages list for insight generation.
 
     Args:
-        question: The original plain-English question from the user.
+        question: The original business-language question from the user.
         sql: The validated SQL that was executed.
         result_markdown: The query result formatted as a markdown table.
 
@@ -495,7 +495,7 @@ def build_verdict_retry_messages(
     single retry allowed before proceeding with the best available answer.
 
     Args:
-        question: The original plain-English question from the user.
+        question: The original business-language question from the user.
         discrepancy_detail: One-sentence description of the mismatch from
             the verdict call.
 

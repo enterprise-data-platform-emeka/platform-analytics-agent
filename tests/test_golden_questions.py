@@ -1,6 +1,6 @@
 """Golden question test suite for the Analytics Agent SQL generation pipeline.
 
-Each test case is a fixed plain-English question paired with:
+Each test case is a fixed business-language question paired with:
   - The Gold table name expected in the generated SQL
   - One or more column names expected in the generated SQL
 
@@ -10,7 +10,7 @@ the schema source (no Glue, no Athena). This catches prompt regressions and
 schema description changes offline, before deploying to AWS.
 
 Run with:
-    ANTHROPIC_API_KEY=sk-ant-... pytest tests/test_golden_questions.py -v
+    ANTHROPIC_API_KEY=<anthropic-api-key> pytest tests/test_golden_questions.py -v
 """
 
 import os
@@ -232,6 +232,9 @@ def golden_generator() -> SQLGenerator:
             athena_workgroup="test-workgroup",
             glue_gold_database=_GOLD_DB,
             ssm_api_key_param="/test/key",
+            claude_provider="anthropic_api_key",
+            claude_workspace_id="",
+            claude_inference_geo="",
         ),
         agent=AgentConfig(cost_threshold_usd=1.0, max_rows=1000),
     )

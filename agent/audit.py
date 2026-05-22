@@ -13,7 +13,7 @@ trail should never prevent the user from getting their answer.
 
 Schema of each JSON record:
     timestamp       ISO-8601 UTC timestamp of the write
-    question        The original plain-English question
+    question        The original business-language question
     sql             The validated SQL that was executed
     assumptions     List of assumption strings from the SQL generator
     execution_id    Athena QueryExecutionId
@@ -21,7 +21,7 @@ Schema of each JSON record:
     bytes_scanned   DataScannedInBytes from Athena statistics
     cost_usd        Estimated cost for this query
     validation_flags List of flag strings from result_validator (may be empty)
-    insight         The plain-English insight string
+    insight         The business-language insight string
 """
 
 import json
@@ -71,7 +71,7 @@ class AuditLogger:
         here so it can be included in the log message with full context.
 
         Args:
-            question: The original plain-English question from the user.
+            question: The original business-language question from the user.
             sql: The validated SQL that was executed.
             response: The InsightResponse from InsightGenerator.generate().
         """

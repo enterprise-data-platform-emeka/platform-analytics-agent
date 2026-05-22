@@ -1,7 +1,8 @@
 """Claude API client for the Analytics Agent.
 
 Wraps the Anthropic SDK with:
-  - SSM Parameter Store key fetch at startup
+  - Provider selection: Anthropic API key or Claude Platform on AWS IAM/SigV4
+  - SSM Parameter Store key fetch at startup for the API-key path
   - Retry on transient errors (rate limit, timeout, connection)
   - Tool-use fallback: handles get_schema calls before returning final SQL
   - Response parsing: extracts <sql> / <assumptions> and insight text
@@ -174,13 +175,26 @@ class ClaudeClient:
         Args:
             config: Fully validated agent config.
             schema_resolver: Used to serve tool-use get_schema calls.
-            api_key: Optional API key override. If None, the key is fetched
-                from SSM Parameter Store using config.aws.ssm_api_key_param.
-                Pass a value in tests to skip the SSM call.
+            api_key: Optional API key override. If supplied, the standard
+                Anthropic API-key client is used. This keeps unit tests and
+                local scripts independent from AWS credential setup.
         """
-        if api_key is None:
+        if api_key is not None:
+            self._client = anthropic.Anthropic(api_key=api_key)
+        elif config.aws.claude_provider == "aws_claude_platform":
+            aws_client_cls = getattr(anthropic, "AnthropicAWS", None)
+            if aws_client_cls is None:
+                raise ConfigurationError(
+                    "Claude Platform on AWS requires the Anthropic AWS SDK extra. "
+                    "Install dependencies with 'pip install \"anthropic[aws]\"'."
+                )
+            self._client = aws_client_cls(
+                aws_region=config.aws.region,
+                workspace_id=config.aws.claude_workspace_id,
+            )
+        else:
             api_key = self._fetch_api_key(config.aws)
-        self._client = anthropic.Anthropic(api_key=api_key)
+            self._client = anthropic.Anthropic(api_key=api_key)
         self._schema_resolver = schema_resolver
         self._config = config
 
@@ -235,10 +249,10 @@ class ClaudeClient:
         sql: str,
         result_markdown: str,
     ) -> tuple[str, str]:
-        """Generate a plain-English insight and a short chart title from query results.
+        """Generate a business-language insight and a short chart title from query results.
 
         Args:
-            question: The original plain-English question from the user.
+            question: The original business-language question from the user.
             sql: The validated SQL that was executed.
             result_markdown: The query result formatted as a markdown table.
 
@@ -305,7 +319,7 @@ class ClaudeClient:
             prior_context: Summary of prior Q&A turns from the session.
 
         Returns:
-            A short plain-English answer (2-3 sentences).
+            A short business-language answer (2-3 sentences).
 
         Raises:
             InsightGenerationError: if Claude returns an empty response.
@@ -333,7 +347,7 @@ class ClaudeClient:
         the streaming Messages API so callers can yield tokens progressively.
 
         Args:
-            question: The original plain-English question.
+            question: The original business-language question.
             sql: The validated SQL that was executed.
             result_markdown: The query result as a markdown table.
 
@@ -349,12 +363,19 @@ class ClaudeClient:
 
         def _iter() -> Iterator[str]:
             full_text = ""
-            with self._client.messages.stream(
-                model=MODEL,
-                max_tokens=_MAX_TOKENS_INSIGHT,
-                system=INSIGHT_SYSTEM_PROMPT,
-                messages=cast(list[MessageParam], messages),
-            ) as stream:
+            stream_kwargs: dict[str, Any] = {
+                "model": MODEL,
+                "max_tokens": _MAX_TOKENS_INSIGHT,
+                "system": INSIGHT_SYSTEM_PROMPT,
+                "messages": cast(list[MessageParam], messages),
+            }
+            if (
+                self._config.aws.claude_provider == "aws_claude_platform"
+                and self._config.aws.claude_inference_geo
+            ):
+                stream_kwargs["inference_geo"] = self._config.aws.claude_inference_geo
+
+            with self._client.messages.stream(**stream_kwargs) as stream:
                 for text in stream.text_stream:
                     full_text += text
                     yield text
@@ -510,6 +531,11 @@ class ClaudeClient:
         }
         if tools:
             kwargs["tools"] = tools
+        if (
+            self._config.aws.claude_provider == "aws_claude_platform"
+            and self._config.aws.claude_inference_geo
+        ):
+            kwargs["inference_geo"] = self._config.aws.claude_inference_geo
 
         last_exc: Exception | None = None
         for attempt in range(1, _MAX_RETRIES + 1):

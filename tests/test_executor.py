@@ -29,6 +29,9 @@ def _aws_config() -> AWSConfig:
         athena_workgroup="edp-dev-workgroup",
         glue_gold_database=GOLD_DB,
         ssm_api_key_param="/edp/dev/anthropic_api_key",
+        claude_provider="anthropic_api_key",
+        claude_workspace_id="",
+        claude_inference_geo="",
     )
 
 

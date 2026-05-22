@@ -2652,7 +2652,7 @@ def _extract_kpi_tiles(
     return tiles[:3]
 
 
-def _plain_english_assumption(text: str) -> str:
+def _stakeholder_assumption(text: str) -> str:
     """Strip SQL and markdown artefacts from an assumption string for stakeholder PDFs.
 
     Applied in order:
