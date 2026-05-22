@@ -64,16 +64,16 @@ flowchart TD
     subgraph AgentLoop ["Agent Reasoning Loop - ECS Fargate"]
         direction TB
         Classify["classify_question()\nanalytical / conversational / retype"]
-        GenerateSQL["Call 1: Generate SQL + Assumptions\nClaude API\nSchema already in system prompt"]
+        GenerateSQL["Call 1: Generate SQL + Assumptions\nClaude Platform on AWS\nSchema already in system prompt"]
         ValidateSQL["validate_sql()\nsqlparse guardrails"]
-        IntentCheck["Call 2: Infer SQL intent\nClaude API - SQL only\nquestion withheld except language hint"]
-        VerdictCheck["Call 3: Compare original question\nvs inferred SQL intent\nClaude API verdict"]
+        IntentCheck["Call 2: Infer SQL intent\nClaude Platform on AWS - SQL only\nquestion withheld except language hint"]
+        VerdictCheck["Call 3: Compare original question\nvs inferred SQL intent\nClaude Platform on AWS verdict"]
         Verdict{"Verdict says\nmismatch?"}
         Execute["execute_query()\nAthena SDK"]
         TrackCost["cost.py\nDataScannedInBytes to USD"]
         ValidateResults["validate_results()\nsanity checks"]
         RenderChart["render_chart()\nmatplotlib + Plotly"]
-        Summarise["Call 4: Generate Insight\nClaude API"]
+        Summarise["Call 4: Generate Insight\nClaude Platform on AWS"]
     end
 
     subgraph AWS ["AWS Data Platform"]
@@ -168,7 +168,7 @@ sequenceDiagram
     participant ALB as AWS Load Balancer
     participant UI as Streamlit UI (web page)
     participant API as Analytics Backend (FastAPI)
-    participant CL as Claude API
+    participant CL as Claude Platform on AWS
     participant ATH as Amazon Athena
     participant S3 as S3 Gold and Audit
 
@@ -234,7 +234,7 @@ sequenceDiagram
     participant Slack as Slack Workspace
     participant Gateway as Slack MCP Gateway (ECS Fargate)
     participant API as Analytics Backend (FastAPI)
-    participant CL as Claude API
+    participant CL as Claude Platform on AWS
     participant ATH as Amazon Athena
     participant S3 as S3 Gold and Audit
 
@@ -385,7 +385,7 @@ Two records are written after every analytical query:
 
 **Engineer log**: a single-row CSV at `s3://{bronze_bucket}/metadata/engineer-log/date={date}/session={id}/{request_id}.csv` with 17 columns: session ID, request ID, timestamp, question, SQL executed, Claude's inferred interpretation, verdict, discrepancy detail, bytes scanned, Athena cost, response time, Athena execution ID, SQL retry count, row count returned, chart type rendered, language detected, and prompt version. One file per request so individual rows can be read without scanning the full log. The engineer log download button in the sidebar fetches and concatenates all rows for the current session.
 
-A rate limiter enforces a maximum of 10 requests per 60-second window per session and returns HTTP 429 on breach. This protects both the Claude API budget and Athena scan costs.
+A rate limiter enforces a maximum of 10 requests per 60-second window per session and returns HTTP 429 on breach. This protects both the Claude Platform on AWS budget and Athena scan costs.
 
 ---
 
@@ -620,7 +620,7 @@ This section covers how to test the agent end-to-end. There are two ways to ask 
 Run these in order. Each one takes about a minute. If any step fails, the numbered troubleshooting items below explain exactly what to do.
 
 ```
-[ ] 1. Buy Anthropic API credits at console.anthropic.com > Plans & Billing
+[ ] 1. Create a Claude Platform on AWS workspace (AWS console → Claude Platform on AWS → Workspaces)
 [ ] 2. Apply infra:   cd terraform-platform-infra-live && make apply dev
 [ ] 3. Trigger the Airflow DAG (edp_pipeline) in the MWAA console and wait for it to finish
 [ ] 4. Test locally:  cd platform-analytics-agent && source .venv/bin/activate
@@ -644,45 +644,21 @@ Start with Track 1. Only move to Track 2 once Track 1 is producing correct answe
 
 ### Prerequisites (do these once before the first test)
 
-**1. Store the Anthropic API key in SSM Parameter Store.**
+**1. Store the Claude workspace ID in SSM Parameter Store.**
 
-The agent fetches its API key from AWS Systems Manager (SSM) at startup. It never reads it from a file or environment variable directly: this way the key never appears in ECS task logs or Terraform state.
+The agent authenticates to Claude via the ECS task IAM role (Claude Platform on AWS). No API key is needed. The only prerequisite is the Claude workspace ID, stored in SSM Parameter Store as a plain string.
 
-In the AWS console, making sure the region is `eu-central-1`, navigate to Systems Manager > Parameter Store. Create a new parameter with these exact values:
+In the AWS console, navigate to Systems Manager > Parameter Store in `eu-central-1`. Create a parameter:
 
 | Field | Value |
 |---|---|
-| Name | `/edp/dev/anthropic_api_key` |
-| Type | `SecureString` |
-| Value | Anthropic API key from the Claude Console |
-| KMS key | Use the default `aws/ssm` key |
+| Name | `/edp/dev/claude/workspace_id` |
+| Type | `String` |
+| Value | Workspace ID from AWS console → Claude Platform on AWS → Workspaces |
 
-This only needs to be done once. The parameter survives `terraform destroy` because it's not managed by Terraform.
+This only needs to be done once per environment. The parameter survives `terraform destroy`.
 
-Alternatively, from the terminal:
-
-```bash
-aws ssm put-parameter \
-  --name "/edp/dev/anthropic_api_key" \
-  --type "SecureString" \
-  --value "<anthropic-api-key>" \
-  --profile dev-admin \
-  --region eu-central-1
-```
-
-To verify it was stored:
-
-```bash
-aws ssm get-parameter \
-  --name "/edp/dev/anthropic_api_key" \
-  --with-decryption \
-  --profile dev-admin \
-  --region eu-central-1
-```
-
-**Claude Platform on AWS option.**
-
-For AWS IAM authentication, I store the Claude workspace ID in SSM Parameter Store instead of committing it in Terraform. The workspace ID is not a secret, but SSM gives each environment one clear place to hold its current Claude workspace.
+From the terminal:
 
 ```bash
 aws ssm put-parameter \
@@ -694,13 +670,13 @@ aws ssm put-parameter \
   --region eu-central-1
 ```
 
-Then the dev Terraform apply uses:
+Then Terraform applies with:
 
 ```bash
 TF_VAR_claude_provider=aws_claude_platform
 ```
 
-In this mode, the ECS task role calls Claude through AWS IAM/SigV4. No Claude API key is required for the running service.
+The ECS task role grants `aws-external-anthropic:CreateInference`, `aws-external-anthropic:CountTokens`, `sts:GetWebIdentityToken`, and `sts:TagGetWebIdentityToken` on the workspace ARN. No static API key is stored anywhere.
 
 **2. Confirm the MWAA pipeline has run and Gold data exists.**
 
@@ -752,7 +728,9 @@ GOLD_BUCKET=edp-dev-YOUR_ACCOUNT_ID-gold
 ATHENA_RESULTS_BUCKET=edp-dev-YOUR_ACCOUNT_ID-athena-results
 ATHENA_WORKGROUP=edp-dev-workgroup
 GLUE_GOLD_DATABASE=edp_dev_gold
-SSM_API_KEY_PARAM=/edp/dev/anthropic_api_key
+CLAUDE_PROVIDER=aws_claude_platform
+ANTHROPIC_AWS_WORKSPACE_ID=<workspace-id-from-ssm>
+ANTHROPIC_AWS_INFERENCE_GEO=us
 COST_THRESHOLD_USD=0.10
 MAX_ROWS=1000
 ```
@@ -1040,7 +1018,7 @@ For multi-turn follow-up, after question 2 ask: "Which month had the lowest volu
 
 **"No tables found in Gold database"**: The MWAA pipeline hasn't run yet. Trigger `edp_pipeline` in the Airflow UI and wait for it to complete.
 
-**"ParameterNotFound: /edp/dev/anthropic_api_key"**: The SSM prerequisite step was skipped. Run the `aws ssm put-parameter` command from the Prerequisites section.
+**"ParameterNotFound: /edp/dev/claude/workspace_id"**: The SSM prerequisite step was skipped. Run the `aws ssm put-parameter` command from the Prerequisites section.
 
 **"AccessDenied on SSM GetParameter"**: The ECS task role doesn't have permission to read this SSM path. Confirm `terraform apply` ran successfully and the `analytics-agent` module is included.
 
@@ -1106,7 +1084,8 @@ Glue:
   on edp_{env}_gold database only
 
 SSM:
-  - ssm:GetParameter on /edp/{env}/anthropic_api_key
+  - aws-external-anthropic:CreateInference and CountTokens on the Claude workspace ARN
+  - sts:GetWebIdentityToken and sts:TagGetWebIdentityToken (OIDC credential exchange)
 ```
 
 ---
@@ -1139,9 +1118,7 @@ All AWS infrastructure lives in `terraform-platform-infra-live/modules/analytics
 
 Resources: ECR repository (scan on push, lifecycle policy keeps last 10 images), ECS cluster (FARGATE, Container Insights enabled), CloudWatch log group (30-day retention, KMS-encrypted), task execution role (ECR pull + CloudWatch write only), task IAM role (scoped exactly), security group (egress port 443 only), ECS task definition (512 CPU / 1024 MB, `lifecycle.ignore_changes` so CI updates the image without Terraform re-deploying).
 
-Task IAM role grants: Gold S3 read-only, Athena results bucket read/write, Bronze `metadata/dbt/*` read, Bronze `metadata/agent-audit/*` write, Glue Gold catalog read-only, Athena query execution on the platform workgroup only, SSM API key read on `/edp/{env}/anthropic_api_key`, KMS decrypt on platform key only. No wildcard resources anywhere.
-
-When `claude_provider=aws_claude_platform`, the task IAM role grants `aws-external-anthropic:CreateInference` and `aws-external-anthropic:CountTokens` on the configured Claude workspace ARN instead of reading the Anthropic API key parameter. The workspace ID comes from `/edp/{env}/claude/workspace_id`.
+Task IAM role grants: Gold S3 read-only, Athena results bucket read/write, Bronze `metadata/dbt/*` read, Bronze `metadata/agent-audit/*` write, Glue Gold catalog read-only, Athena query execution on the platform workgroup only, Claude Platform on AWS `CreateInference` and `CountTokens` on the workspace ARN, STS `GetWebIdentityToken` and `TagGetWebIdentityToken` for the OIDC credential exchange, KMS decrypt on platform key only. No wildcard resources on AWS data services. The workspace ID is read from `/edp/{env}/claude/workspace_id` at Terraform apply time.
 
 Deliverable: `terraform plan` in `terraform-platform-infra-live/environments/dev` produces the correct IAM role. All application AWS code is written inside this permission boundary.
 
@@ -1280,7 +1257,7 @@ What was built:
 - **Stakeholder PDF.** A 2-page report generated by fpdf2. Page 1 has KPI tiles (key numbers pulled from the result), the business-language insight, and the chart. Page 2 has the methodology in business terms (no SQL, no table names, no technical identifiers). Army olive brand palette (`#4B5320`), geometric E logo mark, olive accent bars, CJK font support. The PDF is safe to hand to a non-technical executive.
 - **Engineer audit log.** A 17-column CSV written to `s3://{bronze_bucket}/metadata/engineer-log/date={date}/session={session_id}/{request_id}.csv` for every request. Columns: `session_id`, `request_id`, `timestamp_utc`, `question_asked`, `sql_executed`, `claude_interpretation`, `discrepancy_detail`, `verdict`, `bytes_scanned`, `athena_cost_usd`, `response_time_seconds`, `athena_query_execution_id`, `sql_retry_count`, `row_count_returned`, `chart_type_rendered`, `language`, `prompt_version`. The `prompt_version` column (e.g. `v1`) lets me filter the log by prompt version to compare verdict rates before and after a prompt change. A "Prepare Session Log" button in the sidebar fetches and merges all session rows from S3 into a single downloadable CSV.
 - **Verdict computation.** The pre-Athena intent check writes a `verdict` field (`Yes`/`No`) and a `discrepancy_detail` sentence to the response, audit log, and engineer log. If verdict is `Yes`, the SQL is regenerated once before Athena runs. The UI shows the final verdict as a badge in the Details expander.
-- **Circuit breaker.** A 30-second timeout on every Claude API call. Up to 3 attempts with 2s/5s/10s exponential backoff on transient errors (throttling, timeout). Semantic errors (table not found, permission denied) fail immediately with no retry.
+- **Circuit breaker.** A 30-second timeout on every Claude Platform on AWS call. Up to 3 attempts with 2s/5s/10s exponential backoff on transient errors (throttling, timeout). Semantic errors (table not found, permission denied) fail immediately with no retry.
 - **Rate limiter.** 10 requests per 60-second sliding window per `session_id`. Excess requests return HTTP 429 with a `retry_after_seconds` field. Implemented with `collections.deque` in-process: no Redis needed.
 - **Request UUID tracing.** Every request gets a `request_id` (UUID v4) at the top of the handler. It flows through the audit log, engineer log, and JSON export.
 
@@ -1322,7 +1299,7 @@ Claude-sonnet-4-6 pricing: $3.00 per million input tokens, $15.00 per million ou
 
 | Component | Cost |
 |---|---|
-| Claude API (~3,480 input + ~410 output tokens) | ~$0.017 |
+| Claude Platform on AWS (~3,480 input + ~410 output tokens) | ~$0.017 |
 | Athena scan (Gold table, <5 MB) | <$0.001 |
 | S3 operations (audit log, chart upload) | <$0.001 |
 | **Total per question** | **~$0.018** |
@@ -1332,13 +1309,13 @@ Claude-sonnet-4-6 pricing: $3.00 per million input tokens, $15.00 per million ou
 | Component | Per session cost |
 |---|---|
 | ECS Fargate (0.5 vCPU, 1 GB, 3 hours) | ~$0.08 |
-| Claude API (50 questions × ~$0.018) | ~$0.90 |
+| Claude Platform on AWS (50 questions × ~$0.018) | ~$0.90 |
 | Athena (50 queries, <5 MB each) | ~$0.001 |
 | S3 (audit logs, chart PNGs) | ~$0.01 |
 | ALB (3 hours) | ~$0.05 |
 | **Total per session** | **~$1.04** |
 
-Claude API cost dominates. Athena cost on Gold tables is negligible. The pre-aggregated Gold layer cuts both response time and Claude token usage roughly in half compared to querying Silver directly.
+Claude Platform on AWS cost dominates. Athena cost on Gold tables is negligible. The pre-aggregated Gold layer cuts both response time and Claude token usage roughly in half compared to querying Silver directly.
 
 ---
 
@@ -1387,7 +1364,7 @@ Chart: [interactive Plotly line chart rendered inline]
 | Tool | What it does |
 |---|---|
 | Python 3.11.8 | Agent runtime |
-| Claude API (claude-sonnet-4-6) | Question interpretation, SQL generation, insight summarisation |
+| Claude Platform on AWS (claude-sonnet-4-6) | Question interpretation, SQL generation, insight summarisation |
 | boto3 | AWS SDK: Athena, Glue Catalog, S3, SSM |
 | sqlparse | SQL parsing and validation |
 | FastAPI | HTTP endpoint for the agent API |
@@ -1521,7 +1498,7 @@ This is the last component of the platform. The full pipeline is: PostgreSQL →
 
 ### Resilience
 
-Two overlapping safeguards protect the platform from Claude API instability and runaway usage.
+Two overlapping safeguards protect the platform from Claude Platform on AWS instability and runaway usage.
 
 **E3: Circuit breaker.** Every Claude API call in `agent/claude_client.py` has a hard 30-second timeout. If the call times out or hits a transient error (rate limit, connection reset), the client retries up to three times with 2s, 5s, and 10s backoff. Permanent errors (authentication failures, malformed requests) propagate immediately without retry. If all attempts fail, the endpoint returns a clean error message to the user. The ECS container never hangs waiting for an unresponsive API.
 
