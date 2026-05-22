@@ -152,6 +152,6 @@ jobs:
           echo ""
           echo "Deployed analytics agent to ECS:"
           echo "  Environment : ${{ env.ENV }}"
-          echo "  Service     : analytics agent"
+          echo "  Component   : analytics agent"
           echo ""
           echo "Endpoint details are available from Terraform outputs or the AWS console."
