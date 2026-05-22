@@ -61,33 +61,65 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (OIDC)
-        # Assumes the GitHub Actions IAM role via OIDC — no access keys stored.
-        # The role is created by terraform-bootstrap/modules/github-oidc and has
-        # AdministratorAccess, scoped at the trust layer to this repository only.
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/edp-${{ env.ENV }}-github-actions-role
-          aws-region:     ${{ env.AWS_REGION }}
+      - name: Mask AWS account ID in logs
+        run: echo "::add-mask::${{ vars.AWS_ACCOUNT_ID }}"
 
+      - name: Configure AWS credentials (OIDC)
+        env:
+          ROLE_ARN: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/edp-${{ env.ENV }}-github-actions-role
+          AWS_REGION_VALUE:     ${{ env.AWS_REGION }}
+        run: |
+          echo "::add-mask::${ROLE_ARN}"
+          OIDC_TOKEN_JSON=$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")
+          OIDC_TOKEN=$(printf '%s' "${OIDC_TOKEN_JSON}" | jq -r '.value')
+          CREDS=$(aws sts assume-role-with-web-identity \
+            --role-arn "${ROLE_ARN}" \
+            --role-session-name "github-actions" \
+            --web-identity-token "${OIDC_TOKEN}" \
+            --duration-seconds 3600 \
+            --query Credentials \
+            --output json)
+          AWS_ACCESS_KEY_ID=$(printf '%s' "${CREDS}" | jq -r '.AccessKeyId')
+          AWS_SECRET_ACCESS_KEY=$(printf '%s' "${CREDS}" | jq -r '.SecretAccessKey')
+          AWS_SESSION_TOKEN=$(printf '%s' "${CREDS}" | jq -r '.SessionToken')
+          echo "::add-mask::${AWS_ACCESS_KEY_ID}"
+          echo "::add-mask::${AWS_SECRET_ACCESS_KEY}"
+          echo "::add-mask::${AWS_SESSION_TOKEN}"
+          {
+            echo "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}"
+            echo "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}"
+            echo "AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}"
+            echo "AWS_REGION=${AWS_REGION_VALUE}"
+            echo "AWS_DEFAULT_REGION=${AWS_REGION_VALUE}"
+          } >> "$GITHUB_ENV"
+          echo "AWS credentials configured via OIDC."
       - name: Log in to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        run: |
+          ECR_REGISTRY="${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          echo "::add-mask::${ECR_REGISTRY}"
+          aws ecr get-login-password --region "${AWS_REGION}" |
+            docker login --username AWS --password-stdin "${ECR_REGISTRY}" >/dev/null
+          echo "Logged in to Amazon ECR."
 
       - name: Build, tag, and push image to ECR
         id: build-image
         env:
-          ECR_REGISTRY:   ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: edp-${{ env.ENV }}-analytics-agent
           IMAGE_TAG:      sha-${{ github.sha }}
         run: |
+          ECR_REGISTRY="${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          echo "::add-mask::${ECR_REGISTRY}"
           IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
-          docker build --target runtime \
+          if ! docker build --target runtime \
             -t "${IMAGE_URI}" \
             -t "${ECR_REGISTRY}/${ECR_REPOSITORY}:latest" \
-            .
-          docker push "${IMAGE_URI}"
-          docker push "${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+            . >/tmp/docker-build.log 2>&1; then
+            echo "Docker build failed."
+            exit 1
+          fi
+          docker push "${IMAGE_URI}" >/dev/null
+          docker push "${ECR_REGISTRY}/${ECR_REPOSITORY}:latest" >/dev/null
+          echo "Container image pushed to ECR."
           echo "image=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
 
       - name: Download current task definition
@@ -120,17 +152,6 @@ jobs:
           echo ""
           echo "Deployed analytics agent to ECS:"
           echo "  Environment : ${{ env.ENV }}"
-          echo "  Image       : ${{ steps.build-image.outputs.image }}"
-          echo "  Cluster     : edp-${{ env.ENV }}-analytics-agent"
-          echo "  Service     : edp-${{ env.ENV }}-analytics-agent"
+          echo "  Service     : analytics agent"
           echo ""
-          echo "To query the agent from within the VPC:"
-          echo "  curl -X POST http://<alb-dns-name>/ask -H 'Content-Type: application/json' \\"
-          echo "       -d '{\"question\": \"Which country has the highest revenue?\"}'"
-          echo ""
-          echo "To run a one-off CLI question directly:"
-          echo "  aws ecs run-task --cluster edp-${{ env.ENV }}-analytics-agent \\"
-          echo "    --task-definition edp-${{ env.ENV }}-analytics-agent \\"
-          echo "    --launch-type FARGATE \\"
-          echo "    --network-configuration '...' \\"
-          echo "    --overrides '{\"containerOverrides\":[{\"name\":\"agent\",\"command\":[\"Which country has the highest revenue?\"]}]}'"
+          echo "Endpoint details are available from Terraform outputs or the AWS console."
