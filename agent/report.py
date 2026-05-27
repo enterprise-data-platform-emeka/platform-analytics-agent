@@ -140,7 +140,7 @@ def build_pdf_report(report: ReportInput) -> bytes:
 
     class PDFReport(FPDF):  # type: ignore[misc, unused-ignore]
         def header(self) -> None:
-            self.set_fill_color(75, 83, 32)
+            self.set_fill_color(16, 35, 63)
             self.rect(0, 0, self.w, 25, style="F")
             _draw_logo(self, 7, 6.5, 12)
 
@@ -223,7 +223,7 @@ def build_pdf_report(report: ReportInput) -> bytes:
 
 
 def _draw_logo(pdf: Any, x: float, y: float, size: float) -> None:
-    pdf.set_fill_color(75, 83, 32)
+    pdf.set_fill_color(16, 35, 63)
     pdf.rect(x, y, size, size, style="F")
     pad_x = size * 0.18
     pad_top = size * 0.14
@@ -520,7 +520,7 @@ def _extract_kpi_tiles(
 
 def _section(pdf: Any, title: str, font_name: str) -> None:
     pdf.set_font(font_name, "B", 11)
-    pdf.set_text_color(75, 83, 32)
+    pdf.set_text_color(16, 35, 63)
     pdf.cell(pdf.epw, 5, title, new_x="LMARGIN", new_y="NEXT")
     pdf.set_draw_color(226, 232, 240)
     pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + pdf.epw, pdf.get_y())
@@ -540,12 +540,12 @@ def _draw_kpi_tiles(pdf: Any, report: ReportInput, font_name: str, safe: Any) ->
         tx = pdf.l_margin + i * tile_w
         pdf.set_fill_color(240, 247, 255)
         pdf.rect(tx, tile_y, tile_w - 2, tile_h, style="F")
-        pdf.set_fill_color(75, 83, 32)
+        pdf.set_fill_color(29, 78, 216)
         pdf.rect(tx, tile_y, tile_w - 2, 3, style="F")
 
         pdf.set_xy(tx + 3, tile_y + 4)
         pdf.set_font(font_name, "", 7)
-        pdf.set_text_color(75, 83, 32)
+        pdf.set_text_color(29, 78, 216)
         pdf.cell(tile_w - 5, 4, safe(label.upper()))
 
         pdf.set_xy(tx + 3, tile_y + 9)
@@ -555,7 +555,7 @@ def _draw_kpi_tiles(pdf: Any, report: ReportInput, font_name: str, safe: Any) ->
 
         pdf.set_xy(tx + 3, tile_y + 17)
         pdf.set_font(font_name, "", 7)
-        pdf.set_text_color(75, 83, 32)
+        pdf.set_text_color(29, 78, 216)
         pdf.cell(tile_w - 5, 4, safe(sub_label))
 
         if badge:
@@ -608,7 +608,7 @@ def _draw_summary(pdf: Any, insight: str, font_name: str, safe: Any) -> None:
     y = pdf.get_y()
     pdf.set_x(pdf.l_margin + 6)
     pdf.multi_cell(pdf.epw - 6, 7, safe(_strip_markdown(insight)))
-    pdf.set_fill_color(75, 83, 32)
+    pdf.set_fill_color(29, 78, 216)
     pdf.rect(pdf.l_margin, y, 3, max(4, pdf.get_y() - y), style="F")
     pdf.ln(3)
 
@@ -629,7 +629,7 @@ def _draw_snapshot(pdf: Any, report: ReportInput, font_name: str, safe: Any) -> 
     row_h = 6.5
     y = pdf.get_y()
 
-    pdf.set_fill_color(75, 83, 32)
+    pdf.set_fill_color(16, 35, 63)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font(font_name, "B", 8)
     for i, col in enumerate(columns):
@@ -640,8 +640,10 @@ def _draw_snapshot(pdf: Any, report: ReportInput, font_name: str, safe: Any) -> 
     pdf.set_font(font_name, "", 8)
     pdf.set_text_color(30, 41, 59)
     for row_i, row in enumerate(rows):
+        if pdf.get_y() + row_h > pdf.h - pdf.b_margin:
+            pdf.add_page()
         y = pdf.get_y()
-        pdf.set_fill_color(243, 244, 236) if row_i % 2 else pdf.set_fill_color(255, 255, 255)
+        pdf.set_fill_color(240, 244, 255) if row_i % 2 else pdf.set_fill_color(255, 255, 255)
         for i, col in enumerate(columns):
             value = safe(_fmt_snap(str(row.get(col, "")), col))[:28]
             pdf.set_xy(pdf.l_margin + i * col_w, y)
