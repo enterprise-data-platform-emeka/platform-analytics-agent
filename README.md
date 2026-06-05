@@ -1,5 +1,27 @@
 > **Prefer a visual version?** Open the [responsive HTML README](https://enterprise-data-platform-emeka.github.io/platform-analytics-agent/html/?v=latest).
 
+<p align="center">
+  <a href="./images/showcase/edp-report-q1.pdf">
+    <img src="./images/showcase/edp-report-q1-1.png" alt="EDP Analytics Report preview for payment volume and revenue loss analysis" width="32%" />
+  </a>
+  <a href="./images/showcase/edp-report-q2.pdf">
+    <img src="./images/showcase/edp-report-q2-1.png" alt="EDP Analytics Report preview for revenue and order volume trends" width="32%" />
+  </a>
+  <a href="./images/showcase/edp-report-q3.pdf">
+    <img src="./images/showcase/edp-report-q3-1.png" alt="EDP Analytics Report preview for monthly revenue trend analysis" width="32%" />
+  </a>
+</p>
+
+<p align="center"><strong>Results preview.</strong> Click any image to open the full exported PDF.</p>
+
+<p align="center">
+  <a href="./images/showcase/edp-report-q7.pdf">
+    <img src="./images/showcase/edp-report-q7-page-1.png" alt="EDP Analytics Agent downloadable PDF report preview" width="78%" />
+  </a>
+</p>
+
+<p align="center"><strong>PDF preview.</strong> GitHub README files do not auto-embed PDFs inline, so this image opens the full downloaded report: <a href="./images/showcase/edp-report-q7.pdf">edp-report-q7.pdf</a>.</p>
+
 # platform-analytics-agent
 
 This repository is part of the [Enterprise Data Platform](https://github.com/enterprise-data-platform-emeka/platform-docs). For the full project overview, architecture diagram, and build order, start there.
