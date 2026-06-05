@@ -1,5 +1,27 @@
 > **Prefer a visual version?** Open the [responsive HTML README](https://enterprise-data-platform-emeka.github.io/platform-analytics-agent/html/?v=latest).
 
+<p align="center">
+  <a href="./images/showcase/edp-report-q1.pdf">
+    <img src="./images/showcase/edp-report-q1-1.png" alt="EDP Analytics Report preview for payment volume and revenue loss analysis" width="32%" />
+  </a>
+  <a href="./images/showcase/edp-report-q2.pdf">
+    <img src="./images/showcase/edp-report-q2-1.png" alt="EDP Analytics Report preview for revenue and order volume trends" width="32%" />
+  </a>
+  <a href="./images/showcase/edp-report-q3.pdf">
+    <img src="./images/showcase/edp-report-q3-1.png" alt="EDP Analytics Report preview for monthly revenue trend analysis" width="32%" />
+  </a>
+</p>
+
+<p align="center"><strong>Results preview.</strong> Click any image to open the full exported PDF.</p>
+
+<p align="center">
+  <a href="./images/showcase/edp-report-q7.pdf">
+    <img src="./images/showcase/edp-report-q7-page-1.png" alt="EDP Analytics Agent downloadable PDF report preview" width="78%" />
+  </a>
+</p>
+
+<p align="center"><strong>PDF preview.</strong> GitHub README files do not auto-embed PDFs inline, so this image opens the full downloaded report: <a href="./images/showcase/edp-report-q7.pdf">edp-report-q7.pdf</a>.</p>
+
 # platform-analytics-agent
 
 This repository is part of the [Enterprise Data Platform](https://github.com/enterprise-data-platform-emeka/platform-docs). For the full project overview, architecture diagram, and build order, start there.
@@ -287,7 +309,7 @@ What each part achieves:
    and thread replies.
 4. **Analytics Backend (FastAPI)** does the actual reasoning work. It generates
    SQL, validates it, checks intent, runs Athena, builds charts, and writes logs.
-5. **Claude API** helps with language tasks: SQL generation, SQL intent
+5. **Claude Platform on AWS** helps with language tasks: SQL generation, SQL intent
    cross-checking, and the final written insight.
 6. **Amazon Athena** executes the validated SELECT query against the Gold data.
 7. **S3 Gold** stores the curated business tables produced by dbt. This is the
@@ -314,9 +336,9 @@ Streamlit is a Python library that turns Python code into a web page. I wrote th
 
 FastAPI is a Python web framework, meaning a program that listens for incoming requests and responds to them. This is the reasoning engine of the application. When a question arrives from Streamlit, FastAPI orchestrates three Claude calls, validates the SQL at each step, runs the Athena query, builds the chart, writes the audit log, and packages the response. All the business logic (SQL guardrails, intent checking, retry on mismatch, chart type detection) lives here. FastAPI runs on port 8080 inside the same container as Streamlit.
 
-**Claude API**
+**Claude Platform on AWS**
 
-Claude is Anthropic's AI model. I call it three times for each analytical question. The first call generates the SQL query and a list of assumptions (Claude reads the question against the full schema embedded in the system prompt). The second call reads only the SQL (the original question is withheld) and infers what business question the SQL is answering. This cross-check catches cases where the SQL technically runs but answers the wrong question. The third call reads the data returned by Athena and writes the business-language insight. Claude is stateless: each call is independent, and the relevant context is passed explicitly each time.
+Claude is Anthropic's AI model, accessed here through Claude Platform on AWS using the ECS task IAM role rather than a long-lived API key. I call it three times for each analytical question. The first call generates the SQL query and a list of assumptions (Claude reads the question against the full schema embedded in the system prompt). The second call reads only the SQL (the original question is withheld) and infers what business question the SQL is answering. This cross-check catches cases where the SQL technically runs but answers the wrong question. The third call reads the data returned by Athena and writes the business-language insight. Claude is stateless: each call is independent, and the relevant context is passed explicitly each time.
 
 **Amazon Athena**
 
@@ -1106,7 +1128,7 @@ Project skeleton with CI from the first commit. No business logic yet.
 - `agent/config.py`: frozen dataclasses driven by environment variables, fail fast at startup if any required variable is missing
 - `agent/logging.py`: structured JSON logger used by every module from day one
 - `.github/workflows/ci.yml`: ruff + mypy + pytest on every push
-- `tests/conftest.py`: shared fixtures for mocked AWS clients and mocked Claude API responses
+- `tests/conftest.py`: shared fixtures for mocked AWS clients and mocked Claude Platform on AWS responses
 
 Deliverable: `make lint`, `make typecheck`, `make test` all pass. Docker image builds cleanly. CI is green.
 
@@ -1393,7 +1415,7 @@ platform-analytics-agent/
 │   ├── exceptions.py           ← named exception hierarchy
 │   ├── logging.py              ← structured JSON logger used by every module
 │   ├── prompts.py              ← all Claude prompts in one place: system prompt (with schemas), insight
-│   ├── claude_client.py        ← Claude API client: single-call common path, tool-use fallback, retry
+│   ├── claude_client.py        ← Claude client: Claude Platform on AWS path, tool-use fallback, retry
 │   ├── schema.py               ← schema resolver: load_all_schemas() at startup, Glue + dbt catalog.json
 │   ├── validator.py            ← SQL validator: sqlparse guardrail rules, SELECT-only, Gold DB only
 │   ├── generator.py            ← SQL generator: single-pass, validation feedback loop (3 attempts)
@@ -1436,22 +1458,22 @@ platform-analytics-agent/
 
 ## How the tests work
 
-The agent calls real AWS services (S3, Athena, SSM, Glue) and the Claude API. If the tests made those real calls on every push, they would cost money, be slow, and require valid credentials in CI. Instead, the tests intercept those calls and return fake responses from memory. No real network traffic happens at all.
+The agent calls real AWS services (S3, Athena, SSM, Glue) and Claude Platform on AWS. If the tests made those real calls on every push, they would cost money, be slow, and require valid credentials in CI. Instead, the tests intercept those calls and return fake responses from memory. No real network traffic happens at all.
 
 Two tools make this possible.
 
 **moto** pretends to be AWS. When the application code calls `boto3.client("s3").put_object(...)`, moto catches that call and stores the data in a Python dictionary in RAM. The code never knows it isn't talking to real S3. When the test finishes, everything is discarded.
 
-**unittest.mock** replaces any Python function with a fake version. When the code calls the Claude API to generate SQL, mock substitutes that function with one that instantly returns a hardcoded string like `SELECT * FROM revenue_by_country LIMIT 10`. No HTTP request, no API key needed.
+**unittest.mock** replaces any Python function with a fake version. When the code calls Claude Platform on AWS to generate SQL, mock substitutes that function with one that instantly returns a hardcoded string like `SELECT * FROM revenue_by_country LIMIT 10`. No real inference request is sent.
 
-There are no CSV test data files because the agent doesn't read CSV files: it reads AWS API responses and Claude API responses. Mocking those responses directly is more accurate than representing them as CSV, and the mocks stay in sync with the code automatically.
+There are no CSV test data files because the agent doesn't read CSV files: it reads AWS API responses and Claude Platform on AWS responses. Mocking those responses directly is more accurate than representing them as CSV, and the mocks stay in sync with the code automatically.
 
 ```mermaid
 flowchart TD
     A[Push to GitHub] -->|triggers CI| B[Four jobs run in parallel\nall must pass before deploy]
     B --> C[Lint\nruff checks code style]
     B --> D[Type check\nmypy checks type annotations]
-    B --> E[Unit tests\nmoto replaces AWS API calls\nunittest.mock replaces Claude API\nno real network traffic or cost]
+    B --> E[Unit tests\nmoto replaces AWS API calls\nunittest.mock replaces Claude Platform on AWS\nno real network traffic or cost]
     B --> F[Docker build\nverifies image builds cleanly\nno push yet]
     C --> G{All four pass?}
     D --> G
@@ -1461,7 +1483,7 @@ flowchart TD
     G -->|Yes: safe to deploy| I[Deploy workflow triggers\nBuilds and pushes Docker image to ECR\nUpdates ECS task definition\nECS rolling deploy: old tasks replaced\nwith new ones one at a time]
 ```
 
-Integration tests also exist but are not part of the standard CI run. They are marked `@pytest.mark.integration` and only run when explicitly triggered with real AWS credentials against the deployed dev environment. They validate the full pipeline end-to-end: real Glue schema loading, real Athena query, real Claude API call.
+Integration tests also exist but are not part of the standard CI run. They are marked `@pytest.mark.integration` and only run when explicitly triggered with real AWS credentials against the deployed dev environment. They validate the full pipeline end-to-end: real Glue schema loading, real Athena query, real Claude Platform on AWS call.
 
 ---
 
@@ -1500,9 +1522,9 @@ This is the last component of the platform. The full pipeline is: PostgreSQL →
 
 Two overlapping safeguards protect the platform from Claude Platform on AWS instability and runaway usage.
 
-**E3: Circuit breaker.** Every Claude API call in `agent/claude_client.py` has a hard 30-second timeout. If the call times out or hits a transient error (rate limit, connection reset), the client retries up to three times with 2s, 5s, and 10s backoff. Permanent errors (authentication failures, malformed requests) propagate immediately without retry. If all attempts fail, the endpoint returns a clean error message to the user. The ECS container never hangs waiting for an unresponsive API.
+**E3: Circuit breaker.** Every Claude Platform on AWS call in `agent/claude_client.py` has a hard 30-second timeout. If the call times out or hits a transient error (rate limit, connection reset), the client retries up to three times with 2s, 5s, and 10s backoff. Permanent errors (authentication failures, malformed requests) propagate immediately without retry. If all attempts fail, the endpoint returns a clean error message to the user. The ECS container never hangs waiting for an unresponsive inference service.
 
-**E4: Rate limiting.** `agent/main.py` enforces 10 requests per 60-second sliding window per `session_id`. Requests over the limit return HTTP 429 (Too Many Requests) with a message explaining when the next request will be accepted. The limiter uses an in-memory dictionary keyed by session ID, which is sufficient for a single-container deployment. At approximately $0.016 per question (Claude API plus Athena scan), uncontrolled request volume is the only runtime cost that can grow unexpectedly.
+**E4: Rate limiting.** `agent/main.py` enforces 10 requests per 60-second sliding window per `session_id`. Requests over the limit return HTTP 429 (Too Many Requests) with a message explaining when the next request will be accepted. The limiter uses an in-memory dictionary keyed by session ID, which is sufficient for a single-container deployment. At approximately $0.016 per question (Claude Platform on AWS plus Athena scan), uncontrolled request volume is the only runtime cost that can grow unexpectedly.
 
 ---
 
